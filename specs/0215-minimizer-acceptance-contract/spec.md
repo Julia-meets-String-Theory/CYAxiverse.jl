@@ -32,7 +32,7 @@ Direct calls of `minimize` and `subspace_minimize` therefore had no defined
 acceptance criterion. PR #215 repairs the objective and Hessian and states a
 numerical acceptance filter. This specification records that filter, its known
 limitations, and what it does not establish, so that the owner can approve it
-before merge.
+before merge. The filter is a heuristic. It is not a certificate of a minimum.
 
 The legacy vacua pipeline never reached the minimizer (see *Current
 baseline*), so these repairs do not change any stored legacy count. PR #215
@@ -80,9 +80,32 @@ identifier matches the Issue number.
      PR #215 does not claim complete or certified classification of stationary
      points; that is deferred to #220 (R-003).
 
-  These supersede the earlier R-003, R-009 and R-010 wording. The failed
-  reviews are not relabelled as passed. The amendment becomes durable when the
-  owner approves the revision that contains it at G0.
+  These supersede the earlier R-003, R-009 and R-010 wording. Item 2 rested
+  on the statement in that draft that condition (2) predated PR #215, which
+  was false. It is superseded (see below).
+- Draft `0442ead` (implementation candidate `b309a55`): independent review did
+  not pass. Its blocking findings were:
+  1. R-004 said that rank-deficient charges usually give an empty result. They
+     can give many points from one flat family (R-004).
+  2. R-003 called condition (2) an existing legacy heuristic. It was
+     introduced in PR #215 (`5316fc0`). `minimize` at `f12fbb8` had no
+     stationarity filter, and `subspace_minimize` kept every endpoint.
+- Owner decisions made after the review of `0442ead`, on the corrected facts:
+  1. Condition (2) is removed in PR #215 (`a508769`). This supersedes item 2
+     of the earlier amendment. The Newton-step and Hessian conditions stay. The
+     acceptance is still described as heuristic, and #220 still owns validated
+     nearby-root certification, curvature classification and explicit
+     unresolved outcomes (R-003).
+  2. Over-counting of flat families for rank-deficient charges is accepted as a
+     documented limitation of PR #215. #220 must establish exact structural-rank
+     handling and isolated-minimum count eligibility before #217 reconnects the
+     affected pipeline. This is a classification and counting-unit defect, not
+     a de-duplication defect (#216) (R-004).
+
+The failed reviews are not relabelled as passed. The records of these three
+reviews are not published on GitHub; this list is their only record in the
+repository. The amendments become durable when the owner approves the revision
+that contains them at G0.
 
 ## Scope
 
@@ -92,7 +115,7 @@ This specification governs only these changes in PR #215:
   shared Hessian helper `_phase_hessian!`, which also changes the Hessian of
   `id_minimize(::Vector, ::Matrix)`;
 - the stopping tolerances and the `"stationary"` acceptance filter of
-  `minimize`;
+  `minimize`, including the removal of condition (2);
 - the endpoint filter and the origin rule of `subspace_minimize`;
 - the zero-column `α` case of `vacua_id_basis`;
 - the integral count stored by `_legacy_vacua_search`;
@@ -100,9 +123,13 @@ This specification governs only these changes in PR #215:
 - the default `--method` of `scripts/batch_vacua_pipeline.jl` and its help
   text.
 
-The rest of PR #215 (test-suite structure, Python test portability, CI
-triggers, documentation layout, test runtime) is S0/S1 engineering. It does not
-change scientific meaning and is not governed here.
+The rest of PR #215 is S0/S1 engineering and is not governed here: test-suite
+structure, Python test portability, CI triggers, documentation layout, test
+runtime, and the retirement of the 2026-08-25 physical-scale entrypoints
+(`bd6807e`, including `scripts/audit_physical_certificate.jl` and the
+physical-scale inflation pilot). It does not change scientific meaning. The
+retired scripts stay available at earlier revisions, and their removal does
+not affect the replay of any evidence here.
 
 ## Non-scope
 
@@ -112,11 +139,12 @@ This specification does not cover or authorize:
 - the legacy subspace `phase` contract, including the unreachable minimizer
   call in `vacua_id` and `vacua_full` (#217);
 - a proof-backed classification of minima, non-minima and unresolved critical
-  points, including the replacement of R-003 condition (2) (#220);
+  points, structural-rank handling, and isolated-minimum count eligibility
+  (#220);
 - `id_minima`, which returns `nothing`, and `id_minimize(::Vector, ::Vector)`,
   which raises `MethodError` on the shared helper. Both are non-functional
   before and after PR #215;
-- known issues A and B recorded in PR #215 (`@test_broken` cases);
+- known issues A and B (see *Known issues*);
 - any change to the single-geometry API default (`:legacy`);
 - any change to the reduced-JLM, leading-branch or exact-determinant searches;
 - recomputation of persisted results;
@@ -151,27 +179,45 @@ This specification does not cover or authorize:
 - `_legacy_vacua_search` (`scripts/vacua_pipeline.jl`) calls only
   `vacua_id(L, Q)`. The only minimizer call in `vacua_id`
   (`src/generate.jl`) is `subspace_minimize(...; phase=phase[i])`. It passes a
-  scalar to the keyword `phase::Matrix`, so it raises `TypeError` whenever it
-  is reached. That call has been unchanged since 2022-12; the pipeline was
-  created on 2026-07-30.
-- In the nontrivial cases tested (`Q = [2 0 1 1; 0 1 1 0]`,
-  `L = [1 1 1 1; 0 -0.1 -0.2 -0.3]`, and known issue A), `vacua_id` raises
-  `BoundsError` even earlier, at the `Leff` column mask.
+  scalar to the keyword `phase::Matrix` (in the signature since `f6c71e5`,
+  2022-11), so it raises `TypeError` whenever it is reached. Its
+  `phase=phase[i]` argument is unchanged since 2022-12; `6c46788` (2026-08-04)
+  added `runs=runs`. The pipeline was created on 2026-07-30.
+- In the nontrivial cases tested, `vacua_id` raises `BoundsError` even
+  earlier: at the `Leff` column mask for `Q = [2 0 1 1; 0 1 1 0]`,
+  `L = [1 1 1 1; 0 -0.1 -0.2 -0.3]`, and inside `vacua_id_basis` (the column
+  strip) for the known issue A case.
 - The minimizer has therefore never run inside a legacy pipeline count. Stored
   legacy counts come only from the branches that do not minimize.
 - At `f12fbb8`, the `|det|` branch returned its count as a `Rational`, which
   HDF5 cannot write (`MethodError`), so those geometries failed to save. The
   zero-column `α` case raised `BoundsError`. R-007 and R-006 fix these. Before
-  PR #215, such geometries failed to complete; no stored count was produced
+  PR #215, such geometries failed to complete; no verified count was produced
   for them.
+
+### Known issues
+
+These are recorded as `@test_broken` cases in `test/runtests.jl`, with
+hand-derived expectations. PR #215 does not fix them.
+
+- **A.** The nonzero-`α` branch of `vacua_id_basis` strips a placeholder
+  column that `LQtildebar` already removed. With one dependent instanton it
+  raises `BoundsError` (`Q = [2 0 1; 0 1 1]`, `L = [1 1 1; 0 -1 -1.1]`,
+  expected `Qeff = [1 0 0; 0 1 1]`).
+- **B.** For `Q = [2 0 1; 0 1 1]` with the third instanton below threshold, the
+  trivial branch of `vacua_id` reports 2 vacua but lists only θ/2π = (0, 0),
+  not (1/2, 0).
+
+An earlier candidate recorded condition (2) as known issue D. That condition is
+removed (R-003), and its test is now an ordinary test.
 
 ### Owner direction recorded in PR #215
 
 - The strict origin rule (R-005) was chosen by the owner after review, as
   recorded in the PR #215 description.
-- The scope amendment under *Review and amendment history* (stored legacy
-  counts retained; condition (2) kept as a documented limitation, with its
-  replacement deferred to #220).
+- The amendments under *Review and amendment history*: stored legacy counts
+  retained; condition (2) removed; flat-family over-counting accepted as a
+  limitation deferred to #220.
 - The other decisions below were made during PR #215 implementation and review.
   They become approved only through this specification's `approval_ref`.
 
@@ -201,55 +247,81 @@ eps after such a step. It is not a universal smallest resolvable step, and not
 a certified bound on position error. `eps()/1e-2` is the existing constant, now
 made relative so that the run is invariant under a common rescaling of all
 `Λ_a` in exact arithmetic. In Float64 the run is bitwise unchanged for
-power-of-two factors, and otherwise changes only by rounding.
+power-of-two factors. For other factors rounding changes the run, and this can
+change the accept/reject decision of R-003 and R-004.
 
-### R-003 — Legacy stationarity filter and its limitation
+- **Measured** (at `dbd7b62`): four fixtures (`Q = I` with `L = (1, 1e-6)`;
+  `Q = [1 0 1; 0 1 1]` with `L = (1, 1, -0.9)`; `Q = [1 1; 1 -1]` with
+  `L = (1, 1e-12)`; `Q = [1 0 2 1; 0 1 1 -1; 1 1 0 2]` with
+  `L = (1.3, 0.7, 0.2, 0.05)`), 10 starts each, `2π·rand` from
+  `MersenneTwister(7)` in that order. Factors `2^-40` and `2^30`: 80 of 80 runs
+  bitwise identical. Factor 3: `"xmin"` or `"stationary"` differed in 17 of 40
+  runs, and `_is_converged_minimum` changed in 2 of 40.
 
-`minimize` SHALL report `"stationary" = true` only when all of these hold:
+### R-003 — Stationarity filter
 
-1. `max_i s_i > 0`;
-2. `|∂_i V| ≤ (eps()/1e-2) · s_i` for every component `i`;
-3. no computed eigenvalue of the Hessian at the endpoint is exactly 0, and the
-   Newton step satisfies `‖H⁻¹ ∇V‖_∞ ≤ sqrt(eps())`, computed in the Hessian
-   eigenbasis.
+`minimize` SHALL report `"stationary" = true` only when both of these hold:
 
-`"converged"` SHALL report Optim's convergence flag without change.
+- **(1)** `max_i s_i > 0`;
+- **(3)** no computed eigenvalue of the Hessian at the endpoint is exactly 0,
+  and the Newton step satisfies `‖H⁻¹ ∇V‖_∞ ≤ sqrt(eps())`, computed in the
+  Hessian eigenbasis.
+
+The labels keep the numbering of earlier drafts; condition (2) is removed (see
+below). `"converged"` SHALL report Optim's convergence flag without change.
 
 **Meaning.** The `"stationary"` field reports whether a Newton endpoint
-satisfies the legacy numerical acceptance conditions. It is not a certificate
-of an exact or nearby stationary point. `"stationary" = false` means that the
-endpoint failed this filter. It does not establish that no minimum lies nearby.
+satisfies a heuristic numerical acceptance test in Float64. It is not a
+certificate of an exact or nearby stationary point. `"stationary" = false`
+means that the endpoint failed this test. It does not establish that no
+minimum lies nearby. Validated nearby-root certification, curvature
+classification and explicit unresolved outcomes are deferred to #220.
 
-**Limitation: condition (2) rejects genuine minima.** Condition (2) can reject
-endpoints of genuine local minima even when condition (3), the Newton-step
-condition, passes. This is a documented limitation, not evidence that those
-candidates are not minima. PR #215 retains condition (2) as an existing legacy
-heuristic, and does not claim complete or certified classification of
-stationary points. Its replacement by validated nearby-root certification,
-with explicit unresolved outcomes, is deferred to #220.
+**Basis of (3).** Optim stops on a gradient below `g_tol`, which is relative to
+the largest scale `max_i s_i` (R-002). Along a direction whose scale is far
+below it (a strongly suppressed `Λ`, or a weak direction that mixes the
+fields), the gradient is small away from the minimum too, so a small gradient
+does not locate the point. The Newton step estimates the remaining
+displacement in every direction, including directions that mix the fields,
+and (3) requires it to be within the step tolerance of R-002. Optim can stop
+before that: its gradient check runs before the first step, and its `f` test
+fires once `1 - cos` underflows near a minimum.
+
+**Condition (1).** It is implied by (3) for finite input. If every `s_i` is 0,
+every product `Λ_a Q_ia` is 0, so the computed Hessian is exactly 0 and (3)
+fails. It is kept as an explicit statement for the constant potential.
+
+**Removed condition (2).** Earlier drafts (`444fcc3`, `6b033b5`, `0442ead`)
+also required `|∂_i V| ≤ (eps()/1e-2) · s_i` for every component `i`. This
+condition was introduced in PR #215 (`5316fc0`). It is not inherited from
+`f12fbb8`, which had no stationarity filter. By owner decision it is removed
+(`a508769`):
 
 - **Mechanism (derived by hand).** For `Q = I`, condition (2) on component `i`
   reads `L_i |sin x_i| ≤ 100 eps() L_i`, that is `|x_i| ≤ 100 eps() ≈ 2.2e-14`
   rad, whatever `L_i` is. Condition (3) allows a displacement of about
-  `sqrt(eps()) ≈ 1.5e-8` rad. Optim stops on a gradient relative to the
-  largest scale, `max_i s_i`. Along a weak direction it can therefore stop at
-  a displacement that condition (3) accepts and condition (2) rejects.
-  Rounding of large phases `Q_a · x` adds a second route to the same failure.
+  `sqrt(eps()) ≈ 1.5e-8` rad, and Optim can stop anywhere within it.
 - **Measured.** `Q = I`, `L = (1, 1e-6)`, 400 starts uniform in `[0, 2π)²`
   from `MersenneTwister(4242)`. All 400 endpoints were converged, had
   `Hsign = 1`, and lay within `sqrt(eps())` rad of a minimum (displacement
-  recovered as `|∂_i V| / L_i`). Condition (2) rejected 208 of them, one only
-  2.3e-14 rad away.
-- **Further basis.** (2) allows 100 times `eps()` relative to `s_i`, the bound
-  on `|∂_i V|`. It does not account for the rounding of the phases, which grows
-  with `Σ_i |Q_ia x_i|`, or for accumulation over the N terms. (3) is the step
-  tolerance of R-002. It is needed because (2) is not basis invariant: a weak
-  direction that mixes the fields can have small gradient components while the
-  point is displaced along it.
-- **Isolation.** The known-issue test for `L = (1, 1e-6)`, `x = (0, 1e-9)`
-  isolates condition (2): removing (2) turns its `@test_broken` into an
-  unexpected pass. Condition (1) is not isolated by any test. For an exactly
-  constant `V` the Hessian is exactly 0, so condition (3) also rejects it.
+  recovered as `|∂_i V| / L_i`, at most 4.9e-9 rad). With condition (2), at
+  `b309a55`, 208 of them were rejected, one only 2.25e-14 rad away. At
+  `dbd7b62` all 400 are accepted.
+- **No compensating benefit was shown.** With (2) removed, no test changes
+  result except the `L = (1, 1e-6)` regression, which then passes. The
+  hierarchical case that motivated (2) is rejected by (3).
+
+**Remaining limitations.** The filter can still miss or reject genuine minima.
+Rounding of large phases `Q_a · x`, which grows with `Σ_i |Q_ia x_i|`, enters
+the gradient and so the Newton step. The sign of the smallest eigenvalue is
+taken in Float64 (`Hsign`, see R-005). A run can stop before it resolves a
+direction about 16 decades below the largest scale (see *Scientific claim
+boundary*). Rescaling can change the decision (R-002).
+
+**Isolation.** The regression `L = (1, 1e-6)`, `x = (0, 1e-9)` fails with
+condition (2) present. With (3) disabled, the hierarchical and mixed weak
+direction cases fail (5 assertions). Condition (1) is not isolated, because
+(3) implies it.
 
 ### R-004 — Endpoint acceptance in `subspace_minimize`
 
@@ -259,13 +331,45 @@ eigenvalue strictly positive). Saddles, maxima, endpoints that fail the filter
 and non-converged runs SHALL be discarded. A discarded endpoint is not thereby
 established to be a non-minimum (R-003).
 
-If the charges have rank `r < n` (`n` fields), every critical point lies on an
-exactly flat family, and the exact smallest Hessian eigenvalue is 0. R-003 and
-R-004 then reject the endpoints unless rounding makes the computed eigenvalue
-positive, and R-005 rejects the origin under the same condition. The result is
-usually empty. An empty result does not mean that the potential has no minima.
-`vacua_id` and `vacua_full` pass such rank-deficient charge matrices, but
-neither currently reaches `subspace_minimize` (#217).
+**Limitation: flat families of rank-deficient charges (owner-accepted,
+deferred to #220).** If the charges have rank `r < n` (`n` fields), every
+critical point lies on an exactly flat family of dimension `n - r`, and the
+exact smallest Hessian eigenvalue is 0. Whether an endpoint is accepted then
+depends on rounding:
+
+- When the computed smallest eigenvalue rounds positive and the Newton step
+  passes, endpoints at different points of the same flat family are each
+  accepted, and `subspace_minimize` returns each as a separate exact-unique
+  point. The number of points returned grows with the number of starts, so it
+  does not count minima.
+- When the computed eigenvalue is 0 or negative, the endpoints are rejected.
+  An empty result does not mean that the potential has no minima. R-005
+  rejects the origin under the same condition.
+
+Measured at `dbd7b62`:
+
+- `Q = [1 1; 2 2]`, `L = (0.7, 0.4)`, so `V = 1.1 (1 - cos(x1 + 2 x2))` with
+  the flat direction `(2, -1)`. 40 starts `2π·rand(MersenneTwister(11), 2)`:
+  39 endpoints accepted (computed `λ_min` about 4e-18), and 40 points returned,
+  all on the family `x1 + 2 x2 ≡ 0 (mod 2π)` to within 2.7e-14 in phase. At
+  `b309a55`, with condition (2), 38 were accepted and 39 returned.
+- `Q = u vᵀ` with `u = (1, 2, -1)`, `v = (1, -1, 2)`, `L = (0.3, 0.9, 0.5)`,
+  same starts: 0 accepted, empty result.
+- Random 3×4 charges, `MersenneTwister(1)`, 20 starts each: 16 of 30 rank-1
+  draws (`Q = u vᵀ`, entries of `u` and `v` in `[-3, 3]`) gave a non-empty
+  result, with 217 points in total. 26 of 30 rank-2 draws (`Q = A B` with `A`
+  3×2 and `B` 2×4, entries in `[-3, 3]`) gave a non-empty result, with 215 points.
+
+This is a classification and counting-unit defect. #220 must establish exact
+structural-rank handling and isolated-minimum count eligibility before #217
+reconnects the affected pipeline. De-duplication (#216) is not expected to
+repair it.
+
+Exposure: `vacua_id` passes each subspace to `subspace_minimize` as a 1×k
+single-field charge row, which has full rank when it is nonzero. `vacua_full`
+passes the h11×k matrix `Qsub`, which can be rank deficient. Neither currently
+reaches `subspace_minimize` (#217), so no stored legacy count is affected. The
+limitation applies to direct callers of `subspace_minimize`.
 
 ### R-005 — Origin rule
 
@@ -278,11 +382,15 @@ where the origin is a non-strict minimum.
 The test does not decide the sign of the exact eigenvalue:
 
 - **A degenerate origin can be returned.** If its computed eigenvalue rounds
-  positive, the origin is returned. In the seeded sample of #220, the computed
-  smallest eigenvalue was above 0 in 131 of 2000 random rank-1 `Q`, and the
-  origin was returned each time. The sample is: seed `20261031`; 3 fields and
-  4 instantons; integer entries in `[-3, 3]`; `L_a` uniform in `[0.1, 1.1]`.
-  Independent review found 142 of 1993.
+  positive, the origin is returned. The sample has 2000 rank-1 charge matrices
+  `Q = u vᵀ` with 3 fields and 4 instantons, where `u` and `v` have integer
+  entries in `[-3, 3]` (so `Q` has entries up to ±9), draws with `u = 0` or
+  `v = 0` are skipped, and `L_a` is uniform in `[0.1, 1.1]`, from seed
+  `20261031`. #220 records 131 of 2000 with a positive computed smallest
+  eigenvalue, at `ab48726`, with the origin returned each time. A replay at
+  `dbd7b62` that draws `u`, then `v` (redrawing both if either is 0), then `L`
+  for each sample from `MersenneTwister(20261031)` found 132 of 2000, with the
+  origin returned in all 132. The count depends on the draw order; the effect does not.
 - **A genuine minimum can be dropped.** If its computed eigenvalue rounds to 0,
   the origin is dropped. An example is `Q = [1 1; 1 -1]`, `L = (1, 1e-20)`.
   Its Float64 Hessian `[1 1; 1 1]` equals that of the saddle
@@ -311,13 +419,23 @@ stored count.
 `spectrum_mode_counts` SHALL raise `ArgumentError` when any eigenvalue is not
 finite, instead of classifying it.
 
+At `f12fbb8`, one non-finite eigenvalue made the whole spectrum count as
+zeroish (derived from the code). With a `NaN`, the scale
+`max(maximum(abs, eigenvalues), 1.0)` is `NaN`, so every comparison is false.
+With an `Inf`, the tolerance is `Inf`. `[NaN, 1, -2]` and `[Inf, 1, -2]` both
+gave `zeroish = 3`. The callers are inflation scripts
+(`scripts/inflation_scan_common.jl`, `scripts/inflation_scale_continuation.jl`,
+`scripts/analyze_inflation_candidates.jl`). It is not established whether any
+stored output of those scripts was computed from a non-finite spectrum.
+
 ### R-009 — Batch default method
 
 `scripts/batch_vacua_pipeline.jl` SHALL default to `--method auto`. Its help
 text SHALL:
 
-- state that the previous default was legacy and that the method is part of
-  the configuration digest;
+- state that the previous default was legacy (before PR #215), without tying
+  the change to the minimizer fix, and that the method is part of the
+  configuration digest;
 - point to `--method legacy` to reproduce the legacy counting method used for
   previously stored results;
 - state that PR #215 fixes errors that prevented some geometries from
@@ -344,14 +462,29 @@ positional CLI) SHALL keep `:legacy`.
 The selected method is recorded in `search_method` and `auto_selected_method`.
 Because the method is part of the configuration digest, results from an
 earlier default run (legacy) report a configuration mismatch under `auto`
-instead of being reused.
+instead of being reused. The batch run then blocks that geometry unless
+`--force` is given. With `--force` it recomputes the geometry and replaces the
+stored result, including a stored legacy result. Retention under R-010 means
+that PR #215 does not invalidate stored legacy counts; it does not prevent a
+user from replacing them with `--force`.
+
+**Rationale (proposed; owner confirmation required).** The reason first given
+for the change, that legacy results stored before PR #215 were stale, is
+withdrawn (R-010). The proposed rationale is that the legacy method cannot
+complete a geometry whose `vacua_id` subspaces need the minimizer, because
+that call raises before it minimizes (#217), and `auto` tries the
+exact-determinant, leading-branch and reduced-JLM searches first. This
+rationale does not claim that `auto` and `legacy` counts agree, or that they
+are the same counting unit (see *Scientific claim boundary*). If the owner does
+not adopt a rationale, the alternative is to keep `--method legacy` as the
+batch default, which is an implementation change.
 
 ### R-010 — Records
 
-The scientific behaviour change SHALL be documented in the `minimize` and
-`subspace_minimize` docstrings, the batch help text and the PR #215
-description. Those records SHALL limit the change to direct calls of the
-minimizer.
+The scientific behaviour change SHALL be documented in the `minimize`,
+`subspace_minimize` and `id_minimize(::Vector, ::Matrix)` docstrings, the batch
+help text and the PR #215 description. Those records SHALL limit the change to
+direct calls of the minimizer.
 
 Legacy counts stored before PR #215 SHALL be retained. They SHALL NOT be
 labelled stale, invalidated, migrated or recomputed because of the minimizer
@@ -366,8 +499,8 @@ affected is not established.
 ### This specification may establish
 
 - that `minimize` iterates on `V` and its exact derivatives;
-- that accepted endpoints satisfy the stated numerical filter, which is a set
-  of local convergence criteria;
+- that accepted endpoints satisfy the stated numerical filter, which is a
+  heuristic set of local convergence criteria;
 - that the origin is added only when the computed Float64 smallest eigenvalue
   of `Q · Diagonal(L) · Qᵀ` is positive;
 - that the minimizer acceptance rules in PR #215 do not affect the legacy
@@ -383,8 +516,14 @@ affected is not established.
   from an exact minimum;
 - that `"stationary" = false`, or rejection by `subspace_minimize`,
   establishes that no minimum lies nearby;
-- that every genuine minimum is accepted: condition (2) rejects genuine minima
-  at any phase (R-003), and large phases add rounding;
+- that every genuine minimum is accepted: phase rounding, the Float64 sign of
+  the smallest eigenvalue, and runs that stop before a weak direction is
+  resolved can each lose one (R-003);
+- that returned points are isolated minima, or that their number counts
+  minima: for rank-deficient charges, points of one flat family are returned
+  separately, and their number grows with the number of starts (R-004, #220);
+- that removing condition (2) makes `"stationary"` a certificate: the
+  remaining conditions are heuristic (R-003, #220);
 - that the origin rule decides the sign of the exact smallest eigenvalue: a
   degenerate origin whose computed eigenvalue rounds positive may be returned,
   and a genuine minimum whose computed eigenvalue rounds to 0 may be dropped
@@ -460,15 +599,15 @@ authority. The merge target is `vmm`.
 
 | Requirement | Evidence (`test/runtests.jl` unless stated) |
 | --- | --- |
-| R-001 | **Objective test:** at the mixed-sign minimum (`Q = [1 0 1; 0 1 1]`, `L = (1, 1, -0.9)`, from `(1, 0.95)`), `sign(V) = -1` and `log10\|V\| = log10(16/45)` to a derived `12 eps()`. It fails with the f12fbb8 objective. **End-to-end minimum** (uniform `L = (1, 1, 1)`): position, gradient and `V` within `sqrt(eps())`-derived bounds. It guards `x_abstol` and the buffer zeroing, but not the objective, because with uniform `L` the f12fbb8 objective is `3V`. **Phase-Hessian fixture:** tests the helper that `id_minimize(::Vector, ::Matrix)` shares |
+| R-001 | **Objective test:** at the mixed-sign minimum (`Q = [1 0 1; 0 1 1]`, `L = (1, 1, -0.9)`, from `(1, 0.95)`), `sign(V) = -1` and `log10\|V\| = log10(16/45)` to a derived `12 eps()`. The derivation assumes a position error of at most `sqrt(eps())`, the step tolerance, which is not a proven bound. It fails with the f12fbb8 objective. **End-to-end minimum** (uniform `L = (1, 1, 1)`): position, gradient and `V` within `sqrt(eps())`-derived bounds. It guards `x_abstol` and the buffer zeroing, but not the objective, because with uniform `L` the f12fbb8 objective is `3V`. **Phase-Hessian fixture:** tests the helper that `id_minimize(::Vector, ::Matrix)` shares |
 | R-002 | `V = 1e-20 (1 - cos x)` from `x = 0.3` reaches the minimum at 0 instead of stopping at the start. The absence of Optim deprecation warnings was checked by a manual log search on Optim 1.13.3 (only `x_tol` warns there), not by a test |
-| R-003 | **Cases:** hierarchical `L = (1, 1e-20)`; constant potential; mixed weak direction `Q = [1 1; 1 -1]`, `L = (1, 1e-12)` from `(0.01, -0.01)`, with phases within the hand-derived `2 sqrt(eps())`. **Known-issue test:** `@test_broken` for `L = (1, 1e-6)`, `x = (0, 1e-9)`, which isolates condition (2). **Not isolated:** condition (1). **Measured rate:** the 208-of-400 rejection rate is a recorded probe (recipe in R-003), not a test |
-| R-004 | **Cases:** saddle and maximum endpoints rejected; mixed-sign saddle `Q = [1 0 1; 0 1 1]`, `L = (1, 1, -0.9)` with minima at `x1 = x2 = ±acos(5/9)`. **Not isolated:** the `converged` conjunct. **Not tested:** the empty result for rank-deficient `Q` |
+| R-003 | **Cases:** hierarchical `L = (1, 1e-20)`; constant potential; mixed weak direction `Q = [1 1; 1 -1]`, `L = (1, 1e-12)` from `(0.01, -0.01)`, with phases within the hand-derived `2 sqrt(eps())`. These fail with (3) disabled. **Regression for the removal of (2):** `L = (1, 1e-6)`, `x = (0, 1e-9)` is accepted; it fails with (2) present. **Not isolated:** condition (1), which (3) implies. **Measured rates:** the 400-start probe (recipe in R-003) is recorded, not a test |
+| R-004 | **Cases:** saddle and maximum endpoints rejected; mixed-sign saddle `Q = [1 0 1; 0 1 1]`, `L = (1, 1, -0.9)` with minima at `x1 = x2 = ±acos(5/9)`. **Not isolated:** the `converged` conjunct. **Not tested:** the rank-deficient behaviour, which is a recorded probe (recipes in R-004) |
 | R-005 | `-2 sin⁴(x/2)` maximum (`L = (-1, 1/4)`, `Q = [1 2]`), `V ≡ 0`, and rank-deficient `Q = [1; 0]` exclude the origin. The last passes because its zero eigenvalue is computed exactly. The rounding cases in R-005 are documented, not tested |
 | R-006 | Non-unimodular `Qtilde = [2 0; 0 1]` gives 2 vacua |
 | R-007 | **Integration evidence only:** the legacy batch run on geometry `2,2,1` completes and writes its result (`test/full.jl`). **Not directly verified:** no test asserts that the stored count is an `Int`, or that a non-integral count raises |
-| R-008 | `spectrum_mode_counts([NaN, 1.0])` raises `ArgumentError` |
-| R-009 | `test/full.jl`: the parsed default is `:auto`. The help text names the previous default and the configuration digest, points to `--method legacy` to reproduce stored results, states that stored legacy counts are not invalidated, and does not contain "stale". The auto-chain conditions are existing behaviour, not changed or newly tested here. The single-geometry `:legacy` default has no source change in PR #215 |
+| R-008 | `spectrum_mode_counts([NaN, 1.0])` raises `ArgumentError`. The `f12fbb8` behaviour is derived from its code |
+| R-009 | `test/full.jl`: the parsed default is `:auto`. The help text names the previous default ("was legacy before PR #215", and not "minimizer fix") and the configuration digest, points to `--method legacy` to reproduce stored results, states that stored legacy counts are not invalidated, and does not contain "stale". The auto-chain conditions are existing behaviour, not changed or newly tested here. The single-geometry `:legacy` default has no source change in PR #215 |
 | R-010 | The docstrings and help text are present and limit the change to direct calls; the docs build passes. The reachability facts were established by reading the call graph and running `vacua_id` on the cases in *Current baseline* |
 
 Suites: fast and full Julia suites, Python tests, scientific qualification and
@@ -479,11 +618,12 @@ recorded in the PR #215 description. Unobserved checks are not PASS.
 
 Two identities are tracked:
 
-- **Implementation candidate:** `b309a55` on `codex/test-suite-repairs`. The
+- **Implementation candidate:** `dbd7b62` on `codex/test-suite-repairs`. The
   scientific and test evidence in the PR #215 description is produced on it.
   Earlier candidates and their reviews:
   - `ab48726`: reviewed with draft `444fcc3`; not passed.
   - `dc42633`: reviewed with draft `6b033b5`; not passed.
+  - `b309a55`: reviewed with draft `0442ead`; not passed.
 - **Final merge candidate:** the PR #215 head after the approval-recording
   commit. G1 checks that it differs from the implementation candidate only in
   `specs/0215-minimizer-acceptance-contract/`. G2 reviews it, and CI must pass
@@ -491,7 +631,8 @@ Two identities are tracked:
 
 ## Interfaces and compatibility
 
-- `minimize` results gain the `"converged"` and `"stationary"` keys.
+- `minimize` results gain the `"converged"` and `"stationary"` keys
+  (`"stationary"` as in R-003).
 - `subspace_minimize` gains the `initial_points` keyword.
 - `id_minimize(::Vector, ::Matrix)` returns results computed with the exact
   Hessian (R-001). Its keys and signature are unchanged.
@@ -507,7 +648,10 @@ Two identities are tracked:
 
 ## Open owner decisions
 
-None are intentionally left open. Approval of this specification is the owner's
-decision on R-001 to R-010 and on the scope amendment, as written. The
-replacement of R-003 to R-005 by a proof-backed classifier is a separate owner
-decision under #220.
+- **R-009 rationale.** The owner confirms the proposed rationale for the
+  `--method auto` batch default, states another, or keeps `--method legacy`
+  as the default (an implementation change).
+
+Approval of this specification is the owner's decision on R-001 to R-010 and
+on the amendments, as written. The replacement of R-003 to R-005 by a
+proof-backed classifier is a separate owner decision under #220.
