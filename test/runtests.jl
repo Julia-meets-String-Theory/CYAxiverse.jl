@@ -2371,13 +2371,16 @@ end
     # broadcast summed (Σ L_a)(Σ_b (1 - cos θ_b)) ≥ 0 instead.
     # Tolerance on log10|V| (u = eps()/2): evaluating the three cosines,
     # subtractions, phases and the dot product (γ_3) at the computed point gives
-    # |ΔV| ≤ about 16.1u; a position error δ ≤ sqrt(eps()) (x_abstol) adds at most
-    # λ_max δ²/2 ≈ 0.62 eps() (λ_max = 5/9 + 62/90). Dividing the total ≈ 8.7 eps()
-    # by |V| ln 10 ≈ 0.82 and adding ≤ 1 ulp for log10 gives ≈ 11 eps().
+    # |ΔV| ≤ about 16.1u ≈ 8.05 eps(). A position error with every component
+    # within the x_abstol scale δ = sqrt(eps()) has ‖Δx‖₂² ≤ 2δ², adding at most
+    # λ_max δ² ≈ 1.24 eps() (λ_max = 5/9 + 62/90). δ is the stopping scale of
+    # CYAX-0215 R-002, not a proven error bound. Dividing the total ≈ 9.3 eps()
+    # by |V| ln 10 ≈ 0.82 and adding ≤ 1 ulp (eps()/4 at 0.45) for log10 gives
+    # ≈ 11.6 eps(), so 12 eps().
     mixed_minimum_run = minimizer.minimize(Lmixed, Qmixed, [1.0, 0.95])
     @test mixed_minimum_run["converged"] && mixed_minimum_run["Hsign"] == 1
     @test mixed_minimum_run["±V"] == -1
-    @test mixed_minimum_run["logV"] ≈ log10(16 / 45) atol=11eps()
+    @test mixed_minimum_run["logV"] ≈ log10(16 / 45) atol=12eps()
 
     # Degenerate origins are unclassified and excluded, as zero modes are at
     # endpoints (Hsign = sign(0) = 0). L = (-1, 1/4) with Q = [1 2]:
