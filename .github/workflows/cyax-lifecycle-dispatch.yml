@@ -20,9 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Fetch the exact trigger commit with read-only access
+      - name: Fetch the exact trigger commit with anonymous read-only access
         env:
-          GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF: ${{ github.ref }}
           GITHUB_SHA: ${{ github.sha }}
@@ -30,54 +29,137 @@ jobs:
           set -euo pipefail
           set +x
           git init --quiet "$GITHUB_WORKSPACE"
-          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
-          auth="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 --wrap=0)"
-          GIT_CONFIG_NOSYSTEM=1 \
-          GIT_CONFIG_GLOBAL=/dev/null \
-          GIT_CONFIG_COUNT=1 \
-          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
-          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
-            git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=2 origin "$GITHUB_REF"
-          unset auth GITHUB_TOKEN
-          git -C "$GITHUB_WORKSPACE" checkout --quiet --detach FETCH_HEAD
+          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl.git"
+          mkdir -p "$RUNNER_TEMP/cyax125-anonymous-home"
+          env -i \
+            PATH="$PATH" \
+            HOME="$RUNNER_TEMP/cyax125-anonymous-home" \
+            GIT_CONFIG_NOSYSTEM=1 \
+            GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_CONFIG_COUNT=3 \
+            GIT_CONFIG_KEY_0=credential.helper \
+            GIT_CONFIG_VALUE_0= \
+            GIT_CONFIG_KEY_1=core.hooksPath \
+            GIT_CONFIG_VALUE_1=/dev/null \
+            GIT_CONFIG_KEY_2=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_2= \
+            GIT_TERMINAL_PROMPT=0 \
+            GCM_INTERACTIVE=Never \
+              git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=2 origin "$GITHUB_REF"
+          env -i \
+            PATH="$PATH" \
+            HOME="$RUNNER_TEMP/cyax125-anonymous-home" \
+            GIT_CONFIG_NOSYSTEM=1 \
+            GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_CONFIG_COUNT=3 \
+            GIT_CONFIG_KEY_0=credential.helper \
+            GIT_CONFIG_VALUE_0= \
+            GIT_CONFIG_KEY_1=core.hooksPath \
+            GIT_CONFIG_VALUE_1=/dev/null \
+            GIT_CONFIG_KEY_2=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_2= \
+            GIT_TERMINAL_PROMPT=0 \
+            GCM_INTERACTIVE=Never \
+              git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=8 origin \
+                f12fbb8ec52e4c7510564f602a15f26173fe772e \
+                a6df7c78e27ee81771cc06b0783a508edcaed320 \
+                32af89296955ad684517e7a57ce5d8a431f5a971 \
+                749c211debb344d556db5a1f74e6759a217fe9da
+          git -C "$GITHUB_WORKSPACE" checkout --quiet --detach "$GITHUB_SHA"
           test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$GITHUB_SHA"
 
-      - name: Validate the exact Owner trigger
+      - id: approval
+        name: Validate exact route and approval evidence before App mint
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_REF: ${{ github.ref }}
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 - <<'PY'
+          import base64
           import json
           import os
           from pathlib import Path
-          from version_lifecycle.github_protection import validate_rehearsal_trigger
+          import sys
+          from version_lifecycle.github_protection import (
+              GitHubProtectionError, validate_rehearsal_trigger,
+          )
+          from version_lifecycle.rehearsal import (
+              RehearsalError, verify_run_approval,
+              validate_rehearsal_route_trigger,
+          )
 
           with Path(os.environ["GITHUB_EVENT_PATH"]).open(encoding="utf-8") as stream:
               event = json.load(stream)
-          request = validate_rehearsal_trigger(
-              Path.cwd(),
-              repository=os.environ["GITHUB_REPOSITORY"],
-              ref=os.environ["GITHUB_REF"],
-              commit_sha=os.environ["GITHUB_SHA"],
-              actor=os.environ["GITHUB_ACTOR"],
-              event=event,
-          )
-          print(json.dumps(request.to_dict(), sort_keys=True))
+          context = {
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "ref": os.environ["GITHUB_REF"],
+              "commit_sha": os.environ["GITHUB_SHA"],
+              "actor": os.environ["GITHUB_ACTOR"],
+              "event": event,
+          }
+          try:
+              route_request = validate_rehearsal_route_trigger(Path.cwd(), **context)
+          except (RehearsalError, GitHubProtectionError):
+              legacy_request = validate_rehearsal_trigger(Path.cwd(), **context)
+              with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+                  output.write("route_mode=false\n")
+              print(json.dumps({"status": "LEGACY_REQUEST_FENCE_ONLY", "request_id": legacy_request.request_id}))
+              raise SystemExit(0)
+
+          try:
+              approval = verify_run_approval(
+                  route_request,
+                  run_id=int(os.environ["GITHUB_RUN_ID"]),
+                  run_attempt=int(os.environ["GITHUB_RUN_ATTEMPT"]),
+                  head_sha=os.environ["GITHUB_SHA"],
+                  ref=os.environ["GITHUB_REF"],
+              )
+              raw_envelope = {
+                  "schema_version": 1,
+                  "receipt_b64": base64.b64encode(approval.receipt_bytes).decode("ascii"),
+                  "receipt_sha256": approval.receipt_sha256,
+                  "responses": [
+                      {
+                          "path": item["path"],
+                          "status": item["status"],
+                          "headers": dict(item["headers"]),
+                          "body_b64": base64.b64encode(item["body"]).decode("ascii"),
+                          "body_sha256": item["body_sha256"],
+                      }
+                      for item in approval.raw_responses
+                  ],
+              }
+              raw_path = Path(os.environ["RUNNER_TEMP"]) / "cyax125-approval-raw.json"
+              raw_path.write_text(json.dumps(raw_envelope, sort_keys=True, separators=(",", ":")), encoding="ascii")
+              with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+                  output.write("route_mode=true\n")
+                  output.write("approval_receipt_b64=" + base64.b64encode(approval.receipt_bytes).decode("ascii") + "\n")
+              # The adopted request contains only the seed receipt digest, not
+              # parseable Owner receipts. Do not reach the secret-bearing step.
+              raise RehearsalError("OWNER_SEED_RECEIPTS_UNAVAILABLE_BEFORE_APP_MINT")
+          except RehearsalError as error:
+              print(error.reason)
+              sys.exit(1)
           PY
 
-      - name: Mint a scoped token and create the request fence
+      - name: Mint a scoped token and execute the fixed rehearsal route
         env:
           LIFECYCLE_APP_ID: ${{ vars.LIFECYCLE_APP_ID }}
           LIFECYCLE_APP_PRIVATE_KEY: ${{ secrets.LIFECYCLE_APP_PRIVATE_KEY }}
+          ROUTE_MODE: ${{ steps.approval.outputs.route_mode }}
+          APPROVAL_RECEIPT_B64: ${{ steps.approval.outputs.approval_receipt_b64 }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_REF: ${{ github.ref }}
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           set +x
@@ -122,6 +204,58 @@ jobs:
           end
 
           begin
+            preflight_python = <<~PY
+              import base64
+              import json
+              import os
+              from pathlib import Path
+              from version_lifecycle.github_protection import (
+                  validate_rehearsal_trigger,
+              )
+              from version_lifecycle.rehearsal import (
+                  RehearsalError, validate_rehearsal_route_trigger,
+                  validate_approval_receipt,
+              )
+              with Path(os.environ["GITHUB_EVENT_PATH"]).open(encoding="utf-8") as stream:
+                  event = json.load(stream)
+              context = {
+                  "repository": os.environ["GITHUB_REPOSITORY"],
+                  "ref": os.environ["GITHUB_REF"],
+                  "commit_sha": os.environ["GITHUB_SHA"],
+                  "actor": os.environ["GITHUB_ACTOR"],
+                  "event": event,
+              }
+              if os.environ.get("ROUTE_MODE") == "true":
+                  request = validate_rehearsal_route_trigger(Path.cwd(), **context)
+                  receipt = base64.b64decode(
+                      os.environ["APPROVAL_RECEIPT_B64"], validate=True
+                  )
+                  validate_approval_receipt(
+                      receipt, request, run_id=int(os.environ["GITHUB_RUN_ID"]),
+                      run_attempt=int(os.environ["GITHUB_RUN_ATTEMPT"]),
+                      head_sha=os.environ["GITHUB_SHA"],
+                  )
+                  raise RehearsalError("OWNER_SEED_RECEIPTS_UNAVAILABLE_BEFORE_APP_MINT")
+              validate_rehearsal_trigger(Path.cwd(), **context)
+            PY
+            preflight_environment = {
+              "GITHUB_ACTOR" => ENV.fetch("GITHUB_ACTOR"),
+              "GITHUB_REF" => ENV.fetch("GITHUB_REF"),
+              "GITHUB_SHA" => ENV.fetch("GITHUB_SHA"),
+              "GITHUB_REPOSITORY" => ENV.fetch("GITHUB_REPOSITORY"),
+              "GITHUB_EVENT_PATH" => ENV.fetch("GITHUB_EVENT_PATH"),
+              "GITHUB_RUN_ID" => ENV.fetch("GITHUB_RUN_ID"),
+              "GITHUB_RUN_ATTEMPT" => ENV.fetch("GITHUB_RUN_ATTEMPT"),
+              "ROUTE_MODE" => ENV.fetch("ROUTE_MODE", "false"),
+              "APPROVAL_RECEIPT_B64" => ENV.fetch("APPROVAL_RECEIPT_B64", ""),
+              "PYTHONPATH" => "scripts",
+              "PYTHONDONTWRITEBYTECODE" => "1",
+            }
+            _preflight_out, _preflight_err, preflight_status = Open3.capture3(
+              preflight_environment, "python3", "-c", preflight_python,
+              unsetenv_others: true
+            )
+            raise "TRIGGER_OR_RECEIPT_REVALIDATION_FAILED" unless preflight_status.success?
             app_id = ENV.fetch("LIFECYCLE_APP_ID")
             raise "APP_ID_INVALID" unless app_id.match?(/\A[0-9]+\z/)
             raise "APP_ID_MISMATCH" unless app_id == "5371554"
@@ -142,7 +276,9 @@ jobs:
               jwt,
               {
                 "repositories" => ["CYAxiverse.jl"],
-                "permissions" => { "contents" => "write" },
+                "permissions" => {
+                  "contents" => "write", "metadata" => "read"
+                },
               },
             )
             token = token_record["token"]
@@ -163,6 +299,8 @@ jobs:
               installed["total_count"] == 1 && repositories == [REPOSITORY]
 
             python = <<~PY
+              import base64
+              from datetime import datetime
               import json
               import os
               from pathlib import Path
@@ -170,17 +308,33 @@ jobs:
                   GitHubProtectionAdapter,
                   validate_rehearsal_trigger,
               )
+              from version_lifecycle.rehearsal import (
+                  validate_rehearsal_route_trigger, validate_approval_receipt,
+                  run_rehearsal,
+              )
 
               with Path(os.environ["GITHUB_EVENT_PATH"]).open(encoding="utf-8") as stream:
                   event = json.load(stream)
-              request = validate_rehearsal_trigger(
-                  Path.cwd(),
-                  repository=os.environ["GITHUB_REPOSITORY"],
-                  ref=os.environ["GITHUB_REF"],
-                  commit_sha=os.environ["GITHUB_SHA"],
-                  actor=os.environ["GITHUB_ACTOR"],
-                  event=event,
-              )
+              context = {
+                  "repository": os.environ["GITHUB_REPOSITORY"],
+                  "ref": os.environ["GITHUB_REF"],
+                  "commit_sha": os.environ["GITHUB_SHA"],
+                  "actor": os.environ["GITHUB_ACTOR"],
+                  "event": event,
+              }
+              route_mode = os.environ.get("ROUTE_MODE") == "true"
+              if route_mode:
+                  request = validate_rehearsal_route_trigger(Path.cwd(), **context)
+                  receipt = base64.b64decode(
+                      os.environ["APPROVAL_RECEIPT_B64"], validate=True
+                  )
+                  approval = validate_approval_receipt(
+                      receipt, request, run_id=int(os.environ["GITHUB_RUN_ID"]),
+                      run_attempt=int(os.environ["GITHUB_RUN_ATTEMPT"]),
+                      head_sha=os.environ["GITHUB_SHA"],
+                  )
+              else:
+                  request = validate_rehearsal_trigger(Path.cwd(), **context)
               intent = {
                   "repository": os.environ["GITHUB_REPOSITORY"],
                   "request_id": request.request_id,
@@ -189,8 +343,16 @@ jobs:
               adapter = GitHubProtectionAdapter(
                   os.environ["GITHUB_REPOSITORY"],
                   token=os.environ["GH_TOKEN"],
+                  repository_path=Path.cwd(),
+                  token_permissions={"contents": "write", "metadata": "read"},
+                  token_expires_at=datetime.fromisoformat(
+                      os.environ["APP_TOKEN_EXPIRES_AT"].replace("Z", "+00:00")
+                  ),
                   rehearsal_gate=lambda item, action, ref, rules: (
-                      action == "create-request-fence"
+                      action == (
+                          "create-route-request-fence" if route_mode
+                          else "create-request-fence"
+                      )
                       and item.get("owner_environment_approved") is True
                       and item.get("request_id") == request.request_id
                       and rules.get("repository") == os.environ["GITHUB_REPOSITORY"]
@@ -201,8 +363,15 @@ jobs:
                       )
                   ),
               )
-              result = adapter.create_rehearsal_request_fence(request, intent=intent)
-              print(json.dumps(result, sort_keys=True))
+              if route_mode:
+                  fence = adapter.create_rehearsal_route_request_fence(
+                      request, approval=approval, intent=intent
+                  )
+                  result = run_rehearsal(request, approval, adapter, adapter)
+                  print(json.dumps({"fence": fence, "result": result}, sort_keys=True))
+              else:
+                  result = adapter.create_rehearsal_request_fence(request, intent=intent)
+                  print(json.dumps(result, sort_keys=True))
             PY
             child_environment = {
               "GH_TOKEN" => token,
@@ -211,6 +380,11 @@ jobs:
               "GITHUB_SHA" => ENV.fetch("GITHUB_SHA"),
               "GITHUB_REPOSITORY" => ENV.fetch("GITHUB_REPOSITORY"),
               "GITHUB_EVENT_PATH" => ENV.fetch("GITHUB_EVENT_PATH"),
+              "GITHUB_RUN_ID" => ENV.fetch("GITHUB_RUN_ID"),
+              "GITHUB_RUN_ATTEMPT" => ENV.fetch("GITHUB_RUN_ATTEMPT"),
+              "ROUTE_MODE" => ENV.fetch("ROUTE_MODE", "false"),
+              "APPROVAL_RECEIPT_B64" => ENV.fetch("APPROVAL_RECEIPT_B64", ""),
+              "APP_TOKEN_EXPIRES_AT" => expires_at.utc.iso8601,
               "PYTHONPATH" => "scripts",
               "PYTHONDONTWRITEBYTECODE" => "1",
             }

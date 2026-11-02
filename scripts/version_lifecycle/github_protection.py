@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from contextlib import contextmanager
 import json
 import os
 import re
@@ -21,7 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 import uuid
 
 from .codec import canonical_json, sha256_hex
@@ -96,6 +97,11 @@ class GitHubProtectionError(RuntimeError):
             and 400 <= self.provider_status < 500
             and self.provider_status not in {408, 425, 429}
         )
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,6 +286,47 @@ class RehearsalTriggerRequest:
             "expected_vmm_sha": self.expected_vmm_sha,
             "called_code_blobs": dict(self.called_code_blobs),
             "request_sha256": self.request_sha256,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RehearsalFreezeProof:
+    """Read-only proof of one unchanged Owner-managed rehearsal epoch."""
+
+    epoch_id: str
+    intent_id: str
+    request_id: str
+    plan_sha256: str
+    ref: str
+    freeze_id: int
+    definition_sha256: str
+    effective_rule_ids: tuple[int, ...]
+    owner_terminal_receipt_sha256: str
+    snapshot_sha256: str
+    local_generation: int
+    ref_sha: str | None
+    verified_at: str
+    _adapter_nonce: object = field(repr=False, compare=False)
+
+    @property
+    def generation(self) -> int:
+        return self.local_generation
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "epoch_id": self.epoch_id,
+            "intent_id": self.intent_id,
+            "request_id": self.request_id,
+            "plan_sha256": self.plan_sha256,
+            "ref": self.ref,
+            "freeze_id": self.freeze_id,
+            "definition_sha256": self.definition_sha256,
+            "effective_rule_ids": list(self.effective_rule_ids),
+            "owner_terminal_receipt_sha256": self.owner_terminal_receipt_sha256,
+            "snapshot_sha256": self.snapshot_sha256,
+            "local_generation": self.local_generation,
+            "ref_sha": self.ref_sha,
+            "verified_at": self.verified_at,
         }
 
 
@@ -615,6 +662,9 @@ class GitHubProtectionAdapter:
         clock: Callable[[], datetime] | None = None,
         authorization_gate: Callable[[Any, str, str], bool] | None = None,
         rehearsal_gate: Callable[[Any, str, str, Mapping[str, Any]], bool] | None = None,
+        token_permissions: Mapping[str, str] | None = None,
+        token_expires_at: datetime | None = None,
+        repository_path: str | Path | None = None,
     ) -> None:
         parts = repository.split("/") if isinstance(repository, str) else []
         if len(parts) != 2 or any(_REPOSITORY_PART.fullmatch(part) is None for part in parts):
@@ -654,6 +704,9 @@ class GitHubProtectionAdapter:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._authorization_gate = authorization_gate
         self._rehearsal_gate = rehearsal_gate
+        self._token_permissions = dict(token_permissions or {})
+        self._token_expires_at = token_expires_at
+        self._repository_path = Path(repository_path) if repository_path is not None else None
         self._nonce = object()
         self._leases: dict[str, FreezeLease] = {}
         self._unreconciled_freeze_writes: dict[str, dict[str, Any]] = {}
@@ -663,6 +716,79 @@ class GitHubProtectionAdapter:
         self._freeze_write_evidence: dict[str, dict[str, Any]] = {}
         self._unreconciled_branch_moves: dict[str, dict[str, Any]] = {}
         self._unreconciled_request_fences: dict[str, dict[str, Any]] = {}
+        self._rehearsal_case_generation = 0
+        self._rehearsal_case_inflight: dict[str, dict[str, Any]] = {}
+        self._unreconciled_case_writes: dict[str, dict[str, Any]] = {}
+        self._rehearsal_case_locks: dict[str, threading.Lock] = {}
+        self._rehearsal_lock_owners: dict[str, int] = {}
+        self._rehearsal_lock_guard = threading.Lock()
+        self._rehearsal_case_global_lock = threading.Lock()
+        self._claimed_rehearsal_cases: dict[tuple[str, str, str], str] = {}
+        self._initial_request_fences: dict[str, str] = {}
+        self._initial_approval_evidence: dict[str, dict[str, Any]] = {}
+
+    @contextmanager
+    def case_lock(self, ref: str):
+        """Serialize one fixed rehearsal ref before epoch proof and provider IO."""
+
+        if not isinstance(ref, str) or not self._is_rehearsal_runtime_ref(ref):
+            raise GitHubProtectionError("REHEARSAL_REF_NOT_ALLOWLISTED")
+        if not self._rehearsal_case_global_lock.acquire(blocking=False):
+            raise GitHubProtectionError("REHEARSAL_CASE_ALREADY_INFLIGHT")
+        with self._rehearsal_lock_guard:
+            lock = self._rehearsal_case_locks.setdefault(ref, threading.Lock())
+        if not lock.acquire(blocking=False):
+            self._rehearsal_case_global_lock.release()
+            raise GitHubProtectionError("REHEARSAL_CASE_ALREADY_INFLIGHT")
+        self._rehearsal_lock_owners[ref] = threading.get_ident()
+        try:
+            yield
+        finally:
+            self._rehearsal_lock_owners.pop(ref, None)
+            lock.release()
+            self._rehearsal_case_global_lock.release()
+
+    @staticmethod
+    def _is_rehearsal_runtime_ref(ref: str) -> bool:
+        if not isinstance(ref, str) or not ref.startswith("refs/"):
+            return False
+        try:
+            from .rehearsal import CASE_ORDER, OPERATION_TABLE
+        except Exception:
+            return False
+        if ref in {
+            row["ref"] for row in OPERATION_TABLE
+            if not row["ref"].startswith("DETERMINISTIC ")
+        }:
+            return True
+        if re.fullmatch(
+            r"refs/heads/rehearsal/lifecycle/requests/"
+            r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?",
+            ref,
+        ):
+            return True
+        match = re.fullmatch(
+            r"refs/heads/rehearsal/lifecycle/case-(?:claims|results)/"
+            r"([A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?)/"
+            r"([0-9a-f]{64})/([A-Za-z0-9-]+)",
+            ref,
+        )
+        return bool(match and match.group(3) in CASE_ORDER)
+
+    def assert_rehearsal_app_scope(self) -> None:
+        """Require the single short-lived repository-scoped App token."""
+
+        if not isinstance(self._token, str) or not self._token:
+            raise GitHubProtectionError("GITHUB_AUTHENTICATION_UNAVAILABLE")
+        if self._token_permissions != {"contents": "write", "metadata": "read"}:
+            raise GitHubProtectionError("APP_TOKEN_SCOPE_INVALID")
+        if not isinstance(self._token_expires_at, datetime) or self._token_expires_at.tzinfo is None:
+            raise GitHubProtectionError("APP_TOKEN_EXPIRY_UNVERIFIED")
+        now = self._clock()
+        if not isinstance(now, datetime) or now.tzinfo is None:
+            raise GitHubProtectionError("CLOCK_UNAVAILABLE")
+        if self._token_expires_at.astimezone(timezone.utc) <= now.astimezone(timezone.utc) + timedelta(seconds=30):
+            raise GitHubProtectionError("APP_TOKEN_EXPIRED")
 
     def _timestamp(self) -> str:
         try:
@@ -682,6 +808,8 @@ class GitHubProtectionAdapter:
         payload: Mapping[str, Any] | None = None,
         *,
         allow_not_found: bool = False,
+        return_errors: bool = False,
+        follow_redirects: bool = True,
     ) -> ApiResponse:
         if not self._token:
             raise GitHubProtectionError("GITHUB_AUTHENTICATION_UNAVAILABLE")
@@ -715,7 +843,13 @@ class GitHubProtectionAdapter:
                 },
             )
             try:
-                with urlopen(request, timeout=20) as result:
+                if follow_redirects:
+                    response_context = urlopen(request, timeout=20)
+                else:
+                    response_context = build_opener(_RejectRedirects()).open(
+                        request, timeout=20
+                    )
+                with response_context as result:
                     response = ApiResponse(
                         result.status,
                         result.read(),
@@ -724,9 +858,18 @@ class GitHubProtectionAdapter:
             except HTTPError as error:
                 status = error.code
                 headers = {key.lower(): value for key, value in error.headers.items()}
+                body = error.read(1024 * 1024 + 1) if return_errors else b""
                 error.close()
                 if allow_not_found and status == 404:
                     return ApiResponse(status, b"", headers)
+                if return_errors:
+                    if len(body) > 1024 * 1024:
+                        raise GitHubProtectionError(
+                            "GITHUB_RESPONSE_OVERSIZE",
+                            provider_status=status,
+                            provider_request_id=headers.get("x-github-request-id"),
+                        )
+                    return ApiResponse(status, body, headers)
                 raise GitHubProtectionError(
                     "GITHUB_API_REQUEST_FAILED",
                     provider_status=status,
@@ -751,6 +894,14 @@ class GitHubProtectionAdapter:
             str(key).lower(): str(value) for key, value in response.headers.items()
         }
         if allow_not_found and response.status == 404:
+            return ApiResponse(response.status, response.body, normalized_headers)
+        if return_errors:
+            if not isinstance(response.body, bytes) or len(response.body) > 1024 * 1024:
+                raise GitHubProtectionError(
+                    "GITHUB_RESPONSE_OVERSIZE",
+                    provider_status=response.status,
+                    provider_request_id=normalized_headers.get("x-github-request-id"),
+                )
             return ApiResponse(response.status, response.body, normalized_headers)
         if not 200 <= response.status < 300:
             raise GitHubProtectionError(
@@ -848,9 +999,10 @@ class GitHubProtectionAdapter:
 
     def create_rehearsal_request_fence(
         self,
-        request: RehearsalTriggerRequest,
+        request: Any,
         *,
         intent: Any,
+        _route_approval: Any | None = None,
     ) -> dict[str, Any]:
         """Create one immutable rehearsal request fence on the current vmm tree.
 
@@ -858,7 +1010,48 @@ class GitHubProtectionAdapter:
         the already-validated request file. It never moves or creates vmm.
         """
 
-        if not isinstance(request, RehearsalTriggerRequest):
+        route_mode = _route_approval is not None
+        route_approval_evidence: dict[str, Any] | None = None
+        if route_mode:
+            self.assert_rehearsal_app_scope()
+            try:
+                from .rehearsal import (
+                    ValidatedRouteRequest,
+                    VerifiedRunApproval,
+                    _APPROVAL_VERIFICATION_TOKEN,
+                    validate_approval_receipt,
+                    validate_route_request_bytes,
+                )
+                validated_route = validate_route_request_bytes(request.request_bytes)
+            except Exception:
+                raise GitHubProtectionError("REQUEST_FENCE_INPUT_INVALID") from None
+            if not (
+                isinstance(request, ValidatedRouteRequest)
+                and isinstance(_route_approval, VerifiedRunApproval)
+                and _route_approval._verification_token is _APPROVAL_VERIFICATION_TOKEN
+                and _route_approval.request_id == request.request_id
+                and _route_approval.plan_sha256 == request.plan_sha256
+                and _route_approval.receipt_sha256
+                and validated_route.request_id == request.request_id
+                and validated_route.request_sha256 == request.request_sha256
+                and validated_route.plan_sha256 == request.plan_sha256
+            ):
+                raise GitHubProtectionError("REQUEST_FENCE_APPROVAL_BINDING_INVALID")
+            original_route_approval = _route_approval
+            try:
+                _route_approval = validate_approval_receipt(
+                    _route_approval.receipt_bytes,
+                    request,
+                    run_id=_route_approval.run_id,
+                    run_attempt=_route_approval.run_attempt,
+                    head_sha=_route_approval.head_sha,
+                )
+            except Exception:
+                raise GitHubProtectionError("REQUEST_FENCE_APPROVAL_BINDING_INVALID") from None
+            route_approval_evidence = self._approval_evidence_payload(
+                request, original_route_approval
+            )
+        elif not isinstance(request, RehearsalTriggerRequest):
             raise GitHubProtectionError("REQUEST_FENCE_INPUT_INVALID")
         if (
             _REQUEST_ID.fullmatch(request.request_id) is None
@@ -872,31 +1065,42 @@ class GitHubProtectionAdapter:
             or sha256_hex(request.request_bytes) != request.request_sha256
         ):
             raise GitHubProtectionError("REQUEST_FENCE_INPUT_INVALID")
-        try:
-            payload = json.loads(
-                request.request_bytes.decode("utf-8"),
-                object_pairs_hook=_request_object_pairs,
-            )
+        if route_mode:
             if (
-                not isinstance(payload, dict)
-                or set(payload) != {
-                    "schema_version", "request_id", "implementation_sha",
-                    "workflow_blob_sha", "expected_vmm_sha", "called_code_blobs",
-                    "purpose",
-                }
-                or type(payload.get("schema_version")) is not int
-                or payload.get("schema_version") != 1
-                or canonical_json(payload) != request.request_bytes
-                or payload.get("request_id") != request.request_id
-                or payload.get("implementation_sha") != request.parent_sha
-                or payload.get("workflow_blob_sha") != request.workflow_blob_sha
-                or payload.get("expected_vmm_sha") != request.expected_vmm_sha
-                or payload.get("called_code_blobs") != dict(request.called_code_blobs)
-                or payload.get("purpose") != "gate-a-rehearsal"
+                request.request_path != f"lifecycle-requests/{request.request_id}.json"
+                or request.commit_sha == ""
+                or validated_route.parent_sha != request.parent_sha
+                or validated_route.workflow_blob_sha != request.workflow_blob_sha
+                or validated_route.expected_vmm_sha != request.expected_vmm_sha
+                or dict(validated_route.called_code_blobs) != dict(request.called_code_blobs)
             ):
-                raise ValueError
-        except (UnicodeError, json.JSONDecodeError, TypeError, ValueError):
-            raise GitHubProtectionError("REQUEST_FENCE_INPUT_INVALID") from None
+                raise GitHubProtectionError("REQUEST_FENCE_INPUT_INVALID")
+        else:
+            try:
+                payload = json.loads(
+                    request.request_bytes.decode("utf-8"),
+                    object_pairs_hook=_request_object_pairs,
+                )
+                if (
+                    not isinstance(payload, dict)
+                    or set(payload) != {
+                        "schema_version", "request_id", "implementation_sha",
+                        "workflow_blob_sha", "expected_vmm_sha", "called_code_blobs",
+                        "purpose",
+                    }
+                    or type(payload.get("schema_version")) is not int
+                    or payload.get("schema_version") != 1
+                    or canonical_json(payload) != request.request_bytes
+                    or payload.get("request_id") != request.request_id
+                    or payload.get("implementation_sha") != request.parent_sha
+                    or payload.get("workflow_blob_sha") != request.workflow_blob_sha
+                    or payload.get("expected_vmm_sha") != request.expected_vmm_sha
+                    or payload.get("called_code_blobs") != dict(request.called_code_blobs)
+                    or payload.get("purpose") != "gate-a-rehearsal"
+                ):
+                    raise ValueError
+            except (UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+                raise GitHubProtectionError("REQUEST_FENCE_INPUT_INVALID") from None
         fence_ref = f"refs/heads/rehearsal/lifecycle/requests/{request.request_id}"
         if request.request_id in self._unreconciled_request_fences:
             raise GitHubProtectionError(
@@ -935,12 +1139,19 @@ class GitHubProtectionAdapter:
             raise GitHubProtectionError("REHEARSAL_RULESET_UNVERIFIED")
         try:
             authorized = self._rehearsal_gate(
-                intent, "create-request-fence", fence_ref, rules_evidence
+                intent,
+                "create-route-request-fence" if route_mode else "create-request-fence",
+                fence_ref,
+                rules_evidence,
             )
         except Exception:
             authorized = False
         if authorized is not True:
             raise GitHubProtectionError("REQUEST_FENCE_AUTHORIZATION_UNVERIFIED")
+        if route_mode:
+            if route_approval_evidence is None:
+                raise GitHubProtectionError("APPROVAL_RAW_EVIDENCE_INVALID")
+            self._initial_approval_evidence[request.request_id] = route_approval_evidence
 
         def create_object(path: str, payload: Mapping[str, Any]) -> dict[str, Any]:
             try:
@@ -1046,7 +1257,10 @@ class GitHubProtectionAdapter:
             raise GitHubProtectionError("REHEARSAL_RULESET_UNVERIFIED")
         try:
             final_authorized = self._rehearsal_gate(
-                intent, "create-request-fence", fence_ref, final_rules_evidence
+                intent,
+                "create-route-request-fence" if route_mode else "create-request-fence",
+                fence_ref,
+                final_rules_evidence,
             )
         except Exception:
             final_authorized = False
@@ -1139,6 +1353,1009 @@ class GitHubProtectionAdapter:
                 evidence=evidence,
             )
         return evidence
+
+    def _read_rehearsal_target_ref(self, ref: str) -> tuple[str, str] | None:
+        if not isinstance(ref, str) or not self._is_rehearsal_runtime_ref(ref):
+            raise GitHubProtectionError("REHEARSAL_REF_NOT_ALLOWLISTED")
+        git_ref = ref.removeprefix("refs/")
+        response = self._api_request(
+            "GET", self._repo_path(f"/git/ref/{quote(git_ref, safe='/')}"),
+            allow_not_found=True,
+        )
+        if response.status == 404:
+            return None
+        payload = self._json(response)
+        try:
+            actual_ref = payload["ref"]
+            object_type = payload["object"]["type"]
+            object_sha = payload["object"]["sha"]
+        except (KeyError, TypeError):
+            raise GitHubProtectionError("REHEARSAL_REF_IDENTITY_INVALID") from None
+        if (
+            actual_ref != ref
+            or object_type not in {"commit", "tag"}
+            or not isinstance(object_sha, str)
+            or _FULL_REF_SHA.fullmatch(object_sha) is None
+        ):
+            raise GitHubProtectionError("REHEARSAL_REF_IDENTITY_INVALID")
+        return object_type, object_sha
+
+    def _read_rehearsal_commit(self, commit_sha: str) -> dict[str, Any]:
+        if not isinstance(commit_sha, str) or _FULL_REF_SHA.fullmatch(commit_sha) is None:
+            raise GitHubProtectionError("REHEARSAL_COMMIT_IDENTITY_INVALID")
+        payload = self._json(self._api_request(
+            "GET", self._repo_path(f"/git/commits/{commit_sha}")
+        ))
+        try:
+            sha = payload["sha"]
+            tree = payload["tree"]["sha"]
+            parents = [item["sha"] for item in payload["parents"]]
+        except (KeyError, TypeError):
+            raise GitHubProtectionError("REHEARSAL_COMMIT_IDENTITY_INVALID") from None
+        if (
+            sha != commit_sha
+            or not isinstance(tree, str)
+            or _FULL_REF_SHA.fullmatch(tree) is None
+            or not isinstance(parents, list)
+            or any(not isinstance(parent, str) or _FULL_REF_SHA.fullmatch(parent) is None for parent in parents)
+        ):
+            raise GitHubProtectionError("REHEARSAL_COMMIT_IDENTITY_INVALID")
+        return {**payload, "parents": parents}
+
+    def _read_fenced_route_request(self, request: Any) -> bytes | None:
+        query = urlencode({"ref": f"rehearsal/lifecycle/requests/{request.request_id}"})
+        encoded = quote(request.request_path, safe="/")
+        response = self._api_request(
+            "GET", self._repo_path(f"/contents/{encoded}?{query}"),
+            allow_not_found=True,
+        )
+        if response.status == 404:
+            return None
+        payload = self._json(response)
+        try:
+            content = payload["content"]
+            encoding = payload["encoding"]
+            actual_path = payload["path"]
+        except (KeyError, TypeError):
+            raise GitHubProtectionError("REQUEST_FENCE_CONTENT_INVALID") from None
+        if (
+            actual_path != request.request_path
+            or encoding != "base64"
+            or not isinstance(content, str)
+        ):
+            raise GitHubProtectionError("REQUEST_FENCE_CONTENT_INVALID")
+        try:
+            raw = base64.b64decode(content, validate=True)
+        except (ValueError, TypeError):
+            raise GitHubProtectionError("REQUEST_FENCE_CONTENT_INVALID") from None
+        return raw
+
+    def preflight_route(self, request: Any, approval: Any) -> Any:
+        """Read exact fixed fixtures and mandatory Owner seeds before case 1."""
+
+        from .rehearsal import CaseObservation, VerifiedRunApproval
+
+        try:
+            self.assert_rehearsal_app_scope()
+            if (
+                not isinstance(approval, VerifiedRunApproval)
+                or approval.request_id != request.request_id
+                or approval.plan_sha256 != request.plan_sha256
+            ):
+                raise GitHubProtectionError("APPROVAL_BINDING_INVALID")
+            self._vmm_head_and_tree(request.expected_vmm_sha)
+            fence_ref = f"refs/heads/rehearsal/lifecycle/requests/{request.request_id}"
+            fence = self._read_rehearsal_target_ref(fence_ref)
+            fenced_bytes = self._read_fenced_route_request(request)
+            if (
+                fence is None
+                or fence[1] != self._initial_request_fences.get(request.request_id)
+                or fenced_bytes != request.request_bytes
+            ):
+                return CaseObservation(
+                    "BLOCKED_NOT_VERIFIABLE",
+                    {"reason": "REQUEST_FENCE_NOT_VERIFIED", "fence_sha": fence[1] if fence else None},
+                    failure_reason="REQUEST_FENCE_NOT_VERIFIED",
+                )
+            principal_ref = "refs/heads/rehearsal/principal/cyax125-20261101-route"
+            p2_update_ref = "refs/heads/rehearsal/trigger/cyax125-p2-app-update"
+            restricted_move_ref = "refs/heads/rehearsal/restricted/cyax125-20261101-move"
+            missing_seeds = []
+            for seed_ref in (principal_ref, p2_update_ref, restricted_move_ref):
+                try:
+                    seed = self._read_rehearsal_target_ref(seed_ref)
+                except GitHubProtectionError:
+                    raise
+                if seed is None:
+                    missing_seeds.append(seed_ref)
+                elif seed[1] != "f12fbb8ec52e4c7510564f602a15f26173fe772e":
+                    raise GitHubProtectionError("OWNER_SEED_HEAD_MISMATCH")
+            if missing_seeds:
+                return CaseObservation(
+                    "STOP_OWNER_ACTION_REQUIRED",
+                    {"reason": "OWNER_SEED_REQUIRED", "missing_seed_refs": missing_seeds},
+                    failure_reason="OWNER_SEED_REQUIRED",
+                )
+            for commit_sha in (
+                "f12fbb8ec52e4c7510564f602a15f26173fe772e",
+                "a6df7c78e27ee81771cc06b0783a508edcaed320",
+                "32af89296955ad684517e7a57ce5d8a431f5a971",
+                "749c211debb344d556db5a1f74e6759a217fe9da",
+            ):
+                self._read_rehearsal_commit(commit_sha)
+            expected_absent = (
+                "refs/heads/rehearsal/trigger/cyax125-p2-app-create",
+                "refs/heads/rehearsal/lifecycle/proof/cyax125-20261101",
+                "refs/tags/rehearsal/iterations/cyax125-20261101",
+                "refs/tags/rehearsal/v0.0.125",
+                "refs/heads/rehearsal/restricted/cyax125-20261101-create",
+            )
+            for target in expected_absent:
+                if self._read_rehearsal_target_ref(target) is not None:
+                    raise GitHubProtectionError("FIXED_REHEARSAL_REF_ALREADY_EXISTS")
+            return CaseObservation(
+                "PASS_ACCEPTED",
+                {
+                    "reason": "ROUTE_PREFLIGHT_READBACK_COMPLETE",
+                    "request_fence_sha": fence[1],
+                    "seed_refs": [principal_ref, p2_update_ref, restricted_move_ref],
+                    "fixture_commits": 4,
+                },
+            )
+        except Exception as error:
+            reason = getattr(error, "reason_code", "ROUTE_PREFLIGHT_NOT_VERIFIABLE")
+            return CaseObservation(
+                "BLOCKED_NOT_VERIFIABLE", {"reason": reason}, failure_reason=reason
+            )
+
+    def verify_rehearsal_freeze_epoch(
+        self, request: Any, case_id: str, phase: str
+    ) -> RehearsalFreezeProof:
+        """Read, never change, the Owner epoch and exact effective rule state."""
+
+        from .rehearsal import CASE_ORDER, OPERATION_TABLE
+
+        if case_id not in CASE_ORDER or phase not in {"pre", "post"}:
+            raise GitHubProtectionError("REHEARSAL_CASE_INVALID")
+        row = OPERATION_TABLE[CASE_ORDER.index(case_id)]
+        ref = row["ref"]
+        if ref.startswith("DETERMINISTIC "):
+            ref = f"refs/heads/rehearsal/lifecycle/requests/{request.request_id}"
+        if self._rehearsal_lock_owners.get(ref) != threading.get_ident():
+            raise GitHubProtectionError("REHEARSAL_CASE_LOCK_REQUIRED")
+        self.assert_rehearsal_app_scope()
+        attestation = request.owner_attestation
+        plan = request.plan
+        if (
+            attestation.get("request_id") != request.request_id
+            or attestation.get("plan_sha256") != request.plan_sha256
+            or attestation.get("intent_id") != plan.get("intent_id")
+            or attestation.get("candidate_sha") != plan.get("candidate_sha")
+            or attestation.get("freeze_ruleset_id") != 26316866
+            or attestation.get("effective_rule_ids") != [26314086, 26314227, 26316866]
+            or attestation.get("no_pending_or_unknown_writes") is not True
+            or attestation.get("exclusive_owner_writer_until_reconciliation") is not True
+        ):
+            raise GitHubProtectionError("OWNER_EPOCH_BINDING_INVALID")
+        receipt = attestation.get("last_operation_terminal_receipt_sha256")
+        if not isinstance(receipt, str) or re.fullmatch(r"[0-9a-f]{64}", receipt) is None:
+            raise GitHubProtectionError("OWNER_EPOCH_TERMINALITY_INVALID")
+        if self._rehearsal_case_inflight or self._unreconciled_case_writes:
+            raise GitHubProtectionError("REHEARSAL_EPOCH_HAS_UNRESOLVED_WRITE")
+        snapshot = self.read_snapshot()
+        if snapshot.snapshot_sha256 != attestation.get("full_definition_sha256"):
+            raise GitHubProtectionError("OWNER_EPOCH_RULESET_SNAPSHOT_CHANGED")
+        by_id = {item.id: item for item in snapshot.rulesets}
+        freeze = by_id.get(26316866)
+        integrity = by_id.get(26314086)
+        review = by_id.get(26314227)
+        if freeze is None or integrity is None or review is None:
+            raise GitHubProtectionError("OWNER_EPOCH_RULESETS_MISSING")
+        expected_actors = tuple(sorted((_REHEARSAL_ADMIN_BYPASS, _REHEARSAL_APP_BYPASS)))
+        if (
+            freeze.enforcement != "active"
+            or freeze.target != "branch"
+            or freeze.include != (_REHEARSAL_PRINCIPAL_PATTERN,)
+            or freeze.exclude
+            or freeze.conditions_extra
+            or self._rule_types(freeze) != ("update",)
+            or self._exact_actors(freeze) != expected_actors
+            or not self._exact_rehearsal_actors(freeze, expected_actors)
+            or integrity.enforcement != "active"
+            or integrity.target != "branch"
+            or integrity.include != (_REHEARSAL_PRINCIPAL_PATTERN,)
+            or integrity.exclude
+            or integrity.conditions_extra
+            or self._rule_types(integrity) != ("deletion", "non_fast_forward")
+            or self._exact_actors(integrity)
+            or review.enforcement != "active"
+            or review.target != "branch"
+            or review.include != (_REHEARSAL_PRINCIPAL_PATTERN,)
+            or review.exclude
+            or review.conditions_extra
+            or self._rule_types(review) != ("pull_request",)
+            or self._exact_actors(review) != expected_actors
+            or not self._exact_rehearsal_actors(review, expected_actors)
+            or canonical_json(review.rules[0].get("parameters", {}))
+            != canonical_json(_REHEARSAL_PR_REVIEW_PARAMETERS)
+        ):
+            raise GitHubProtectionError("OWNER_EPOCH_RULESET_DEFINITION_INVALID")
+        principal_ref = "refs/heads/rehearsal/principal/cyax125-20261101-route"
+        principal_rules = self.observe_rules_for_ref(principal_ref, _snapshot=snapshot)
+        if principal_rules.ruleset_ids != (26314086, 26314227, 26316866):
+            raise GitHubProtectionError("OWNER_EPOCH_EFFECTIVE_RULES_INVALID")
+        current_rules = self.observe_rules_for_ref(
+            ref, _snapshot=snapshot, _allow_rehearsal_tag=True
+        )
+        expected_ids = self._rehearsal_case_effective_ids(case_id)
+        if current_rules.ruleset_ids != expected_ids:
+            raise GitHubProtectionError("CASE_EFFECTIVE_RULES_INVALID")
+        ref_state = self._read_rehearsal_target_ref(ref)
+        if ref_state is not None and ref_state[0] != "commit":
+            raise GitHubProtectionError("CASE_REF_OBJECT_TYPE_INVALID")
+        generation = self._rehearsal_case_generation
+        if self._rehearsal_case_inflight or self._unreconciled_case_writes:
+            raise GitHubProtectionError("REHEARSAL_EPOCH_INVALIDATED")
+        return RehearsalFreezeProof(
+            attestation["epoch_id"], plan["intent_id"], request.request_id,
+            request.plan_sha256, ref, 26316866,
+            attestation["full_definition_sha256"], principal_rules.ruleset_ids,
+            receipt, snapshot.snapshot_sha256, generation,
+            ref_state[1] if ref_state else None, self._timestamp(), self._nonce,
+        )
+
+    @staticmethod
+    def _rehearsal_case_effective_ids(case_id: str) -> tuple[int, ...]:
+        expected = {
+            "P2-app-create": (26314085,),
+            "P2-app-update": (26314085,),
+            "4a": (26314086, 26314227, 26316866),
+            "4b-nff": (26314086, 26314227, 26316866),
+            "4b-delete": (26314086, 26314227, 26316866),
+            "4c": (26314086, 26314227, 26316866),
+            "4d-branch-create": (26316868, 26316869),
+            "4d-branch-update": (26316868, 26316869),
+            "4d-branch-delete": (26316868, 26316869),
+            "4d-tag-create": (26316870, 26316871),
+            "4d-tag-update": (26316870, 26316871),
+            "4d-tag-delete": (26316870, 26316871),
+            "4e": (26316872,),
+            "4f-create": (26316874,),
+            "4f-move": (26316874,),
+            "P5-event-observe": (26314086, 26314227, 26316866),
+            "P5-duplicate-fence": (26316868, 26316869),
+            "4g": (26314086, 26314227, 26316866),
+        }
+        try:
+            return expected[case_id]
+        except KeyError:
+            raise GitHubProtectionError("REHEARSAL_CASE_INVALID") from None
+
+    def _approval_evidence_payload(self, request: Any, approval: Any) -> dict[str, Any]:
+        from .rehearsal import (
+            MAX_PROVIDER_BODY,
+            VerifiedRunApproval,
+            _APPROVAL_VERIFICATION_TOKEN,
+            _json_response,
+            _response_manifest,
+            validate_approval_receipt,
+        )
+
+        if (
+            not isinstance(approval, VerifiedRunApproval)
+            or approval._verification_token is not _APPROVAL_VERIFICATION_TOKEN
+            or approval.request_id != request.request_id
+            or approval.plan_sha256 != request.plan_sha256
+            or approval.head_sha != request.commit_sha
+            or sha256_hex(approval.receipt_bytes) != approval.receipt_sha256
+            or len(approval.raw_responses) != 8
+        ):
+            raise GitHubProtectionError("APPROVAL_RAW_EVIDENCE_INVALID")
+        receipt = validate_approval_receipt(
+            approval.receipt_bytes, request,
+            run_id=approval.run_id,
+            run_attempt=approval.run_attempt,
+            head_sha=approval.head_sha,
+        )
+        if (
+            approval.job_id != receipt.job_id
+            or approval.marker_sha256 != receipt.marker_sha256
+            or dict(approval.receipt) != dict(receipt.receipt)
+        ):
+            raise GitHubProtectionError("APPROVAL_RAW_EVIDENCE_INVALID")
+        run_prefix = f"/repos/{self.repository}/actions/runs/{approval.run_id}"
+        expected_paths = (
+            f"/repos/{self.repository}",
+            f"{run_prefix}/attempts/1",
+            f"{run_prefix}/approvals",
+            f"{run_prefix}/attempts/1/jobs?per_page=100",
+        ) * 2
+        raw_rows: list[tuple[str, ApiResponse]] = []
+        persisted_rows: list[dict[str, Any]] = []
+        total_body_bytes = 0
+        for expected_path, item in zip(expected_paths, approval.raw_responses):
+            if not isinstance(item, Mapping):
+                raise GitHubProtectionError("APPROVAL_RAW_EVIDENCE_INVALID")
+            path = item.get("path")
+            status = item.get("status")
+            body = item.get("body")
+            if (
+                path != expected_path
+                or type(status) is not int
+                or status != 200
+                or not isinstance(body, bytes)
+                or len(body) > MAX_PROVIDER_BODY
+                or item.get("body_sha256") != sha256_hex(body)
+            ):
+                raise GitHubProtectionError("APPROVAL_RAW_EVIDENCE_INVALID")
+            raw_headers = item.get("headers")
+            if not isinstance(raw_headers, Mapping) or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in raw_headers.items()
+            ):
+                raise GitHubProtectionError("APPROVAL_RAW_EVIDENCE_INVALID")
+            normalized_keys = [key.lower() for key in raw_headers]
+            if len(normalized_keys) != len(set(normalized_keys)):
+                raise GitHubProtectionError("APPROVAL_RAW_EVIDENCE_INVALID")
+            headers = {key.lower(): value for key, value in raw_headers.items()}
+            if any(key in headers for key in ("authorization", "proxy-authorization", "set-cookie")):
+                raise GitHubProtectionError("APPROVAL_RAW_EVIDENCE_CONTAINS_CREDENTIAL")
+            response = ApiResponse(status, body, headers)
+            try:
+                _json_response(response)
+            except Exception:
+                raise GitHubProtectionError("APPROVAL_RAW_EVIDENCE_INVALID") from None
+            raw_rows.append((path, response))
+            total_body_bytes += len(body)
+            persisted_rows.append({
+                "path": path,
+                "status": status,
+                "headers": headers,
+                "body_b64": base64.b64encode(body).decode("ascii"),
+                "body_sha256": sha256_hex(body),
+            })
+        if total_body_bytes > 8 * MAX_PROVIDER_BODY:
+            raise GitHubProtectionError("APPROVAL_RAW_EVIDENCE_OVERSIZE")
+        _first_manifest, first_sha = _response_manifest(raw_rows[:4])
+        _second_manifest, second_sha = _response_manifest(raw_rows[4:])
+        if (
+            first_sha != receipt.receipt["first_response_manifest_sha256"]
+            or second_sha != receipt.receipt["second_response_manifest_sha256"]
+        ):
+            raise GitHubProtectionError("APPROVAL_RAW_EVIDENCE_DIGEST_MISMATCH")
+        return {
+            "schema_version": 1,
+            "receipt_b64": base64.b64encode(approval.receipt_bytes).decode("ascii"),
+            "receipt_sha256": approval.receipt_sha256,
+            "responses": persisted_rows,
+        }
+
+    def _case_context(self, request: Any, case_id: str, proof: Any) -> tuple[str, str]:
+        from .rehearsal import CASE_ORDER, OPERATION_TABLE
+
+        if case_id not in CASE_ORDER or not isinstance(proof, RehearsalFreezeProof):
+            raise GitHubProtectionError("REHEARSAL_CASE_INVALID")
+        row = OPERATION_TABLE[CASE_ORDER.index(case_id)]
+        ref = row["ref"]
+        if ref.startswith("DETERMINISTIC "):
+            ref = f"refs/heads/rehearsal/lifecycle/requests/{request.request_id}"
+        if (
+            proof._adapter_nonce is not self._nonce
+            or proof.request_id != request.request_id
+            or proof.plan_sha256 != request.plan_sha256
+            or proof.ref != ref
+            or proof.epoch_id != request.owner_attestation.get("epoch_id")
+            or proof.snapshot_sha256 != request.owner_attestation.get("full_definition_sha256")
+            or self._rehearsal_lock_owners.get(ref) != threading.get_ident()
+        ):
+            raise GitHubProtectionError("REHEARSAL_FREEZE_PROOF_INVALID")
+        if self._rehearsal_case_inflight or self._unreconciled_case_writes:
+            raise GitHubProtectionError("REHEARSAL_EPOCH_INVALIDATED")
+        return ref, row["target"]
+
+    @staticmethod
+    def _case_target_rule(case_id: str) -> int | None:
+        return {
+            "P2-app-create": 26314085,
+            "P2-app-update": 26314085,
+            "4b-nff": 26314086,
+            "4b-delete": 26314086,
+            "4d-branch-update": 26316869,
+            "4d-branch-delete": 26316869,
+            "4d-tag-update": 26316871,
+            "4d-tag-delete": 26316871,
+            "4e": 26316872,
+            "4f-create": 26316874,
+            "4f-move": 26316874,
+        }.get(case_id)
+
+    @staticmethod
+    def _provider_rule_ids(response: ApiResponse) -> tuple[int, ...]:
+        def reject_number(_value: str) -> Any:
+            raise ValueError("floating provider value")
+
+        try:
+            payload = json.loads(
+                response.body.decode("utf-8"),
+                object_pairs_hook=_request_object_pairs,
+                parse_float=reject_number,
+                parse_constant=reject_number,
+            )
+        except (UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+            return ()
+        if not isinstance(payload, dict):
+            return ()
+        candidates = payload.get("errors")
+        if candidates is None:
+            candidates = payload.get("violations")
+        if not isinstance(candidates, list) or not candidates:
+            return ()
+        rule_ids: list[int] = []
+        for item in candidates:
+            if not isinstance(item, dict):
+                return ()
+            rule_id = item.get("rule_id", item.get("ruleId"))
+            if type(rule_id) is not int or rule_id <= 0:
+                return ()
+            rule_ids.append(rule_id)
+        return tuple(sorted(set(rule_ids)))
+
+    def _case_observation(
+        self,
+        case_id: str,
+        request: Any,
+        proof: Any,
+        *,
+        method: str,
+        path: str,
+        payload: Mapping[str, Any] | None,
+        expected_sha: str | None,
+        expected_rule: int | None,
+        positive: bool,
+    ) -> Any:
+        from .rehearsal import CaseObservation
+
+        ref, target = self._case_context(request, case_id, proof)
+        before = self._read_rehearsal_target_ref(ref)
+        before_sha = before[1] if before is not None else None
+        if before_sha != proof.ref_sha:
+            raise GitHubProtectionError("CASE_REF_CHANGED_BEFORE_OPERATION")
+        write_id = uuid.uuid4().hex
+        self._rehearsal_case_inflight[write_id] = {
+            "case_id": case_id,
+            "ref": ref,
+            "started_at": self._timestamp(),
+            "expected_sha": expected_sha,
+        }
+        try:
+            response = self._api_request(
+                method, path, payload, return_errors=True, follow_redirects=False
+            )
+        except Exception as error:
+            evidence = {
+                "reason": getattr(error, "reason_code", "CASE_PROVIDER_OUTCOME_UNKNOWN"),
+                "write_id": write_id,
+                "ref": ref,
+                "expected_old_sha": before_sha,
+                "intended_sha": expected_sha,
+                "provider_status": getattr(error, "provider_status", None),
+            }
+            self._unreconciled_case_writes[write_id] = evidence
+            return CaseObservation(
+                "BLOCKED_UNKNOWN", evidence,
+                provider_status=getattr(error, "provider_status", None),
+                failure_reason=evidence["reason"],
+            )
+        try:
+            after = self._read_rehearsal_target_ref(ref)
+            after_sha = after[1] if after is not None else None
+        except Exception:
+            after_sha = None
+            after = None
+        evidence = {
+            "write_id": write_id,
+            "ref": ref,
+            "expected_old_sha": before_sha,
+            "intended_sha": expected_sha,
+            "observed_object_type": after[0] if after else None,
+            "observed_sha": after_sha,
+            "provider_status": response.status,
+            "provider_request_id": response.headers.get("x-github-request-id"),
+            "provider_body_sha256": sha256_hex(response.body),
+            "target_rule_id": expected_rule,
+        }
+        if 200 <= response.status < 300:
+            self._rehearsal_case_inflight.pop(write_id, None)
+            if after_sha != expected_sha or (expected_sha is not None and (after is None or after[0] != "commit")):
+                self._unreconciled_case_writes[write_id] = evidence
+                return CaseObservation(
+                    "BLOCKED_UNKNOWN", evidence,
+                    provider_status=response.status,
+                    failure_reason="CASE_READBACK_MISMATCH",
+                )
+            if not positive:
+                return CaseObservation(
+                    "BLOCKED_UNEXPECTED_ACCEPTANCE", evidence,
+                    provider_status=response.status,
+                    failure_reason="TARGET_RULE_DID_NOT_BLOCK",
+                )
+            return CaseObservation("PASS_ACCEPTED", evidence, provider_status=response.status)
+        self._rehearsal_case_inflight.pop(write_id, None)
+        terminal_target_denial = (
+            response.status in {403, 422}
+            and expected_rule is not None
+            and self._provider_rule_ids(response) == (expected_rule,)
+            and after == before
+        )
+        if terminal_target_denial:
+            evidence["attributed_rule_ids"] = [expected_rule]
+            return CaseObservation(
+                "PASS_DENIED_TARGET_CONTROL", evidence,
+                provider_status=response.status,
+            )
+        if response.status in {408, 425, 429} or response.status >= 500 or response.status < 200:
+            self._unreconciled_case_writes[write_id] = evidence
+            status = "BLOCKED_UNKNOWN"
+            reason = "CASE_PROVIDER_OUTCOME_UNKNOWN"
+        else:
+            status = "BLOCKED_NOT_VERIFIABLE"
+            reason = "CASE_TARGET_RULE_ATTRIBUTION_MISSING"
+        return CaseObservation(
+            status, evidence, provider_status=response.status, failure_reason=reason
+        )
+
+    def _execute_fixed_case(self, case_id: str, request: Any, approval: Any, proof: Any) -> Any:
+        from .rehearsal import (
+            CASE_ORDER, OPERATION_TABLE, VerifiedRunApproval,
+            _APPROVAL_VERIFICATION_TOKEN,
+        )
+
+        if (
+            case_id not in CASE_ORDER
+            or not isinstance(approval, VerifiedRunApproval)
+            or approval._verification_token is not _APPROVAL_VERIFICATION_TOKEN
+            or approval.request_id != request.request_id
+            or approval.plan_sha256 != request.plan_sha256
+        ):
+            raise GitHubProtectionError("REHEARSAL_CASE_APPROVAL_INVALID")
+        self.assert_rehearsal_app_scope()
+        ref, target = self._case_context(request, case_id, proof)
+        row = OPERATION_TABLE[CASE_ORDER.index(case_id)]
+        old = row["expected_old"]
+        target_rule = self._case_target_rule(case_id)
+        if case_id == "4c":
+            from .rehearsal import CaseObservation
+            if self._repository_path is None:
+                return CaseObservation(
+                    "BLOCKED_NOT_VERIFIABLE", {"reason": "LOCAL_GIT_SOURCE_UNAVAILABLE"},
+                    failure_reason="LOCAL_GIT_SOURCE_UNAVAILABLE",
+                )
+            decision = classify_principal_branch_move(
+                self._repository_path, ref=ref,
+                expected_old_sha=old, intended_new_sha=target,
+            )
+            current = self._read_rehearsal_target_ref(ref)
+            observed_sha = current[1] if current else None
+            if decision.status != "OWNER_ROUTE_REQUIRED" or observed_sha != proof.ref_sha:
+                return CaseObservation(
+                    "BLOCKED_NOT_VERIFIABLE",
+                    {"reason": decision.reason_code, "observed_sha": observed_sha,
+                     "commits_examined": list(decision.commits_examined),
+                     "workflow_paths": list(decision.workflow_paths)},
+                    failure_reason="OWNER_ROUTE_CLASSIFICATION_UNPROVEN",
+                )
+            return CaseObservation(
+                "PASS_OWNER_ROUTE_NO_PUSH",
+                {"reason": decision.reason_code, "observed_sha": observed_sha,
+                 "commits_examined": list(decision.commits_examined),
+                 "workflow_paths": list(decision.workflow_paths),
+                 "api_mutation_count": 0, "git_push_count": 0},
+            )
+        if case_id == "P5-event-observe":
+            from .rehearsal import CaseObservation
+            return CaseObservation(
+                "BLOCKED_NOT_VERIFIABLE",
+                {"reason": "PRIOR_4A_APP_EVENT_EVIDENCE_UNAVAILABLE"},
+                failure_reason="PRIOR_4A_APP_EVENT_EVIDENCE_UNAVAILABLE",
+                p5_subresult={
+                    "matching_app_trigger_guard_exercised": False,
+                    "observed_off_ref_event": None,
+                    "second_driver_dispatch_count": None,
+                    "api_mutation_count": None,
+                    "git_push_count": None,
+                    "existing_fence_sha": None,
+                    "fence_state": "UNKNOWN",
+                    "request_plan_match": None,
+                    "failure_reason": "PRIOR_4A_APP_EVENT_EVIDENCE_UNAVAILABLE",
+                },
+            )
+        if case_id == "P5-duplicate-fence":
+            from .rehearsal import CaseObservation
+            fence_ref = f"refs/heads/rehearsal/lifecycle/requests/{request.request_id}"
+            fence = self._read_rehearsal_target_ref(fence_ref)
+            exact_bytes = self._read_fenced_route_request(request)
+            known_fence_sha = self._initial_request_fences.get(request.request_id)
+            matches = (
+                fence is not None
+                and fence[1] == known_fence_sha
+                and exact_bytes == request.request_bytes
+            )
+            if matches:
+                return CaseObservation(
+                    "PASS_DENIED_TARGET_CONTROL",
+                    {"reason": "REQUEST_ID_ALREADY_USED", "fence_sha": fence[1]},
+                    p5_subresult={
+                        "matching_app_trigger_guard_exercised": False,
+                        "observed_off_ref_event": None,
+                        "second_driver_dispatch_count": 0,
+                        "api_mutation_count": 0,
+                        "git_push_count": 0,
+                        "existing_fence_sha": fence[1],
+                        "fence_state": "VERIFIED_MATCH",
+                        "request_plan_match": True,
+                        "failure_reason": None,
+                    },
+                )
+            state = "MISMATCH" if fence is not None or exact_bytes is not None else "ABSENT"
+            return CaseObservation(
+                "BLOCKED_NOT_VERIFIABLE",
+                {"reason": "REQUEST_FENCE_NOT_EXACT", "fence_sha": fence[1] if fence else None},
+                failure_reason="REQUEST_FENCE_NOT_EXACT",
+                p5_subresult={
+                    "matching_app_trigger_guard_exercised": False,
+                    "observed_off_ref_event": None,
+                    "second_driver_dispatch_count": None,
+                    "api_mutation_count": None,
+                    "git_push_count": None,
+                    "existing_fence_sha": fence[1] if fence else None,
+                    "fence_state": state,
+                    "request_plan_match": False if exact_bytes is not None else None,
+                    "failure_reason": "REQUEST_FENCE_NOT_EXACT",
+                },
+            )
+        if case_id == "4g":
+            from .rehearsal import CaseObservation
+            return CaseObservation(
+                "STOP_OWNER_ACTION_REQUIRED",
+                {"reason": "OWNER_MUST_COMPLETE_THE_APPROVED_TERMINAL_ACTION"},
+                failure_reason="OWNER_MUST_COMPLETE_THE_APPROVED_TERMINAL_ACTION",
+            )
+        current = self._read_rehearsal_target_ref(ref)
+        if (current[1] if current else None) != proof.ref_sha:
+            raise GitHubProtectionError("CASE_REF_CHANGED_BEFORE_OPERATION")
+        if target is not None:
+            commit = self._read_rehearsal_commit(target)
+            if case_id in {"P2-app-update", "4a", "4d-branch-update", "4d-tag-update", "4f-move"}:
+                if not isinstance(commit.get("parents"), list) or old not in commit["parents"]:
+                    raise GitHubProtectionError("CASE_FAST_FORWARD_LINEAGE_INVALID")
+        if case_id in {"P2-app-create", "4d-branch-create", "4d-tag-create", "4e", "4f-create"}:
+            if current is not None:
+                raise GitHubProtectionError("CASE_CREATE_REF_NOT_ABSENT")
+            payload = {"ref": ref, "sha": target}
+            return self._case_observation(
+                case_id, request, proof, method="POST", path=self._repo_path("/git/refs"),
+                payload=payload, expected_sha=target, expected_rule=target_rule,
+                positive=row["expected_result"] == "ACCEPT_OR_WORKFLOW_CAPABILITY_STOP",
+            )
+        if case_id in {"P2-app-update", "4a", "4b-nff", "4d-branch-update", "4d-tag-update", "4f-move"}:
+            if current is None or current[1] != old:
+                raise GitHubProtectionError("CASE_EXPECTED_OLD_SHA_MISMATCH")
+            if case_id == "4b-nff":
+                # This is the only fixed operation allowed to submit force=true.
+                body = {"sha": target, "force": True}
+            else:
+                body = {"sha": target, "force": False}
+            return self._case_observation(
+                case_id, request, proof, method="PATCH",
+                path=self._repo_path(f"/git/refs/{quote(ref.removeprefix('refs/'), safe='/')}"),
+                payload=body, expected_sha=target, expected_rule=target_rule,
+                positive=case_id == "4a",
+            )
+        if case_id in {"4b-delete", "4d-branch-delete", "4d-tag-delete"}:
+            if current is None or current[1] != old:
+                raise GitHubProtectionError("CASE_EXPECTED_OLD_SHA_MISMATCH")
+            return self._case_observation(
+                case_id, request, proof, method="DELETE",
+                path=self._repo_path(f"/git/refs/{quote(ref.removeprefix('refs/'), safe='/')}"),
+                payload=None, expected_sha=None, expected_rule=target_rule,
+                positive=False,
+            )
+        raise GitHubProtectionError("REHEARSAL_CASE_NOT_IMPLEMENTED")
+
+    def execute_case(self, case_id: str, request: Any, approval: Any, proof: Any) -> Any:
+        from .rehearsal import CASE_ORDER, _CASE_METHODS
+
+        if case_id not in CASE_ORDER:
+            raise GitHubProtectionError("REHEARSAL_CASE_INVALID")
+        return getattr(self, _CASE_METHODS[case_id])(request, approval, proof)
+
+    def probe_trigger_create_server(self, request: Any, approval: Any, proof: Any) -> Any:
+        return self._execute_fixed_case("P2-app-create", request, approval, proof)
+
+    def probe_trigger_update_server(self, request: Any, approval: Any, proof: Any) -> Any:
+        return self._execute_fixed_case("P2-app-update", request, approval, proof)
+
+    def cas_principal_ff(self, request: Any, approval: Any, proof: Any) -> Any:
+        return self._execute_fixed_case("4a", request, approval, proof)
+
+    def probe_principal_nff_server(self, request: Any, approval: Any, proof: Any) -> Any:
+        return self._execute_fixed_case("4b-nff", request, approval, proof)
+
+    def probe_principal_delete_server(self, request: Any, approval: Any, proof: Any) -> Any:
+        return self._execute_fixed_case("4b-delete", request, approval, proof)
+
+    def classify_owner_route_no_push(self, request: Any, approval: Any, proof: Any) -> Any:
+        return self._execute_fixed_case("4c", request, approval, proof)
+
+    def create_once_fixture(self, request: Any, approval: Any, proof: Any) -> Any:
+        from .rehearsal import CASE_ORDER, OPERATION_TABLE
+        row = next(
+            OPERATION_TABLE[index] for index, case in enumerate(CASE_ORDER)
+            if case in {"4d-branch-create", "4d-tag-create"}
+            and OPERATION_TABLE[index]["ref"] == proof.ref
+        )
+        return self._execute_fixed_case(row["case"], request, approval, proof)
+
+    def probe_immutable_update(self, request: Any, approval: Any, proof: Any) -> Any:
+        from .rehearsal import CASE_ORDER, OPERATION_TABLE
+        row = next(
+            OPERATION_TABLE[index] for index, case in enumerate(CASE_ORDER)
+            if case in {"4d-branch-update", "4d-tag-update"}
+            and OPERATION_TABLE[index]["ref"] == proof.ref
+        )
+        return self._execute_fixed_case(row["case"], request, approval, proof)
+
+    def probe_immutable_delete(self, request: Any, approval: Any, proof: Any) -> Any:
+        from .rehearsal import CASE_ORDER, OPERATION_TABLE
+        row = next(
+            OPERATION_TABLE[index] for index, case in enumerate(CASE_ORDER)
+            if case in {"4d-branch-delete", "4d-tag-delete"}
+            and OPERATION_TABLE[index]["ref"] == proof.ref
+        )
+        return self._execute_fixed_case(row["case"], request, approval, proof)
+
+    def probe_canonical_tag_create(self, request: Any, approval: Any, proof: Any) -> Any:
+        return self._execute_fixed_case("4e", request, approval, proof)
+
+    def probe_restricted_create(self, request: Any, approval: Any, proof: Any) -> Any:
+        return self._execute_fixed_case("4f-create", request, approval, proof)
+
+    def probe_restricted_move(self, request: Any, approval: Any, proof: Any) -> Any:
+        return self._execute_fixed_case("4f-move", request, approval, proof)
+
+    def read_existing_4a_app_event(self, request: Any, approval: Any, proof: Any) -> Any:
+        return self._execute_fixed_case("P5-event-observe", request, approval, proof)
+
+    def reject_existing_same_request_fence(self, request: Any, approval: Any, proof: Any) -> Any:
+        return self._execute_fixed_case("P5-duplicate-fence", request, approval, proof)
+
+    def return_owner_action(self, request: Any, approval: Any, proof: Any) -> Any:
+        return self._execute_fixed_case("4g", request, approval, proof)
+
+    def _create_rehearsal_record_ref(
+        self, *, ref: str, path: str, request: Any, record: Mapping[str, Any]
+    ) -> str:
+        write_id = f"journal:{uuid.uuid4().hex}"
+        self._rehearsal_case_inflight[write_id] = {
+            "target_ref": ref,
+            "started_at": self._timestamp(),
+            "kind": "append-only-case-record",
+        }
+        try:
+            commit_sha = self._create_rehearsal_record_ref_once(
+                ref=ref, path=path, request=request, record=record,
+            )
+        except Exception as error:
+            self._rehearsal_case_inflight.pop(write_id, None)
+            self._unreconciled_case_writes[write_id] = {
+                "target_ref": ref,
+                "write_outcome": "unknown",
+                "reason": getattr(error, "reason_code", "REHEARSAL_RECORD_WRITE_UNKNOWN"),
+            }
+            raise
+        self._rehearsal_case_inflight.pop(write_id, None)
+        return commit_sha
+
+    def _create_rehearsal_record_ref_once(
+        self, *, ref: str, path: str, request: Any, record: Mapping[str, Any]
+    ) -> str:
+        if not self._is_rehearsal_runtime_ref(ref):
+            raise GitHubProtectionError("REHEARSAL_RECORD_REF_NOT_ALLOWLISTED")
+        if self._read_rehearsal_target_ref(ref) is not None:
+            raise GitHubProtectionError("REHEARSAL_RECORD_ALREADY_EXISTS")
+        self._vmm_head_and_tree(request.expected_vmm_sha)
+        try:
+            raw = json.dumps(
+                record, ensure_ascii=True, allow_nan=False, sort_keys=True,
+                separators=(",", ":"),
+            ).encode("ascii")
+        except (TypeError, ValueError, UnicodeError):
+            raise GitHubProtectionError("REHEARSAL_RECORD_INVALID") from None
+        body = base64.b64encode(raw).decode("ascii")
+        blob = self._api_request(
+            "POST", self._repo_path("/git/blobs"),
+            {"content": body, "encoding": "base64"},
+            return_errors=True, follow_redirects=False,
+        )
+        if blob.status not in {200, 201}:
+            raise GitHubProtectionError(
+                "REHEARSAL_RECORD_OBJECT_CREATION_FAILED",
+                provider_status=blob.status,
+                provider_request_id=blob.headers.get("x-github-request-id"),
+                evidence={"write_outcome": "unknown"},
+            )
+        try:
+            blob_sha = self._json(blob)["sha"]
+        except (KeyError, TypeError):
+            raise GitHubProtectionError("REHEARSAL_RECORD_OBJECT_INVALID") from None
+        if not isinstance(blob_sha, str) or _FULL_REF_SHA.fullmatch(blob_sha) is None:
+            raise GitHubProtectionError("REHEARSAL_RECORD_OBJECT_INVALID")
+        _head, base_tree = self._vmm_head_and_tree(request.expected_vmm_sha)
+        tree = self._api_request(
+            "POST", self._repo_path("/git/trees"),
+            {"base_tree": base_tree, "tree": [{
+                "path": path, "mode": "100644", "type": "blob", "sha": blob_sha,
+            }]},
+            return_errors=True, follow_redirects=False,
+        )
+        if tree.status not in {200, 201}:
+            raise GitHubProtectionError(
+                "REHEARSAL_RECORD_OBJECT_CREATION_FAILED",
+                provider_status=tree.status,
+                provider_request_id=tree.headers.get("x-github-request-id"),
+                evidence={"write_outcome": "unknown"},
+            )
+        try:
+            tree_sha = self._json(tree)["sha"]
+        except (KeyError, TypeError):
+            raise GitHubProtectionError("REHEARSAL_RECORD_OBJECT_INVALID") from None
+        if not isinstance(tree_sha, str) or _FULL_REF_SHA.fullmatch(tree_sha) is None:
+            raise GitHubProtectionError("REHEARSAL_RECORD_OBJECT_INVALID")
+        commit = self._api_request(
+            "POST", self._repo_path("/git/commits"),
+            {"message": f"CYAx rehearsal record {request.request_id}",
+             "tree": tree_sha, "parents": [request.expected_vmm_sha]},
+            return_errors=True, follow_redirects=False,
+        )
+        if commit.status not in {200, 201}:
+            raise GitHubProtectionError(
+                "REHEARSAL_RECORD_OBJECT_CREATION_FAILED",
+                provider_status=commit.status,
+                provider_request_id=commit.headers.get("x-github-request-id"),
+                evidence={"write_outcome": "unknown"},
+            )
+        try:
+            commit_sha = self._json(commit)["sha"]
+        except (KeyError, TypeError):
+            raise GitHubProtectionError("REHEARSAL_RECORD_OBJECT_INVALID") from None
+        if not isinstance(commit_sha, str) or _FULL_REF_SHA.fullmatch(commit_sha) is None:
+            raise GitHubProtectionError("REHEARSAL_RECORD_OBJECT_INVALID")
+        ref_result = self._api_request(
+            "POST", self._repo_path("/git/refs"),
+            {"ref": ref, "sha": commit_sha},
+            return_errors=True, follow_redirects=False,
+        )
+        if ref_result.status not in {200, 201}:
+            evidence = {
+                "target_ref": ref, "intended_commit_sha": commit_sha,
+                "provider_status": ref_result.status,
+                "provider_request_id": ref_result.headers.get("x-github-request-id"),
+                "write_outcome": "unknown",
+            }
+            self._unreconciled_case_writes[f"journal:{ref}"] = evidence
+            raise GitHubProtectionError(
+                "REHEARSAL_RECORD_REF_WRITE_UNKNOWN",
+                provider_status=ref_result.status,
+                provider_request_id=ref_result.headers.get("x-github-request-id"),
+                evidence=evidence,
+            )
+        observed = self._read_rehearsal_target_ref(ref)
+        if observed is None or observed[0] != "commit" or observed[1] != commit_sha:
+            evidence = {
+                "target_ref": ref, "intended_commit_sha": commit_sha,
+                "observed_sha": observed[1] if observed else None,
+                "write_outcome": "unknown",
+            }
+            self._unreconciled_case_writes[f"journal:{ref}"] = evidence
+            raise GitHubProtectionError("REHEARSAL_RECORD_REF_WRITE_UNKNOWN", evidence=evidence)
+        observed_commit = self._read_rehearsal_commit(commit_sha)
+        if (
+            observed_commit["tree"]["sha"] != tree_sha
+            or observed_commit["parents"] != [request.expected_vmm_sha]
+        ):
+            raise GitHubProtectionError("REHEARSAL_RECORD_COMMIT_READBACK_INVALID")
+        content = self._api_request(
+            "GET", self._repo_path(f"/contents/{quote(path, safe='/')}?{urlencode({'ref': ref.removeprefix('refs/heads/')})}"),
+        )
+        payload = self._json(content)
+        try:
+            observed_path = payload["path"]
+            observed_content = base64.b64decode(payload["content"], validate=True)
+        except (KeyError, TypeError, ValueError):
+            raise GitHubProtectionError("REHEARSAL_RECORD_READBACK_INVALID") from None
+        if observed_path != path or observed_content != raw:
+            raise GitHubProtectionError("REHEARSAL_RECORD_READBACK_INVALID")
+        return commit_sha
+
+    def claim_case(self, request: Any, case_id: str, proof: Any) -> str:
+        from .rehearsal import CASE_ORDER
+
+        ref, _target = self._case_context(request, case_id, proof)
+        claim_ref = (
+            f"refs/heads/rehearsal/lifecycle/case-claims/"
+            f"{request.request_id}/{request.plan_sha256}/{case_id}"
+        )
+        record_path = (
+            f"case-claims/{request.request_id}/{request.plan_sha256}/{case_id}.json"
+        )
+        if (request.request_id, request.plan_sha256, case_id) in self._claimed_rehearsal_cases:
+            raise GitHubProtectionError("REHEARSAL_CASE_ALREADY_CLAIMED")
+        if case_id not in CASE_ORDER:
+            raise GitHubProtectionError("REHEARSAL_CASE_INVALID")
+        record = {
+            "schema_version": 1,
+            "request_id": request.request_id,
+            "plan_sha256": request.plan_sha256,
+            "case_id": case_id,
+            "freeze_proof": proof.to_dict(),
+        }
+        if case_id == CASE_ORDER[0]:
+            approval_evidence = self._initial_approval_evidence.get(request.request_id)
+            if approval_evidence is None:
+                raise GitHubProtectionError("APPROVAL_EVIDENCE_REQUIRED")
+            record["approval_evidence"] = approval_evidence
+        commit_sha = self._create_rehearsal_record_ref(
+            ref=claim_ref, path=record_path, request=request, record=record,
+        )
+        self._claimed_rehearsal_cases[(request.request_id, request.plan_sha256, case_id)] = commit_sha
+        return commit_sha
+
+    def append_case_result(self, result: Mapping[str, Any]) -> str:
+        from .rehearsal import CASE_ORDER, OPERATION_TABLE, validate_driver_result
+
+        validate_driver_result(dict(result))
+        request_id = result["request_id"]
+        plan_sha256 = result["plan_sha256"]
+        case_id = result["case_id"]
+        if (request_id, plan_sha256, case_id) not in self._claimed_rehearsal_cases:
+            raise GitHubProtectionError("REHEARSAL_CASE_CLAIM_REQUIRED")
+        operation_ref = OPERATION_TABLE[CASE_ORDER.index(case_id)]["ref"]
+        if operation_ref.startswith("DETERMINISTIC "):
+            operation_ref = f"refs/heads/rehearsal/lifecycle/requests/{request_id}"
+        if self._rehearsal_lock_owners.get(operation_ref) != threading.get_ident():
+            raise GitHubProtectionError("REHEARSAL_CASE_LOCK_REQUIRED")
+        request_stub = type("RehearsalRecordRequest", (), {
+            "request_id": request_id,
+            "plan_sha256": plan_sha256,
+            "expected_vmm_sha": "f12fbb8ec52e4c7510564f602a15f26173fe772e",
+        })()
+        ref = (
+            f"refs/heads/rehearsal/lifecycle/case-results/"
+            f"{request_id}/{plan_sha256}/{case_id}"
+        )
+        record_path = f"case-results/{request_id}/{plan_sha256}/{case_id}.json"
+        return self._create_rehearsal_record_ref(
+            ref=ref, path=record_path, request=request_stub,
+            record=dict(result),
+        )
+
+    def create_rehearsal_route_request_fence(
+        self,
+        request: Any,
+        *,
+        approval: Any,
+        intent: Any,
+    ) -> dict[str, Any]:
+        """Create the schema-2 fence only after its run approval is verified."""
+
+        result = self.create_rehearsal_request_fence(
+            request, intent=intent, _route_approval=approval
+        )
+        observed = result.get("observed_commit_sha")
+        if not isinstance(observed, str) or _FULL_REF_SHA.fullmatch(observed) is None:
+            raise GitHubProtectionError("REQUEST_FENCE_READBACK_INVALID")
+        self._initial_request_fences[request.request_id] = observed
+        return result
 
     def _rehearsal_branch_head(self, ref: str) -> str:
         branch = ref.removeprefix("refs/heads/")
@@ -1663,19 +2880,30 @@ class GitHubProtectionAdapter:
         return current.snapshot_sha256 == evidence.snapshot_sha256
 
     def observe_rules_for_ref(
-        self, ref: str, *, _snapshot: RulesetSnapshot | None = None
+        self, ref: str, *, _snapshot: RulesetSnapshot | None = None,
+        _allow_rehearsal_tag: bool = False,
     ) -> RuleEvaluationObservation:
         """Read the non-mutating GitHub effective-rules evaluation for a ref."""
 
-        if not isinstance(ref, str) or not ref.startswith("refs/heads/"):
+        is_branch = isinstance(ref, str) and ref.startswith("refs/heads/")
+        is_rehearsal_tag = (
+            _allow_rehearsal_tag
+            and isinstance(ref, str)
+            and ref.startswith("refs/tags/")
+            and self._is_rehearsal_runtime_ref(ref)
+        )
+        if not isinstance(ref, str) or not (is_branch or is_rehearsal_tag):
             raise GitHubProtectionError("EVALUATION_REF_INVALID")
-        branch = ref.removeprefix("refs/heads/")
-        if not branch or any(part in {"", ".", ".."} for part in branch.split("/")):
+        target_type, target_name = ref.removeprefix("refs/").split("/", 1)
+        if target_type not in {"heads", "tags"} or not target_name or any(
+            part in {"", ".", ".."} for part in target_name.split("/")
+        ):
             raise GitHubProtectionError("EVALUATION_REF_INVALID")
         snapshot = _snapshot or self.read_snapshot()
-        encoded_branch = "/".join(quote(part, safe="") for part in branch.split("/"))
+        encoded_name = "/".join(quote(part, safe="") for part in target_name.split("/"))
+        route_kind = "branches" if target_type == "heads" else "tags"
         response = self._api_request(
-            "GET", self._repo_path(f"/rules/branches/{encoded_branch}")
+            "GET", self._repo_path(f"/rules/{route_kind}/{encoded_name}")
         )
         payload = self._json(response)
         if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):

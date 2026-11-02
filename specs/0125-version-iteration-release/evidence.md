@@ -840,3 +840,46 @@ is a local descendant of the reviewed candidate and changes only the same
 three authorized paths. Independent SPEC, STANDARDS, and SECURITY rechecks
 remain required. No approval for rehearsal, publication, merge, release, or
 lifecycle operation is claimed.
+
+## CYAX125 owner-approval runtime commission (local-only; 2026-11-02)
+
+This local implementation follows the Owner-adopted approval-predicate
+supersession and corrected R2 contract recorded for the 2026-11-01 runtime
+commission. It changes only the six commissioned paths: the fixed rehearsal
+runtime and its tests, the GitHub protection adapter and its tests, the
+dispatch workflow, and this evidence file. The runtime pins the request,
+driver-return, operation-table, approval-marker, and status-vector contracts.
+It validates the public repository, exact run attempt, Owner approval marker,
+environment, job, and current workflow step through eight anonymous direct-TLS
+reads. The retained receipt explicitly reports the approval time as
+`UNKNOWN_NOT_DOCUMENTED`; admin-bypass evidence remains an Owner procedural
+attestation and is not provider-verified. The first immutable case claim
+retains the receipt-bound response paths, headers, statuses, body bytes, and
+digests; later case claims do not repeat that envelope.
+
+The workflow reaches a deliberate pre-mint stop with
+`OWNER_SEED_RECEIPTS_UNAVAILABLE_BEFORE_APP_MINT`. The adopted request carries
+only the seed-receipt digest and provides no parseable Owner receipt artifact
+or schema. No App key was read, no App token was minted, and no lifecycle
+provider operation was attempted. This local source and its synthetic tests
+do not establish live approval, provider protection, a completed rehearsal,
+P5 evidence, Gate A, publication, merge, release, or lifecycle authorization.
+
+Offline qualification on this source snapshot:
+
+| Command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed, 203 tests, exit 0. |
+| Ruby YAML parse of `.github/workflows/cyax-lifecycle-dispatch.yml` | Passed. |
+| `ruby -c` on the workflow's embedded runtime | `Syntax OK`. |
+| Python AST parse of the four changed Python source/test files | Passed. |
+| `git diff --check` | Passed. |
+
+The tests use synthetic responses and fake transports. They cover the adopted
+status-aware vectors, strict request and receipt binding, raw-response
+tampering, one-time evidence retention, route ordering, fail-closed unknown
+writes, fixed API targets, and schema-1 compatibility. They made no live
+provider requests and performed no credential access, network operation,
+remote write, ref creation, cleanup, publication, or release. The source
+remains unreviewed pending the commissioned independent SPEC, STANDARDS, and
+SECURITY rechecks; this evidence does not self-accept the candidate.

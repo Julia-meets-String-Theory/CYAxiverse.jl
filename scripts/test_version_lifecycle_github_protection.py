@@ -497,11 +497,15 @@ class GitHubProtectionTests(unittest.TestCase):
         self.assertIn("permissions: {}", workflow)
         self.assertIn("environment:\n      name: lifecycle", workflow)
         self.assertEqual(workflow.count("\n  lifecycle:\n"), 1)
-        self.assertEqual(workflow.count("      - name:"), 3)
+        self.assertEqual(workflow.count("      - name:"), 2)
+        self.assertEqual(workflow.count("        name:"), 1)
         self.assertLess(
-            workflow.index("Validate the exact Owner trigger"),
-            workflow.index("Mint a scoped token and create the request fence"),
+            workflow.index("Validate exact route and approval evidence before App mint"),
+            workflow.index("Mint a scoped token and execute the fixed rehearsal route"),
         )
+        self.assertIn("Fetch the exact trigger commit with anonymous read-only access", workflow)
+        self.assertIn("OWNER_SEED_RECEIPTS_UNAVAILABLE_BEFORE_APP_MINT", workflow)
+        self.assertNotIn("GITHUB_TOKEN", workflow)
         self.assertEqual(workflow.count("secrets.LIFECYCLE_APP_PRIVATE_KEY"), 1)
         for forbidden in (
             "workflow_dispatch:",
@@ -516,7 +520,6 @@ class GitHubProtectionTests(unittest.TestCase):
         self.assertNotIn("permission-administration:", workflow)
         self.assertNotIn("uses:", workflow)
         self.assertIn("fetch --no-tags --depth=2 origin", workflow)
-        self.assertIn("unset auth GITHUB_TOKEN", workflow)
         self.assertIn("github.event.installation.id != 172789630", workflow)
         self.assertIn("github.run_attempt == 1", workflow)
 
