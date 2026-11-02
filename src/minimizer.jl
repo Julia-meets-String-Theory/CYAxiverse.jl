@@ -503,22 +503,24 @@ Minimize the axion potential
 charge matrix. Return the located stationary point in field coordinates.
 
 The gradient tolerance is relative to the largest gradient bound
-``s_i = \\sum_a |\\Lambda_a| |Q_{ia}|``, so the result does not change when every
-``\\Lambda_a`` is rescaled. `"converged"` is Optim's convergence flag;
+``s_i = \\sum_a |\\Lambda_a| |Q_{ia}|``, so the run is invariant under a common
+rescaling of every ``\\Lambda_a`` in exact arithmetic (bitwise for power-of-two
+factors, otherwise up to rounding). `"converged"` is Optim's convergence flag;
 `"stationary"` additionally requires ``|\\partial_i V| \\le (\\epsilon / 10^{-2})\\, s_i``
 for each component and a Newton step ``\\|H^{-1} \\nabla V\\|_\\infty \\le \\sqrt{\\epsilon}``
 (the step tolerance of the run), so that a point displaced along a weak direction that
 mixes the fields is not stationary. It is `false` for a constant potential (all
-``s_i = 0``) and where the Hessian is singular.
+``s_i = 0``) and where a computed Hessian eigenvalue is exactly zero.
 
 !!! warning "Behaviour change"
     Before this fix the objective and Hessian passed to Newton's method were
     mis-shaped (the 1×N row `cos.(x' * QV)` broadcast against `LV` as N×N), so
     they were not the derivatives of ``V`` and the iteration could stop at
-    spurious points. This affects every caller, including `subspace_minimize`
-    and the `:legacy` vacua search (`vacua_id`). Vacuum counts produced by
-    `--method legacy` before this change may not match results now; recompute
-    them rather than comparing. The gradient was already correct.
+    spurious points. This affects direct callers of `minimize` and
+    `subspace_minimize`. It does not affect legacy vacuum counts stored by the
+    `:legacy` pipeline search: its only route to the minimizer, the call to
+    `subspace_minimize` in `vacua_id`, raises before minimizing (#217), so
+    those counts never depended on this code. The gradient was already correct.
 """
 function minimize(LV::Vector, QV, x0::Vector)
 	if @isdefined h11
@@ -754,7 +756,9 @@ positive, the same test as `Hsign == 1` for Newton endpoints.
 !!! warning "Behaviour change"
     Earlier versions kept every Newton endpoint and always added the origin.
     Together with the corrected objective and Hessian in [`minimize`](@ref), this
-    changes `:legacy` vacua results.
+    changes the results of direct calls. It does not change legacy vacuum counts
+    stored by the `:legacy` pipeline search, which never reaches this function:
+    the call in `vacua_id` raises before minimizing (#217).
 """
 function subspace_minimize(L, Q; runs=10_000, phase::Matrix=zeros(max(collect(size(Q))...),1),
         initial_points=nothing)
