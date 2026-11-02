@@ -103,7 +103,6 @@ identifier matches the Issue number.
      handling and isolated-minimum count eligibility before #217 reconnects the
      affected pipeline. This is a classification and counting-unit defect, not
      a de-duplication defect (#216) (R-004).
-
 - Draft `92f4c71` (implementation candidate `dbd7b62`): independent review did
   not pass. Its blocking findings were text only:
   1. *Current baseline* said that `Rational` counts from the `|det|` branch
@@ -145,6 +144,11 @@ identifier matches the Issue number.
   not pass. Its blocking finding: R-009 said that the origin was the single
   leading branch of the undercount example; there are 4 leading branches, of
   which only the origin is a leading minimum. The candidate did not change.
+- Draft `043cc3f` (implementation candidate `a6a07da`): independent review
+  passed, with non-blocking text findings. At the owner's request they are
+  corrected before approval: the R-004 recipe now states that `Q` was passed
+  as `Float64.(Q)`, and R-009 no longer states as fact that stored `auto`
+  results exist. This revision needs a fresh review.
 
 The failed reviews are not relabelled as passed. The records of these seven
 reviews are not published on GitHub; this list is their only record in the
@@ -211,11 +215,13 @@ This specification does not cover or authorize:
 
 ### Source facts
 
-- At `f12fbb8`, the objective and Hessian in `minimize(LV::Vector, QV, x0::Vector)`
-  broadcast the 1×N row `cos.(x' * QV)` against `LV` as an N×N matrix. The
-  objective was `(Σ_a Λ_a) · Σ_b (1 - cos θ_b)`. The gradient was correct.
-  Newton's method therefore received an objective and Hessian that were not
-  those of `V`.
+- At `f12fbb8`, the objective and Hessian in
+  `minimize(LV::Vector, QV, x0::Vector)` mis-broadcast the 1×N row
+  `cos.(x' * QV)`. In the objective it broadcast against `LV` as an N×N matrix;
+  in the Hessian helper it broadcast against the N-vector `QV[i,:] .* QV[j,:]`
+  before the product with `LV'`. The objective was
+  `(Σ_a Λ_a) · Σ_b (1 - cos θ_b)`. The gradient was correct. Newton's method
+  therefore received an objective and Hessian that were not those of `V`.
 - At `f12fbb8`, the step tolerance was `x_tol = minimum(abs.(LV))` and the
   gradient tolerance was the absolute `g_tol = eps()/1e-2`.
 - At `f12fbb8`, `subspace_minimize` kept every Newton endpoint and always added
@@ -309,13 +315,13 @@ in the same way. Its own acceptance rule is unchanged.
 
 Basis: `sqrt(eps())` is a chosen Float64 stopping scale. It is motivated by
 local numerical behaviour: once a step is about `sqrt(eps())`, the change in the
-objective is O(eps), and Newton's quadratic convergence leaves an error near
-eps after such a step. It is not a universal smallest resolvable step, and not
-a certified bound on position error. `eps()/1e-2` is the existing constant, now
-made relative so that the run is invariant under a common rescaling of all
-`Λ_a` in exact arithmetic. In Float64 the run is bitwise unchanged for
-power-of-two factors, provided no value overflows or underflows (measured for
-two factors on the fixtures below). For other factors rounding changes the run, and this can
+objective is O(eps), and Newton's quadratic convergence leaves an error near eps
+after such a step. It is not a universal smallest resolvable step, and not a
+certified bound on position error. `eps()/1e-2` is the existing constant, now
+made relative so that the run is invariant under a common rescaling of all `Λ_a`
+in exact arithmetic. In Float64 the run is bitwise unchanged for power-of-two
+factors, provided no value overflows or underflows (measured for two factors on
+the fixtures below). For other factors rounding changes the run, and this can
 change the accept/reject decision of R-003 and R-004.
 
 - **Measured** (at `dbd7b62`): four fixtures (`Q = I` with `L = (1, 1e-6)`;
@@ -401,11 +407,11 @@ eigenvalue strictly positive). Saddles, maxima, endpoints that fail the filter
 and non-converged runs SHALL be discarded. A discarded endpoint is not thereby
 established to be a non-minimum (R-003).
 
-**Limitation: flat families of rank-deficient charges (owner-accepted,
-deferred to #220).** If the charges have rank `r < n` (`n` fields), every
-critical point lies on an exactly flat family of dimension `n - r`, and the
-exact Hessian always has an eigenvalue 0 (the smallest one at a minimum of the
-family; saddles and maxima also have negative eigenvalues). Whether an endpoint is accepted then
+**Limitation: flat families of rank-deficient charges (owner-accepted, deferred
+to #220).** If the charges have rank `r < n` (`n` fields), every critical point
+lies on an exactly flat family of dimension `n - r`, and the exact Hessian
+always has an eigenvalue 0 (the smallest one at a minimum of the family; saddles
+and maxima also have negative eigenvalues). Whether an endpoint is accepted then
 depends on rounding:
 
 - When the computed smallest eigenvalue rounds positive and the Newton step
@@ -419,12 +425,12 @@ depends on rounding:
 
 Measured at `dbd7b62`:
 
-- `Q = [1 1; 2 2]`, `L = (0.7, 0.4)`, so `V = 1.1 (1 - cos(x1 + 2 x2))` with
-  the flat direction `(2, -1)`. 40 starts `2π·rand(MersenneTwister(11), 2)`:
-  39 endpoints accepted (computed `λ_min` about 4e-18), and 40 points returned:
-  the 39 endpoints and the origin, which R-005 adds because its computed
-  smallest eigenvalue, 4.4e-18, is positive (a degenerate origin returned).
-  All lie on the family `x1 + 2 x2 ≡ 0 (mod 2π)` to within 3e-14 in phase (the maximum of
+- `Q = [1 1; 2 2]`, `L = (0.7, 0.4)`, so `V = 1.1 (1 - cos(x1 + 2 x2))` with the
+  flat direction `(2, -1)`. 40 starts `2π·rand(MersenneTwister(11), 2)`: 39
+  endpoints accepted (computed `λ_min` about 4e-18), and 40 points returned: the
+  39 endpoints and the origin, which R-005 adds because its computed smallest
+  eigenvalue, 4.4e-18, is positive (a degenerate origin returned). All lie on
+  the family `x1 + 2 x2 ≡ 0 (mod 2π)` to within 3e-14 in phase (the maximum of
   `|rem2pi(2π (x1 + 2 x2), RoundNearest)|` over the returned fractions `x`). At
   `b309a55`, with condition (2), 38 were accepted and 39 returned.
 - `Q = u vᵀ` with `u = (1, 2, -1)`, `v = (1, -1, 2)`, `L = (0.3, 0.9, 0.5)`,
@@ -438,6 +444,9 @@ Measured at `dbd7b62`:
   draws: `A = rand(rng, -3:3, 3, 2)`, `B = rand(rng, -3:3, 2, 4)`, `Q = A B`
   (a draw with rank other than 2 would be skipped; none occurred), then `L`
   and 20 starts as before. 26 of 30 gave a non-empty result, with 215 points.
+  `Q` was passed to `subspace_minimize` as `Float64.(Q)` and the starts as
+  `initial_points`. With integer `Q` (replayed at `a6a07da`) the totals are 218
+  and 208 points; the non-empty counts, 16 and 26, are the same.
 
 This is a classification and counting-unit defect. #220 must establish exact
 structural-rank handling and isolated-minimum count eligibility before #217
@@ -463,15 +472,15 @@ The test does not decide the sign of the exact eigenvalue:
 - **A degenerate origin can be returned.** If its computed eigenvalue rounds
   positive, the origin is returned. The sample has 2000 rank-1 charge matrices
   `Q = u vᵀ` with 3 fields and 4 instantons: `u = rand(rng, -3:3, 3)`,
-  `v = rand(rng, -3:3, 4)` (so `Q` has entries up to ±9), draws with `u = 0`
-  or `v = 0` are skipped, and `L = rand(rng, Uniform(0.1, 1.1), 4)`, with
-  `rng = MersenneTwister(20261031)`. #220 records 131 of 2000 with a positive computed smallest
-  eigenvalue, at `ab48726`, with the origin returned each time. A replay at
-  `dbd7b62` that makes those calls in that order for each sample (redrawing
-  `u` and `v` if either is 0) found 132 of 2000, with the origin returned in
-  all 132, with `Q * Diagonal(L) * Q'` evaluated as in `subspace_minimize`
-  (integer `Q`). The count depends on the draw order and on how the product
-  is evaluated; the effect does not.
+  `v = rand(rng, -3:3, 4)` (so `Q` has entries up to ±9), draws with `u = 0` or
+  `v = 0` are skipped, and `L = rand(rng, Uniform(0.1, 1.1), 4)`, with
+  `rng = MersenneTwister(20261031)`. #220 records 131 of 2000 with a positive
+  computed smallest eigenvalue, at `ab48726`, with the origin returned each
+  time. A replay at `dbd7b62` that makes those calls in that order for each
+  sample (redrawing `u` and `v` if either is 0) found 132 of 2000, with the
+  origin returned in all 132, with `Q * Diagonal(L) * Q'` evaluated as in
+  `subspace_minimize` (integer `Q`). The count depends on the draw order and on
+  how the product is evaluated; the effect does not.
 - **A genuine minimum can be dropped.** If its computed eigenvalue rounds to 0,
   the origin is dropped. An example is `Q = [1 1; 1 -1]`, `L = (1, 1e-20)`.
   Its Float64 Hessian `[1 1; 1 1]` equals that of the saddle
@@ -589,9 +598,10 @@ The selected method is recorded in `search_method` and `auto_selected_method`.
   to reduced JLM, which finds 2. By hand, the truncated potential has exactly 2
   minima, at `x1 = x2 = ±acos(5/9)` (R-001). Legacy raises `BoundsError` (known
   issue A). How many stored or population geometries are affected has not been
-  measured. Stored `auto` results exist: for example,
-  `scripts/build_orientifold_vacua_inflation.jl` calls `compute_vacua_data` with
-  `method=:auto`, as it already did at `f12fbb8`.
+  measured. `auto` results are written by, for example,
+  `scripts/build_orientifold_vacua_inflation.jl`, which calls
+  `compute_vacua_data` with `method=:auto` and `save=true`, as it already did at
+  `f12fbb8`. No stored file was inspected.
 - Errors from steps 1 and 2, and from step 3 other than its limit, do not
   fall through to legacy. So `auto` may fail on a geometry where `legacy`
   would complete. No such geometry is known; whether any stored geometry is
@@ -651,11 +661,11 @@ affected is not established.
   (#220);
 - that an empty `subspace_minimize` result means the potential has no minima,
   in particular for rank-deficient charges;
-- that Float64 resolves directions about 16 decades below the largest scale,
-  in a mixing basis or not. With `Q = I`, `L = (1, -1e-16)`,
-  `subspace_minimize(L, Q; runs=100)` returns an empty vector, and none of 100 starts
-  `rand(Uniform(0, 2π), 2) .* rand(2)` after `Random.seed!(9876543210)` is
-  accepted, although by hand `(0, π)` is a minimum;
+- that Float64 resolves directions about 16 decades below the largest scale, in
+  a mixing basis or not. With `Q = I`, `L = (1, -1e-16)`,
+  `subspace_minimize(L, Q; runs=100)` returns an empty vector, and none of 100
+  starts `rand(Uniform(0, 2π), 2) .* rand(2)` after `Random.seed!(9876543210)`
+  is accepted, although by hand `(0, π)` is a minimum;
 - that a legacy count is complete or a rigorous lower bound. Legacy results
   retain the operational classification `finite_multistart_minimum_lower_bound`,
   but this specification does not establish that reported counts are rigorous
@@ -746,16 +756,21 @@ Two identities are tracked:
 
 - **Implementation candidate:** `a6a07da` on `codex/test-suite-repairs`. The
   scientific and test evidence in the PR #215 description is produced on it.
-  Outside `specs/`, it differs from `dbd7b62` only in the help text,
-  docstrings, comments and `test/full.jl` assertions (commits `51ac579`,
-  `3e54c76`, `4abbd60`), and in the batch default (`a6a07da`), which no probe
-  uses. The probe measurements recorded "at `dbd7b62`" therefore apply to it
-  unchanged. Earlier candidates and their reviews:
+  Outside `specs/`, it differs from `dbd7b62` only in the help text and default
+  of `scripts/batch_vacua_pipeline.jl` (`51ac579`, `a6a07da`), the
+  `test/full.jl` comment and assertions (`51ac579`, `a6a07da`), two docstrings
+  in `src/minimizer.jl` (`3e54c76`) and one comment in
+  `scripts/vacua_pipeline.jl` (`4abbd60`). No probe uses these. The probe
+  measurements recorded "at `dbd7b62`" therefore apply to it unchanged. Earlier
+  candidates and their reviews:
   - `ab48726`: reviewed with draft `444fcc3`; not passed.
   - `dc42633`: reviewed with draft `6b033b5`; not passed.
   - `b309a55`: reviewed with draft `0442ead`; not passed.
   - `dbd7b62`: reviewed with drafts `92f4c71` and `898029d`; not passed.
   - `4abbd60`: reviewed with draft `033f673`; not passed.
+  - `a6a07da` (current): reviewed with draft `94a61f7`, not passed; and with
+    draft `043cc3f`, passed, followed by text corrections at the owner's
+    request (*Review and amendment history*).
 - **Final merge candidate:** the PR #215 head after the approval-recording
   commit. G1 checks that it differs from the implementation candidate only in
   `specs/0215-minimizer-acceptance-contract/`. G2 reviews it, and CI must pass
@@ -781,8 +796,12 @@ Two identities are tracked:
 
 ## Open owner decisions
 
-None beyond G0. The R-009 default was decided by the owner after the review
-of `033f673` (*Review and amendment history*).
+None that gates G0. The R-009 default was decided by the owner after the
+review of `033f673` (*Review and amendment history*).
+
+Follow-up, not gating G0: an Issue for the repair of the `auto`
+leading-branch step (R-009), which `auto` needs before it can become the batch
+default.
 
 Approval of this specification is the owner's decision on R-001 to R-010 and
 on the amendments, as written. The replacement of R-003 to R-005 by a

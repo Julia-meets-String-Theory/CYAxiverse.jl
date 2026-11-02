@@ -2,13 +2,14 @@
 
 `tasks.md` records evidence readiness, not live PR, Issue or Project state.
 
-- [ ] **T001 [G1] Record implementation evidence on the implementation candidate**
+- [ ] **T001 [G1] Record implementation evidence on the implementation
+  candidate**
   - Input: implementation candidate `a6a07da`; R-001 to R-010.
   - Output: suite results and break checks in the PR #215 description.
   - Verify: each requirement row in `spec.md` *Verification* has the listed
     evidence. R-007 has integration evidence only. Evidence recorded on
-    `ab48726`, `dc42633`, `b309a55`, `dbd7b62` and `4abbd60` is superseded; it is
-    re-recorded on `a6a07da`.
+    `ab48726`, `dc42633`, `b309a55`, `dbd7b62` and `4abbd60` is superseded; it
+    is re-recorded on `a6a07da`.
   - Escalate if: a requirement has no evidence.
 
 - [ ] **T002 [G0] Independent Scientific/Numerical Review of the specification**
