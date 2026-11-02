@@ -2,25 +2,27 @@
 
 ## Approach
 
-This is a brownfield record. The implementation exists at candidate `dc42633`
-(PR #215), which replaced `ab48726` after the G0 review of `444fcc3`. The plan
-therefore maps each requirement to its implementation and evidence, and
-defines the path to approval and merge. It does not plan new implementation.
+This is a brownfield record. The implementation exists at candidate `b309a55`
+(PR #215). It replaced `ab48726` and `dc42633` after the G0 reviews of drafts
+`444fcc3` and `6b033b5`, which did not pass, and after the owner scope
+amendment recorded in `spec.md`. The plan therefore maps each requirement to
+its implementation and evidence, and defines the path to approval and merge.
+It does not plan new implementation.
 
 ## Requirement map
 
 | Requirement | Implementation | Evidence |
 | --- | --- | --- |
-| R-001 | `src/minimizer.jl`: `minimize` objective, `hess!`, `hess`; `_phase_hessian!` (shared with `id_minimize`, `id_minima`) | `test/runtests.jl` "Phase-hoisted Hessian parity" (includes the end-to-end minimum); objective value `-16/45` in "subspace_minimize keeps only converged minima with Hsign == 1" |
+| R-001 | `src/minimizer.jl`: `minimize` objective, `hess!`, `hess`; `_phase_hessian!` (shared with `id_minimize(::Vector, ::Matrix)`) | `test/runtests.jl` "Phase-hoisted Hessian parity" (includes the end-to-end minimum); objective value `-16/45` in "subspace_minimize keeps only converged minima with Hsign == 1" |
 | R-002 | `src/minimizer.jl`: `minimize` (`x_abstol`, `g_tol`) | `test/runtests.jl` "minimize resolves stationarity relative to the instanton scales" |
-| R-003 | `src/minimizer.jl`: `minimize` (`"stationary"`) | same testset (hierarchical, constant, mixed weak direction). Condition (2) is not isolated |
+| R-003 | `src/minimizer.jl`: `minimize` (`"stationary"`) | same testset (hierarchical, constant, mixed weak direction); the `@test_broken` known issue for `L = (1, 1e-6)` isolates condition (2) and records its false rejection. Condition (1) is not isolated |
 | R-004 | `src/minimizer.jl`: `_is_converged_minimum`, `subspace_minimize` | `test/runtests.jl` "subspace_minimize keeps only converged minima with Hsign == 1". The `converged` conjunct is not isolated |
 | R-005 | `src/minimizer.jl`: `subspace_minimize` origin rule | same testset (degenerate, constant and rank-deficient cases) |
 | R-006 | `src/generate.jl`: `vacua_id_basis` | `test/runtests.jl` "vacua_id_basis handles charges with no dependent columns (2,2,1 geometry)" |
 | R-007 | `scripts/vacua_pipeline.jl`: `_legacy_vacua_search` | Integration evidence only: `test/full.jl` "Vacua pipeline persistence and validation" (legacy batch case). The `Int` type contract is not directly tested |
 | R-008 | `src/generate.jl`: `spectrum_mode_counts` | `test/runtests.jl` "spectrum_mode_counts partitions a symmetric spectrum" |
 | R-009 | `scripts/batch_vacua_pipeline.jl`: default and help text | `test/full.jl` "Vacua pipeline persistence and validation" (default and help text) |
-| R-010 | docstrings, help text, PR #215 description | docs build; text review. Documented, not enforced; enforcement in #216 |
+| R-010 | docstrings, help text, PR #215 description | docs build; text review; reachability of the minimizer from the legacy pipeline (call graph and the `vacua_id` cases in `spec.md`) |
 
 ## Path to merge
 
@@ -29,7 +31,8 @@ defines the path to approval and merge. It does not plan new implementation.
    revision in a PR #215 comment that names the SHA.
 2. **If G0 amends a decision, or a blocking finding needs an implementation
    change:** change the implementation, repeat the break checks and suites,
-   update the implementation candidate, and repeat T001 and T005 for it.
+   update the implementation candidate, and repeat T001, T002, T003 and T005
+   for it.
 3. **Approval recording.** A commit that touches only this directory sets
    `status: approved`, `last_reviewed` and `approval_ref` (the G0 comment). It
    changes no requirement and no implementation. Its result is the final merge
