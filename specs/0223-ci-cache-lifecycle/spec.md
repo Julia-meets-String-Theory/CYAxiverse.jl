@@ -32,13 +32,18 @@ Facts from the CI logs and the repository cache list on 2026-11-03
   "Cache not found" and precompiled 479 packages in 1549 s. Later runs of the
   same PR restore its own cache.
 - `CI.yml` runs on push only for `main` and tags, so no CI cache exists on
-  `vmm`. A PR can restore caches from its own merge ref, its base branch and the
-  default branch, not from other PRs.
+  `vmm`. A PR can restore caches from its own merge ref and from the base or
+  default branch, not from other PRs. GitHub's documentation does not state the
+  order in which the base branch is searched; CYAX-0223 G2 records the ref that
+  is actually restored.
 - Storage was 9.6 GB of the 10 GB quota in 10 entries; PR #215's Fast tests
   entry was 2.1 GB.
 - `julia-actions/cache@v2` deletes superseded entries only with
   `actions: write`; `CI.yml` grants `contents: read`, so superseded entries
-  stay. Its `delete-old-caches: false` controls deletion only, not saving.
+  stay. On branches other than the default branch, a post step runs `Pkg.gc()`
+  (default seven-day delay) and then tries the deletion;
+  `delete-old-caches: 'false'` skips that whole post step, garbage collection
+  included. It does not stop saving.
 - Its default `cache-name` is `julia-cache;workflow=<workflow>;job=<job id>`;
   the primary key appends `os=<OS>;` and `run_id=…;run_attempt=…`, and restore
   uses the prefix up to `run_id=`.
@@ -68,24 +73,26 @@ base-cache miss.
 
 ### R-002 — Fast tests cache producer
 
-WHEN a push event runs `CI.yml`, a job `fast-cache` SHALL run the same steps as
-the Fast tests job (checkout, Julia 1.12 x64, Julia cache, build, notebook
-environment, package tests with the same environment variables) and save its
-depot cache under the Fast tests cache name
-`julia-cache;workflow=CI;job=fast`. It SHALL NOT run on pull requests.
+WHEN a push to `vmm` runs `CI.yml`, a job `fast-cache` SHALL run the same steps
+as the Fast tests job (checkout, Julia 1.12 x64, Julia cache, build, notebook
+environment, package tests with the same environment variables), then the
+garbage collection of R-006, and save its depot cache under the Fast tests
+cache name `julia-cache;workflow=CI;job=fast`. It SHALL NOT run on pull
+requests, on pushes to `main` or on tags (a tag ref's cache can be restored only
+by runs on that tag).
 
 ### R-003 — Restore-only Fast tests on pull requests
 
 The Fast tests job SHALL keep its current condition (pull requests only) and
 use the cache name `julia-cache;workflow=CI;job=fast` with job-level
-`cache-mode: read`, so it restores the newest matching entry (its PR ref, then
-`vmm` or `main` as base) and saves none.
+`cache-mode: read`, so it restores the newest matching entry available to the
+PR (its own ref, or the base or default branch) and saves none.
 
 ### R-004 — One writer per cache key
 
 No two jobs that can run in the same workflow run SHALL use the same cache
-name. `fast` (pull requests only) and `fast-cache` (push only) share a name and
-never run in the same workflow run; every other job keeps its default,
+name. `fast` (pull requests only) and `fast-cache` (push to `vmm` only) share a
+name and never run in the same workflow run; every other job keeps its default,
 job-specific name.
 
 ### R-005 — Full test suite reach unchanged
@@ -98,7 +105,11 @@ the `full-tests` label. It SHALL NOT run on push to `vmm`.
 
 Every job that checks out and runs repository or PR code SHALL keep the
 workflow's `contents: read` and no other write permission, and SHALL set
-`delete-old-caches: 'false'` on `julia-actions/cache`.
+`delete-old-caches: 'false'` on `julia-actions/cache`. Every job that can save
+a Julia cache (lifecycle, `fast-cache`, qualification, Full) SHALL end with
+`Pkg.gc()` at its default delay, replacing the garbage collection that the
+skipped post step performed; the restore-only PR Fast tests job saves nothing
+and has no such step.
 
 ### R-007 — Cache maintenance job
 
@@ -109,19 +120,26 @@ A job `cache-maintenance` SHALL:
 2. have permissions `actions: write` and `pull-requests: read` only;
 3. not check out the repository or run any repository or PR file; its logic is
    inline in `CI.yml` and calls only the GitHub REST API;
-4. list all caches of the repository, following every page, into a fixed
-   snapshot before selecting anything;
-5. group entries by restore identity: Git ref plus the key up to `run_id=`;
+4. list all caches of the repository, oldest first by creation
+   (`sort=created_at&direction=asc`), following every page, into a fixed
+   snapshot that holds each cache ID once, before selecting anything;
+5. group entries by restore identity: Git ref, the key up to `run_id=`, and the
+   cache `version` (cached paths and compression);
 6. select for deletion (a) every entry of a ref matching exactly
-   `refs/pull/<digits>/merge` whose pull request is closed when checked, and
-   (b) in every other group, every entry except the newest by `created_at`;
+   `refs/pull/<digits>/merge` whose pull request is closed when checked;
+   (b) every entry of such a ref whose key starts with
+   `julia-cache;workflow=CI;job=fast;`, since pull requests no longer save that
+   cache and such an entry would be restored instead of the `vmm` base; and
+   (c) in every other group, every entry except the newest by `created_at`,
+   compared as times, ties broken by cache ID;
 7. never select the newest entry of a group on `refs/heads/vmm` or
    `refs/heads/main`;
 8. delete only selected entries, by cache ID; log every selected and deleted
-   ID; log and skip an entry that is already gone (HTTP 404); and on any other
-   API error stop, report failure (non-zero exit) and log what was already
-   deleted, deleting nothing unselected. A failure before selection completes
-   deletes nothing.
+   ID, with refs and keys JSON-quoted so that no logged value can start a
+   workflow command; log and skip an entry that is already gone (HTTP 404); and
+   on any other API error stop, report failure (non-zero exit) and log what was
+   already deleted, deleting nothing unselected. A failure before selection
+   completes deletes nothing.
 
 ### R-008 — Pull-request behaviour unchanged
 
@@ -141,6 +159,10 @@ and Full keep saving their own caches.
   labelled Full runs on PRs still save entries (about 0.5, 0.4 and 1.6 GB), and
   GitHub can evict caches, including the `vmm` base. Obsolete entries are
   pruned at the next maintenance run; absence of eviction is not promised.
+- Maintenance has its own concurrency group without cancellation. If a third
+  maintenance job queues while one runs, GitHub replaces the older pending job,
+  which is then shown as cancelled in its push's CI run. The newer job reads a
+  fresh snapshot, so no pruning is lost.
 - Each push to `vmm` runs lifecycle, `fast-cache`, qualification and
   maintenance (about 30 minutes wall time, about 50 runner-minutes on
   PR #215's figures). Qualification after each merge is a scheduling effect, not
@@ -156,15 +178,21 @@ commit SHA.
 ### CYAX-0223 G1 — Implementation (pre-merge)
 
 - `scripts/test_ci_cache_workflow.py` checks the wiring of R-001 to R-008 in
-  `CI.yml` and, by executing the inline maintenance logic against a fake API,
-  the selection rules of R-007: pagination, grouping, newest kept, closed and
-  reopened PRs, strict ref pattern, protected `vmm`/`main` entries, logging,
-  and failure without unselected deletion. Each test fails before the change.
+  `CI.yml`, including the exact permission sets and the final garbage
+  collection step, and, by executing the inline maintenance logic against a
+  fake API, the selection rules of R-007: request order, pagination with a list
+  that shifts between pages, de-duplication, grouping by ref, key prefix and
+  version, newest kept by parsed time, closed, open and reopened PRs, PR Fast
+  tests entries, strict ref pattern, protected `vmm`/`main` entries, quoted
+  logging, and failure without unselected deletion. Each test fails before the
+  change it covers.
 - All existing Python tests pass, including
   `scripts/test_ci_requires_qualification.py`.
-- On the PR's own CI run: the Fast tests job restores, logs a skipped save, and
-  no new `job=fast` entry appears on the PR's merge ref; the other jobs behave
-  as before.
+- On the PR's own CI run: the Fast tests job attempts a restore (a miss is
+  expected, because no `vmm` Fast tests cache exists before the first push to
+  `vmm`), logs the skipped save, and no new `job=fast` entry appears on the
+  PR's merge ref; the other jobs behave as before, and each job that saves a
+  cache ends with `Pkg.gc()`.
 
 ### CYAX-0223 G2 — Post-merge evidence (on #223, not a merge gate)
 
@@ -177,6 +205,7 @@ commit SHA.
 | PR with no usable `vmm` cache | Recorded as a base-cache miss, with its cost |
 | Push after a PR closes (same-repository or fork) | Only that PR's merge-ref entries deleted |
 | Failed `fast-cache` on a `vmm` push | Previous `vmm` Fast entry kept |
+| Every push to `vmm` | Size of the `vmm` Fast tests entry, to show whether `Pkg.gc()` bounds its growth |
 
 Single-run timings are evidence, not guarantees. The restore-only policy is
 revisited if measurements show that repeated compilation makes PR iteration
@@ -186,11 +215,29 @@ substantially slower.
 
 CI only. No package, API, schema, environment or version change.
 
+## Review history and owner decisions
+
+- Intake (#223): the owner decided the restore-only Fast policy, push-only
+  maintenance and the accepted limitations, after two reviews of the design.
+- The author then chose a separate push-only `fast-cache` producer sharing the
+  Fast tests cache name, because `cache-mode` has no documented expression
+  support.
+- Independent review of `d80aa21` (spec and implementation): not passed.
+  Blocking findings: unstable pagination could delete the only `vmm` Fast tests
+  entry (B1); `delete-old-caches: 'false'` also skips `Pkg.gc()`, which the
+  baseline omitted (B2); the pre-merge gate expected a restore that cannot
+  happen on this PR (B3). Non-blocking findings included grouping without the
+  cache version, string-compared times, unquoted logged keys, permission tests
+  that missed added write permissions, the producer running on `main` and tags,
+  and stale PR Fast tests entries shadowing the `vmm` base.
+- Owner decisions after that review: add `Pkg.gc()` at the end of each job that
+  saves a Julia cache; run `fast-cache` on pushes to `vmm` only; delete Fast
+  tests entries on pull-request refs. The other findings are corrected as
+  above.
+
 ## Open owner decisions
 
-None. The restore-only Fast policy, push-only maintenance and the accepted
-limitations were decided by the owner at intake and are recorded in the #223
-Issue body.
+None.
 
 ## Completion criterion
 
