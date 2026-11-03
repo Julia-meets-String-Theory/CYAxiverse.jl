@@ -2,21 +2,23 @@
 
 ## Approach
 
-This is a brownfield record. The implementation exists at candidate `a6a07da`
-(PR #215). It replaced `ab48726`, `dc42633`, `b309a55`, `dbd7b62` and
-`4abbd60` after the G0 reviews of drafts `444fcc3`, `6b033b5`, `0442ead`,
-`92f4c71`, `898029d` and `033f673`, which did not pass, and after the owner
-amendments recorded in `spec.md`, one of which removed condition (2) of
-R-003. The review of `92f4c71` required text corrections only, so the
-candidate did not change. The review of `898029d` required a help-text
-correction, so the candidate changed to `4abbd60`; that change is text only
-(help text, docstrings, comments and their test). After the review of
-`033f673` the owner kept `--method legacy` as the batch default, so the
-candidate changed to `a6a07da`. Against `a6a07da`, the review of `94a61f7`
-did not pass, and the reviews of `043cc3f` and `f88be82` passed; the
-corrections after them are text only. The plan therefore maps each
-requirement to its implementation and evidence, and defines the path to
-approval and merge. It does not plan new implementation.
+This is a brownfield record. The implementation exists at candidate `4cca53d`
+(PR #215). Earlier, `a6a07da` replaced `ab48726`, `dc42633`, `b309a55`,
+`dbd7b62` and `4abbd60` after the G0 reviews of drafts `444fcc3`, `6b033b5`,
+`0442ead`, `92f4c71`, `898029d` and `033f673`, which did not pass, and after the
+owner amendments recorded in `spec.md`, one of which removed condition (2) of
+R-003. The review of `92f4c71` required text corrections only, so the candidate
+did not change. The review of `898029d` required a help-text correction, so the
+candidate changed to `4abbd60`; that change is text only (help text, docstrings,
+comments and their test). After the review of `033f673` the owner kept
+`--method legacy` as the batch default, so the candidate changed to `a6a07da`. Against
+`a6a07da`, the review of `94a61f7` did not pass, and the reviews of `043cc3f`
+and `f88be82` passed; the corrections after them are text only. The owner
+approved `96169a1`. The G2 review of `f658144` found a CI qualification gap, and
+the owner had it fixed in PR #215, so the candidate changed to `4cca53d` (CI and
+qualification fixture only). The plan therefore maps each requirement to its
+implementation and evidence, and defines the path to approval and merge. It does
+not plan new implementation.
 
 ## Requirement map
 

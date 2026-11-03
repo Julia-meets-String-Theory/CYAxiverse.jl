@@ -3,14 +3,14 @@ spec_id: CYAX-0215
 title: Legacy minimizer acceptance criteria and batch vacua default
 issue: 218
 class: S2
-status: approved
+status: draft
 workstream: legacy vacua / minima counting
 parent: null
 depends_on: []
 created: 2026-10-31
 last_reviewed: 2026-11-03
 review_required: repository-owner approval after independent Scientific/Numerical Review
-approval_ref: "PR #215 comment 6593089383 — approves spec revision 96169a1 (reviewed revision f88be82)"
+approval_ref: "N/A while draft; the approval of 96169a1 (PR #215 comment 6593089383) is superseded by the candidate change after G2"
 version_impact: patch, no version bump
 ---
 
@@ -166,12 +166,28 @@ identifier matches the Issue number.
   owner directed that these provenance and editorial corrections do not need
   another independent review, because they change no normative requirement
   and no evidence (G0).
+- The owner approved `96169a1` in PR #215 comment 6593089383, and `f658144`
+  recorded the approval.
+- G2 review of the final merge candidate `f658144` did not pass. Its blocking
+  finding concerned CI, not R-001 to R-010: before PR #215 the fast job ran
+  the process-isolated fast qualification on every pull request; PR #215 moved
+  that run to the `qualification` job, which on PRs to `vmm` ran only for
+  changes under `src/` or `test/fixtures/scientific_certification/`, and on
+  PRs to other bases (except `main`) only with the `full-tests` label.
+- Owner decision after the G2 review of `f658144`: fix it in PR #215. With it,
+  the same candidate restores the clean-tree check for direct qualification
+  producers, which the test-suite restructuring had dropped; the PR #215
+  description discloses two changes it had not listed; and this specification
+  names #221 for the `auto` repair. The new candidate is `4cca53d`. Because
+  *Candidate identity* changes, T001, T002, T003 and T005 are repeated, and
+  the approval of `96169a1` no longer covers the candidate (G0).
 
-This list records nine reviews: seven did not pass, and the reviews of
-`043cc3f` and `f88be82` passed. The failed reviews are not relabelled as
-passed. The record of the review of `f88be82` is a PR #215 comment (T002). The
-records of the other eight reviews are not published on GitHub; this list is
-their only record in the repository. The amendments become durable when the
+This list records nine specification reviews: seven did not pass, and the
+reviews of `043cc3f` and `f88be82` passed. It also records one G2 review, of
+`f658144`, which did not pass. The failed reviews are not relabelled as passed.
+The record of the review of `f88be82` is a PR #215 comment (T002). The records
+of the other eight specification reviews are not published on GitHub; this list
+is their only record in the repository. The amendments become durable when the
 owner approves the revision that contains them at G0.
 
 ## Scope
@@ -572,9 +588,9 @@ commit of PR #215 (`db7b254`) made `auto` the batch default. Review found that
 under `auto` the leading-branch step can store fewer minima than the truncated
 potential has, under a label that reads as verified (below). A legacy failure
 stores no result, so it stays visible. `auto` can become the batch default
-only after separate work repairs that step, under its own specification. No
-Issue tracks that work yet; opening one is an owner decision. The
-withdrawn stale-results premise (R-010) plays no part in this decision.
+only after separate work repairs that step, under its own specification;
+#221 tracks that work. The withdrawn stale-results premise (R-010) plays no
+part in this decision.
 
 **Existing behaviour of `--method auto`.** PR #215 does not change it. It is
 recorded here because the decision rests on it. For each geometry, `auto` uses
@@ -713,10 +729,11 @@ affected is not established.
 - The owner approves that exact reviewed revision in a durable GitHub
   comment on PR #215 that names its commit SHA. That comment is the approval
   event.
-- Exception, by owner direction: the corrections made after the review of
-  `f88be82` are provenance and editorial only and are not re-reviewed
-  (*Review and amendment history*). The approval comment names the corrected
-  revision that it approves and the reviewed revision `f88be82`.
+- Exception, by owner direction, for the approval of `96169a1` (now
+  superseded): the corrections made after the review of `f88be82` were
+  provenance and editorial only and were not re-reviewed (*Review and
+  amendment history*). That approval comment named the corrected revision
+  `96169a1` and the reviewed revision `f88be82`.
 
 Stop condition: the owner amends a decision, or a blocking finding requires an
 implementation change. The implementation and evidence then change before G1,
@@ -782,23 +799,29 @@ values. The environment of the earlier measurements was not recorded.
 
 Two identities are tracked:
 
-- **Implementation candidate:** `a6a07da` on `codex/test-suite-repairs`. The
+- **Implementation candidate:** `4cca53d` on `codex/test-suite-repairs`. The
   scientific and test evidence in the PR #215 description is produced on it.
-  Outside `specs/`, it differs from `dbd7b62` only in the help text and default
-  of `scripts/batch_vacua_pipeline.jl` (`51ac579`, `a6a07da`), the
-  `test/full.jl` comment and assertions (`51ac579`, `a6a07da`), two docstrings
-  in `src/minimizer.jl` (`3e54c76`) and one comment in
+  Outside `specs/`, it differs from `a6a07da` only in
+  `.github/workflows/CI.yml`, `scripts/ci_requires_qualification.py` and its
+  test (`ec465e0`), and in
+  `test/fixtures/scientific_certification/run_fixture.jl` and
+  `test/scientific_certification.jl` (`4cca53d`). It differs from `dbd7b62` also
+  in the help text and default of `scripts/batch_vacua_pipeline.jl` (`51ac579`,
+  `a6a07da`), the `test/full.jl` comment and assertions (`51ac579`, `a6a07da`),
+  two docstrings in `src/minimizer.jl` (`3e54c76`) and one comment in
   `scripts/vacua_pipeline.jl` (`4abbd60`). No probe uses these. The probe
-  measurements recorded "at `dbd7b62`" therefore apply to it unchanged. Earlier
-  candidates and their reviews:
+  measurements recorded "at `dbd7b62`" or "at `a6a07da`" therefore apply to it
+  unchanged. Earlier candidates and their reviews:
   - `ab48726`: reviewed with draft `444fcc3`; not passed.
   - `dc42633`: reviewed with draft `6b033b5`; not passed.
   - `b309a55`: reviewed with draft `0442ead`; not passed.
   - `dbd7b62`: reviewed with drafts `92f4c71` and `898029d`; not passed.
   - `4abbd60`: reviewed with draft `033f673`; not passed.
-  - `a6a07da` (current): reviewed with draft `94a61f7`, not passed; and with
-    drafts `043cc3f` and `f88be82`, passed, each followed by text corrections
-    at the owner's request (*Review and amendment history*).
+  - `a6a07da`: reviewed with draft `94a61f7`, not passed; and with drafts
+    `043cc3f` and `f88be82`, passed, each followed by text corrections at the
+    owner's request. Approved at `96169a1`. G2 review of `f658144` not passed
+    (*Review and amendment history*).
+  - `4cca53d` (current): the next draft needs a fresh review (T002).
 - **Final merge candidate:** the PR #215 head after the approval-recording
   commit. G1 checks that it differs from the implementation candidate only in
   `specs/0215-minimizer-acceptance-contract/`. G2 reviews it, and CI must pass
@@ -827,9 +850,8 @@ Two identities are tracked:
 None that gates G0. The R-009 default was decided by the owner after the
 review of `033f673` (*Review and amendment history*).
 
-Follow-up, not gating G0: an Issue for the repair of the `auto`
-leading-branch step (R-009), which `auto` needs before it can become the batch
-default.
+Follow-up, not gating G0: #221, the repair of the `auto` leading-branch step
+(R-009), which `auto` needs before it can become the batch default.
 
 Approval of this specification is the owner's decision on R-001 to R-010 and
 on the amendments, as written. The replacement of R-003 to R-005 by a
