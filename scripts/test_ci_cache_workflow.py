@@ -217,6 +217,18 @@ class MaintenanceSelection(unittest.TestCase):
         self.run_main(api)
         self.assertEqual(api.deleted, [9])
 
+    def test_creation_times_compare_as_times_not_strings(self) -> None:
+        # As strings "…:30Z" sorts after "…:30.5Z", although it is half a second older.
+        for older, newer in (("2026-11-03T15:31:30Z", "2026-11-03T15:31:30.5Z"),
+                             ("2026-11-03T15:31:30.119977Z", "2026-11-03T15:31:30.9Z"),
+                             ("2026-11-03T15:31:29.999999Z", "2026-11-03T15:31:30Z")):
+            with self.subTest(older=older, newer=newer):
+                caches = [_cache(1, "refs/heads/vmm", "fast", older),
+                          _cache(2, "refs/heads/vmm", "fast", newer)]
+                api = FakeApi(caches)
+                self.run_main(api)
+                self.assertEqual(api.deleted, [1])
+
     def test_entries_with_different_cache_versions_are_kept_apart(self) -> None:
         caches = [
             _cache(1, "refs/heads/vmm", "fast", "2026-11-01T00:00:00Z", version="aaaa"),

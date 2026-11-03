@@ -246,6 +246,7 @@ jobs:
           import sys
           import urllib.error
           import urllib.request
+          from datetime import datetime, timezone
 
           PULL_MERGE_REF = re.compile(r"refs/pull/([0-9]+)/merge")
           PER_PAGE = 100
@@ -303,6 +304,15 @@ jobs:
                   page += 1
 
 
+          def created(cache):
+              """Creation time as a datetime; the API's fractional seconds vary in length."""
+              stamp = re.sub(r"(Z|[+-]00:00)$", "", cache["created_at"])
+              whole, _, fraction = stamp.partition(".")
+              moment = datetime.strptime(whole, "%Y-%m-%dT%H:%M:%S")
+              micro = int((fraction + "000000")[:6])
+              return moment.replace(microsecond=micro, tzinfo=timezone.utc)
+
+
           def restore_identity(cache):
               """Ref, key prefix up to run_id=, and cache version (paths and compression):
               entries differing in any of these can never stand in for each other."""
@@ -325,7 +335,7 @@ jobs:
                           continue
                   groups.setdefault(restore_identity(cache), []).append(cache)
               for entries in groups.values():
-                  entries.sort(key=lambda cache: cache["created_at"], reverse=True)
+                  entries.sort(key=lambda cache: (created(cache), cache["id"]), reverse=True)
                   selected.extend(entries[1:])  # the newest entry of every group stays
               return sorted(selected, key=lambda cache: cache["id"])
 
