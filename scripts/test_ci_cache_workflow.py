@@ -129,7 +129,12 @@ class WorkflowWiring(unittest.TestCase):
                         self.assertIn("delete-old-caches: 'false'", step)
 
     def test_only_the_maintenance_job_has_write_permission(self) -> None:
-        self.assertIn("permissions:\n  contents: read\n", self.workflow)
+        # The workflow-level block is exactly contents: read, nothing more.
+        top = re.search(r"^permissions:\n((?:  .*\n)*)", self.workflow, flags=re.M)
+        self.assertIsNotNone(top)
+        self.assertEqual(top.group(1), "  contents: read\n")
+        self.assertEqual(_section(_job_block(self.workflow, "cache-maintenance"), "permissions"),
+                         "    permissions:\n      actions: write\n      pull-requests: read\n")
         for job in _job_names(self.workflow):
             block = _job_block(self.workflow, job)
             with self.subTest(job=job):
