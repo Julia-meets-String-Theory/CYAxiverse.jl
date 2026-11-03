@@ -3,14 +3,14 @@ spec_id: CYAX-0215
 title: Legacy minimizer acceptance criteria and batch vacua default
 issue: 218
 class: S2
-status: draft
+status: approved
 workstream: legacy vacua / minima counting
 parent: null
 depends_on: []
 created: 2026-10-31
 last_reviewed: 2026-11-03
 review_required: repository-owner approval after independent Scientific/Numerical Review
-approval_ref: "N/A while draft; the approval of 96169a1 (PR #215 comment 6593089383) is superseded by the candidate change after G2"
+approval_ref: "PR #215 comment 6607502624 — approves spec revision caab103 (implementation candidate 4cca53d); supersedes the approval of 96169a1"
 version_impact: patch, no version bump
 ---
 
