@@ -276,7 +276,10 @@ jobs:
                   return json.loads(body) if body else None
 
               def list_caches_page(self, page, per_page):
-                  data = self._call("GET", f"/actions/caches?per_page={per_page}&page={page}")
+                  # Oldest first by creation: new caches append at the end, so a
+                  # cache used between page reads cannot shift entries across pages.
+                  data = self._call("GET", f"/actions/caches?per_page={per_page}&page={page}"
+                                           "&sort=created_at&direction=asc")
                   return data["actions_caches"], data["total_count"]
 
               def pr_state(self, number):
@@ -287,11 +290,14 @@ jobs:
 
 
           def list_all_caches(api):
-              """Read every page into one snapshot before anything is selected."""
-              caches, page = [], 1
+              """Read every page into one snapshot, each cache once, before selecting."""
+              caches, seen, page = [], set(), 1
               while True:
                   entries, total = api.list_caches_page(page, PER_PAGE)
-                  caches.extend(entries)
+                  for cache in entries:
+                      if cache["id"] not in seen:  # an entry repeated across pages counts once
+                          seen.add(cache["id"])
+                          caches.append(cache)
                   if not entries or len(caches) >= total:
                       return caches
                   page += 1

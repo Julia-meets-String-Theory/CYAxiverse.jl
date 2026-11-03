@@ -143,8 +143,9 @@ def _cache(cache_id: int, ref: str, job: str, created: str, run: int | None = No
 
 class FakeApi:
     def __init__(self, caches, states=None, per_page=2, fail_list=False,
-                 fail_state=False, fail_delete=(), gone=()):
+                 fail_state=False, fail_delete=(), gone=(), move_to_front_after_page=None):
         self.caches = list(caches)
+        self.move_to_front_after_page = move_to_front_after_page
         self.states = states or {}
         self.per_page = per_page
         self.fail_list = fail_list
@@ -161,7 +162,12 @@ class FakeApi:
             raise RuntimeError("list failed")
         size = self.per_page
         self.pages.append(page)
-        return self.caches[(page - 1) * size:page * size], len(self.caches)
+        served = self.caches[(page - 1) * size:page * size]
+        if self.move_to_front_after_page == page:
+            # A cache used between page reads moves position, as under the
+            # API's default last-accessed ordering.
+            self.caches.insert(0, self.caches.pop())
+        return served, len(self.caches)
 
     def pr_state(self, number):
         self.calls.append(("state", number))
@@ -256,6 +262,31 @@ class MaintenanceSelection(unittest.TestCase):
         last_list = max(i for i, call in enumerate(api.calls) if call[0] == "list")
         self.assertLess(last_list, first_delete)
         self.assertEqual(sorted(api.deleted), [1, 2, 3, 4])
+
+    def test_an_entry_seen_twice_across_pages_is_not_deleted(self) -> None:
+        caches = [
+            _cache(2, "refs/heads/vmm", "fast", "2026-11-01T00:00:00Z"),
+            _cache(3, "refs/heads/vmm", "lifecycle", "2026-11-01T00:00:00Z"),
+            _cache(4, "refs/pull/9/merge", "full", "2026-11-01T00:00:00Z"),
+        ]
+        api = FakeApi(caches, states={9: "open"}, per_page=2, move_to_front_after_page=1)
+        code, _ = self.run_main(api)
+        self.assertEqual(code, 0)
+        self.assertEqual(api.deleted, [])
+
+    def test_lists_caches_oldest_first_by_creation(self) -> None:
+        paths = []
+
+        class Recording(self.ns["GitHubApi"]):
+            def _call(self, method, path):
+                paths.append((method, path))
+                return {"actions_caches": [], "total_count": 0}
+
+        Recording("owner/repo", "token").list_caches_page(1, 100)
+        self.assertEqual(len(paths), 1)
+        self.assertEqual(paths[0][0], "GET")
+        self.assertIn("sort=created_at", paths[0][1])
+        self.assertIn("direction=asc", paths[0][1])
 
     def test_selection_failure_deletes_nothing_and_fails(self) -> None:
         for kwargs in ({"fail_list": True}, {"fail_state": True}):
