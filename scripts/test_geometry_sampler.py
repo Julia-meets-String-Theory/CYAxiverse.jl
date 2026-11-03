@@ -1,4 +1,8 @@
 """Regression tests for CYTools sampler adapter argument contracts."""
+from local_only import require_cytools
+
+require_cytools()
+
 
 import os
 import json

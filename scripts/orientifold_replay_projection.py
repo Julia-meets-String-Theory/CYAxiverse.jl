@@ -374,11 +374,11 @@ def compare_replay_artifacts(
 
 def _write_zstd_json(path: Path, value: Mapping[str, Any]) -> None:
     path = path.expanduser().resolve()
-    private_tmp = Path("/private/tmp").resolve()
+    temp_root = Path(tempfile.gettempdir()).resolve()
     try:
-        path.relative_to(private_tmp)
+        path.relative_to(temp_root)
     except ValueError as exc:
-        raise ProjectionError("verification output must be written under /private/tmp") from exc
+        raise ProjectionError(f"verification output must be written under {temp_root}") from exc
     if path.exists() or path.is_symlink():
         raise ProjectionError(f"refusing to overwrite verification output: {path}")
     zstd = shutil.which("zstd")
@@ -386,7 +386,7 @@ def _write_zstd_json(path: Path, value: Mapping[str, Any]) -> None:
         raise ProjectionError("zstd is required to write verification output")
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", newline="\n", dir=str(private_tmp), delete=False
+        mode="w", encoding="utf-8", newline="\n", dir=str(temp_root), delete=False
     ) as stream:
         raw_path = Path(stream.name)
         json.dump(value, stream, sort_keys=True, indent=2, ensure_ascii=True, allow_nan=False)
@@ -412,7 +412,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--repaired", required=True, type=Path)
     parser.add_argument("--implementation", type=Path)
-    parser.add_argument("--output", type=Path, help="Compressed JSON report under /private/tmp.")
+    parser.add_argument("--output", type=Path, help="Compressed JSON report under the system temporary directory.")
     return parser
 
 

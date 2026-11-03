@@ -34,6 +34,13 @@ function _vacua_usage()
       --max-iterations N           Recorded iteration bound. Default: 200.
         --method NAME                Search method: auto, legacy, leading_branches, or reduced_jlm.
                             Default: legacy.
+                            The method is part of the configuration digest, so results
+                            written with another method do not match.
+                            PR #215 fixes an error that prevented some geometries from
+                            completing, and makes the counts of those geometries writable.
+                            It does not invalidate legacy counts already stored before the
+                            fix. Rerunning the legacy method may produce additional results
+                            for geometries that previously failed.
         --max-branches N             Bound leading-branch enumeration. Default: 1000000.
       --summary PATH               CSV summary output path.
       --append-summary             Append to an existing summary.

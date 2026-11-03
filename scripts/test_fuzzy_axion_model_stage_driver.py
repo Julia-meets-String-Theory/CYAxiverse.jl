@@ -34,6 +34,10 @@ Requires the local CYTools conda env (``julia`` on PATH, ``h5py`` importable)
 per this initiative's established environment gotchas -- same as
 ``test_inherited_orientifold_candidates.py``.
 """
+from local_only import require_cytools
+
+require_cytools()
+
 
 import subprocess
 import tempfile

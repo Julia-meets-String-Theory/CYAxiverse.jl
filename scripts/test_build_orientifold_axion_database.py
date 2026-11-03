@@ -5,6 +5,10 @@ single-shard summary with `class_funnel` at the top level (h11=2/3), and a
 merged, sharded artifact with the same list nested at
 `terminal_ledger.class_funnel` (h11=4's `h4.merged.json.zst`).
 """
+from local_only import require_cytools
+
+require_cytools()
+
 
 import hashlib
 import itertools

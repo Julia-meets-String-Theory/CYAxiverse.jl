@@ -33,10 +33,9 @@ Pages = ["inflation_points.jl"]
 ```
 
 ## `CYAxiverse.minimizer`
-```@autodocs
-Modules = [CYAxiverse.minimizer]
-Pages = ["minimizer.jl"]
-```
+Documented on its own page, [`CYAxiverse.minimizer`](api_minimizer.md), to keep
+this page within the HTML size threshold set in `docs/make.jl`.
+
 ## `CYAxiverse.read`
 ```@autodocs
 Modules = [CYAxiverse.read]

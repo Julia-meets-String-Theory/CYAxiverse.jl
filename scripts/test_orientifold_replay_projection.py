@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -44,6 +45,7 @@ class CanonicalProjectionTests(unittest.TestCase):
             canonical_projection_bytes([{"row_identity": "missing-status"}])
 
 
+@unittest.skipIf(shutil.which("zstd") is None, "requires the zstd executable")
 class ArtifactComparisonTests(unittest.TestCase):
     @staticmethod
     def _artifact(
@@ -281,7 +283,7 @@ class ArtifactComparisonTests(unittest.TestCase):
             {"row_identity": "0000", "terminal_status": "smoothness_verification_unavailable"},
             {"row_identity": "0001", "terminal_status": "h21_plus_nonzero"},
         ]
-        with tempfile.TemporaryDirectory(dir="/private/tmp") as temporary:
+        with tempfile.TemporaryDirectory(dir=tempfile.gettempdir()) as temporary:
             source = Path(temporary) / "source.jsonl.zst"
             repaired = Path(temporary) / "repaired.jsonl.zst"
             output = Path(temporary) / "report.json.zst"

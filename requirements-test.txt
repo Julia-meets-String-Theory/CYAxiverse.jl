@@ -1,0 +1,6 @@
+# Third-party packages for the portable Python test job (CI).
+# CYTools tests are local-only and skip themselves when it is absent.
+h5py
+sympy
+pyarrow
+numpy

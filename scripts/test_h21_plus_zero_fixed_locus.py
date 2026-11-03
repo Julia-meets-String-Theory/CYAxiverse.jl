@@ -33,6 +33,10 @@ recorded evidence.
 Requires the local CYTools conda env, same as
 ``test_inherited_orientifold_candidates.py``.
 """
+from local_only import require_cytools
+
+require_cytools()
+
 
 import unittest
 

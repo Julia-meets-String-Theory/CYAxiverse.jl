@@ -1,4 +1,8 @@
 """Fixture tests for the bounded symmetric-fan diagnostic."""
+from local_only import require_cytools
+
+require_cytools()
+
 
 import unittest
 
