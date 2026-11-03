@@ -134,7 +134,7 @@ and Full keep saving their own caches.
 
 - PR Fast runs give up reuse of their own earlier runs: each run recompiles
   the PR's own changes and any dependency released since the last `vmm`
-  warm-up. Expected to be acceptable for ordinary PRs; measured (G2).
+  warm-up. Expected to be acceptable for ordinary PRs; measured (CYAX-0223 G2).
 - If the `vmm` Fast cache is missing, evicted or incompatible, every PR Fast run
   starts cold until the next push to `vmm`. Frequency and cost are recorded.
 - Maintenance runs only on pushes. Between pushes, lifecycle, qualification and
@@ -148,12 +148,12 @@ and Full keep saving their own caches.
 
 ## Acceptance gates
 
-### G0 — Specification approval
+### CYAX-0223 G0 — Specification approval
 
 The owner approves this specification in a durable comment that names its
 commit SHA.
 
-### G1 — Implementation (pre-merge)
+### CYAX-0223 G1 — Implementation (pre-merge)
 
 - `scripts/test_ci_cache_workflow.py` checks the wiring of R-001 to R-008 in
   `CI.yml` and, by executing the inline maintenance logic against a fake API,
@@ -166,7 +166,7 @@ commit SHA.
   no new `job=fast` entry appears on the PR's merge ref; the other jobs behave
   as before.
 
-### G2 — Post-merge evidence (recorded on #223, not a merge gate)
+### CYAX-0223 G2 — Post-merge evidence (on #223, not a merge gate)
 
 | Observation | Required record |
 | --- | --- |
@@ -194,5 +194,5 @@ Issue body.
 
 ## Completion criterion
 
-G0 and G1 pass and the PR is merged into `vmm`; G2 evidence is then recorded
-on #223.
+CYAX-0223 G0 and G1 pass and the PR is merged into `vmm`; CYAX-0223 G2
+evidence is then recorded on #223.
