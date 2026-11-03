@@ -423,7 +423,7 @@ end
 function _approved_profile_matches(expected, observed; pinned::Bool=true)
     expected == observed || return false
     get(observed, "schema", "") == "cyax-scientific-environment-v1" || return false
-    # Cleanliness is enforced once, when a retained environment receipt is created.
+    get(observed, "worktree_clean", false) === true || return false
     pinned && !_release_pins_match(observed) && return false
     get(observed, "julia_threads", 0) == 1 || return false
     get(observed, "julia_default_threads", 0) == 1 || return false
@@ -440,13 +440,13 @@ function _approved_profile_matches(expected, observed; pinned::Bool=true)
     true
 end
 
-function _environment_record(candidate, path; require_clean::Bool=true)
+function _environment_record(candidate, path)
     record = _actual_environment_observation()
     record["candidate_commit"] == candidate.commit &&
         record["candidate_tree"] == candidate.tree &&
         record["worktree_clean"] == candidate.clean ||
         error("trusted environment snapshot does not match the observed candidate")
-    !require_clean || record["worktree_clean"] === true || error("qualification requires a clean candidate source")
+    record["worktree_clean"] === true || error("qualification requires a clean candidate source")
     _approved_profile_matches(record, record) || error("qualification requires the approved serial scientific profile")
     ispath(path) && error("refusing to overwrite evidence file $path")
     open(path, "w") do io
@@ -916,8 +916,7 @@ function _run_qualification_suite(evidence_dir::AbstractString, selected_ids,
     end
     mkpath(joinpath(out,"environment")); mkpath(joinpath(out,"commands"));
     mkpath(joinpath(out,"producer")); mkpath(joinpath(out,"replay")); mkpath(joinpath(out,"logs"))
-    environment = _environment_record(candidate,joinpath(out,"environment","producer-environment.toml");
-        require_clean=retain)
+    environment = _environment_record(candidate,joinpath(out,"environment","producer-environment.toml"))
     settings, all_fixtures = _fixture_records()
     fixtures = selected_ids === nothing ? all_fixtures :
         filter(item -> item["id"] in selected_ids, all_fixtures)

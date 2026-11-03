@@ -1959,7 +1959,12 @@ end
     approved["certificate_source_sha256"]="present"
     approved["interval_arithmetic_registered_tree_sha1"]="x"
     approved["interval_arithmetic_actual_tree_sha1"]="x"
+    approved["worktree_clean"]=true
     @test F._approved_profile_matches(approved,approved;pinned=false)
+    # A receipt and observation that agree on an unclean source are still
+    # rejected, so a direct `--case` producer cannot certify from a dirty tree.
+    dirty=copy(approved);dirty["worktree_clean"]=false
+    @test !F._approved_profile_matches(dirty,dirty;pinned=false)
     for (key,bad) in (("julia_threads",2),("julia_default_threads",2),
             ("julia_interactive_threads",1),("blas_threads",2),
             ("julia_num_threads","2"),("openblas_num_threads","2"))
