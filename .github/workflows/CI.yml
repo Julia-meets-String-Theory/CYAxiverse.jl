@@ -93,9 +93,10 @@ jobs:
 
   fast-cache:
     name: Fast tests (cache producer)
-    # Pushes save the Fast tests cache that pull requests restore. It never runs
-    # in the same workflow run as `fast`, so the shared cache name has one writer.
-    if: github.event_name == 'push'
+    # Pushes to vmm save the Fast tests cache that pull requests restore. It never
+    # runs in the same workflow run as `fast`, so the shared cache name has one
+    # writer. Not on main or tags: a tag ref's cache is usable only on that tag.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/vmm'
     runs-on: ubuntu-latest
     cache-mode: write
     env:

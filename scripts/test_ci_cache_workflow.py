@@ -77,7 +77,9 @@ class WorkflowWiring(unittest.TestCase):
 
     def test_push_fast_cache_job_produces_the_fast_cache(self) -> None:
         producer = _job_block(self.workflow, "fast-cache")
-        self.assertIn("    if: github.event_name == 'push'\n", producer)
+        # vmm only: a tag ref's cache is usable only by runs on that tag (owner decision).
+        self.assertIn("    if: github.event_name == 'push' && github.ref == 'refs/heads/vmm'\n",
+                      producer)
         self.assertIn("    cache-mode: write\n", producer)
         self.assertIn(f"          cache-name: {FAST_CACHE_NAME}\n", producer)
 
