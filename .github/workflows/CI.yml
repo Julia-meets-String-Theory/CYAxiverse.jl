@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - vmm
     tags: '*'
   pull_request:
     types: [opened, synchronize, reopened, labeled]
@@ -43,6 +44,8 @@ jobs:
         with:
           version: '1.12'
       - uses: julia-actions/cache@v2
+        with:
+          delete-old-caches: 'false'
       - name: Install documentation routing test dependencies
         run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
       - uses: actions/setup-python@v5
@@ -58,6 +61,9 @@ jobs:
     name: Fast tests
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # Restore the Fast tests cache (this PR's, else the base branch's) but never
+    # save one: repeated PR runs must not fill the 10 GB cache quota (CYAX-0223).
+    cache-mode: read
     env:
       CYAXIVERSE_TEST_FULL: '0'
       JULIA_NUM_THREADS: '1'
@@ -71,6 +77,43 @@ jobs:
           version: '1.12'
           arch: x64
       - uses: julia-actions/cache@v2
+        with:
+          cache-name: julia-cache;workflow=CI;job=fast
+          delete-old-caches: 'false'
+      - uses: julia-actions/julia-buildpkg@v1
+      - name: Instantiate notebook environment
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        run: |
+          julia --startup-file=no --project=notebooks -e 'using Pkg; Pkg.instantiate()'
+          git diff --exit-code -- notebooks/Project.toml notebooks/Manifest.toml
+      - uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: false
+
+  fast-cache:
+    name: Fast tests (cache producer)
+    # Pushes save the Fast tests cache that pull requests restore. It never runs
+    # in the same workflow run as `fast`, so the shared cache name has one writer.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    cache-mode: write
+    env:
+      CYAXIVERSE_TEST_FULL: '0'
+      JULIA_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+          arch: x64
+      - uses: julia-actions/cache@v2
+        with:
+          cache-name: julia-cache;workflow=CI;job=fast
+          delete-old-caches: 'false'
       - uses: julia-actions/julia-buildpkg@v1
       - name: Instantiate notebook environment
         env:
@@ -123,6 +166,8 @@ jobs:
           version: '1.12'
           arch: x64
       - uses: julia-actions/cache@v2
+        with:
+          delete-old-caches: 'false'
       - uses: julia-actions/julia-buildpkg@v1
       - name: Watchdog self-test, then fast and public qualification (clean tree, pinned profile)
         run: |
@@ -132,7 +177,8 @@ jobs:
 
   full:
     name: Full test suite
-    if: github.event_name != 'pull_request' || github.base_ref == 'main' || contains(github.event.pull_request.labels.*.name, 'full-tests')
+    # Pushes to vmm run the Fast tests cache producer instead (CYAX-0223).
+    if: (github.event_name != 'pull_request' && !(github.event_name == 'push' && github.ref == 'refs/heads/vmm')) || github.base_ref == 'main' || contains(github.event.pull_request.labels.*.name, 'full-tests')
     runs-on: ubuntu-latest
     env:
       CYAXIVERSE_TEST_FULL: '1'
@@ -150,6 +196,8 @@ jobs:
           version: '1.12'
           arch: x64
       - uses: julia-actions/cache@v2
+        with:
+          delete-old-caches: 'false'
       - uses: julia-actions/julia-buildpkg@v1
       - name: Instantiate notebook environment
         env:
@@ -171,3 +219,137 @@ jobs:
           | Commit | \`${{ github.sha }}\` |
           | Status | \`${{ job.status }}\` |
           EOF
+
+  cache-maintenance:
+    name: Cache maintenance
+    # Trusted push events only. Deletes caches of closed pull requests and all but
+    # the newest entry per ref and key prefix (CYAX-0223 R-007). It checks out
+    # nothing and runs no repository file: the logic below is its only code.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: read
+    concurrency:
+      group: ci-cache-maintenance
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Prune superseded and closed-pull-request caches
+        run: |
+          python3 - <<'PY'
+          # BEGIN cache-maintenance
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.request
+
+          PULL_MERGE_REF = re.compile(r"refs/pull/([0-9]+)/merge")
+          PER_PAGE = 100
+
+
+          class NotFound(Exception):
+              """The API reports that the resource no longer exists."""
+
+
+          class GitHubApi:
+              def __init__(self, repository, token):
+                  self.base = f"https://api.github.com/repos/{repository}"
+                  self.token = token
+
+              def _call(self, method, path):
+                  request = urllib.request.Request(
+                      self.base + path, method=method,
+                      headers={"Authorization": f"Bearer {self.token}",
+                               "Accept": "application/vnd.github+json",
+                               "X-GitHub-Api-Version": "2022-11-28"})
+                  try:
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          body = response.read()
+                  except urllib.error.HTTPError as error:
+                      if error.code == 404:
+                          raise NotFound(f"{method} {path}: 404") from error
+                      raise RuntimeError(f"{method} {path}: HTTP {error.code}") from error
+                  return json.loads(body) if body else None
+
+              def list_caches_page(self, page, per_page):
+                  data = self._call("GET", f"/actions/caches?per_page={per_page}&page={page}")
+                  return data["actions_caches"], data["total_count"]
+
+              def pr_state(self, number):
+                  return self._call("GET", f"/pulls/{number}")["state"]
+
+              def delete_cache(self, cache_id):
+                  self._call("DELETE", f"/actions/caches/{cache_id}")
+
+
+          def list_all_caches(api):
+              """Read every page into one snapshot before anything is selected."""
+              caches, page = [], 1
+              while True:
+                  entries, total = api.list_caches_page(page, PER_PAGE)
+                  caches.extend(entries)
+                  if not entries or len(caches) >= total:
+                      return caches
+                  page += 1
+
+
+          def restore_identity(cache):
+              key = cache["key"]
+              cut = key.find("run_id=")
+              return cache["ref"], key if cut < 0 else key[:cut]
+
+
+          def select(caches, pr_state):
+              """Entries of closed pull requests, plus all but the newest per identity."""
+              selected, groups, closed = [], {}, {}
+              for cache in caches:
+                  match = PULL_MERGE_REF.fullmatch(cache["ref"])
+                  if match:
+                      number = int(match.group(1))
+                      if number not in closed:
+                          closed[number] = pr_state(number) == "closed"
+                      if closed[number]:
+                          selected.append(cache)
+                          continue
+                  groups.setdefault(restore_identity(cache), []).append(cache)
+              for entries in groups.values():
+                  entries.sort(key=lambda cache: cache["created_at"], reverse=True)
+                  selected.extend(entries[1:])  # the newest entry of every group stays
+              return sorted(selected, key=lambda cache: cache["id"])
+
+
+          def main(api, out=print):
+              try:
+                  caches = list_all_caches(api)
+                  selected = select(caches, api.pr_state)
+              except Exception as error:  # nothing has been deleted yet
+                  out(f"::error::cache maintenance stopped before deleting anything: {error}")
+                  return 1
+              out(f"listed {len(caches)} caches; selected {len(selected)} for deletion")
+              for cache in selected:
+                  out(f"selected {cache['id']} {cache['ref']} {cache['key']}")
+              deleted = []
+              for cache in selected:
+                  try:
+                      api.delete_cache(cache["id"])
+                  except NotFound:
+                      out(f"cache {cache['id']} already removed")
+                      continue
+                  except Exception as error:
+                      out(f"::error::deleting cache {cache['id']} failed: {error}; "
+                          f"deleted before the failure: {deleted}")
+                      return 1
+                  deleted.append(cache["id"])
+                  out(f"deleted {cache['id']}")
+              out(f"deleted {len(deleted)} caches")
+              return 0
+
+
+          if __name__ == "__main__":
+              sys.exit(main(GitHubApi(os.environ["GITHUB_REPOSITORY"], os.environ["GH_TOKEN"])))
+          # END cache-maintenance
+          PY
