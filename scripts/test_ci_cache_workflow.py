@@ -11,6 +11,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "CI.yml"
 FAST_CACHE_NAME = "julia-cache;workflow=CI;job=fast"
+GC_STEP = (
+    "      - name: Collect unused depot entries before the cache is saved\n"
+    "        # julia-actions/cache runs Pkg.gc() only in the post step that\n"
+    "        # delete-old-caches: 'false' turns off (CYAX-0223).\n"
+    "        run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'\n"
+)
 BEGIN = "# BEGIN cache-maintenance"
 END = "# END cache-maintenance"
 
@@ -87,7 +93,24 @@ class WorkflowWiring(unittest.TestCase):
         fast = _job_block(self.workflow, "fast")
         producer = _job_block(self.workflow, "fast-cache")
         self.assertEqual(_section(fast, "env"), _section(producer, "env"))
-        self.assertEqual(_section(fast, "steps"), _section(producer, "steps"))
+        # The producer adds only the depot garbage collection before its save.
+        self.assertEqual(_section(fast, "steps").rstrip("\n") + "\n" + GC_STEP,
+                         _section(producer, "steps").rstrip("\n") + "\n")
+
+    def test_every_job_that_saves_a_julia_cache_collects_garbage_last(self) -> None:
+        saving = []
+        for job in _job_names(self.workflow):
+            block = _job_block(self.workflow, job)
+            if "uses: julia-actions/cache@" not in block:
+                continue
+            steps = _section(block, "steps").rstrip("\n") + "\n"
+            with self.subTest(job=job):
+                if "    cache-mode: read\n" in block:
+                    self.assertNotIn("Pkg.gc()", block)
+                else:
+                    saving.append(job)
+                    self.assertTrue(steps.endswith(GC_STEP), steps[-300:])
+        self.assertEqual(sorted(saving), ["fast-cache", "full", "lifecycle", "qualification"])
 
     def test_only_fast_and_its_producer_share_a_cache_name(self) -> None:
         named = {job: re.findall(r"cache-name: (.+)\n", _job_block(self.workflow, job))
