@@ -135,10 +135,11 @@ class WorkflowWiring(unittest.TestCase):
             "contains(github.event.pull_request.labels.*.name, 'full-tests')\n", full)
 
 
-def _cache(cache_id: int, ref: str, job: str, created: str, run: int | None = None) -> dict:
+def _cache(cache_id: int, ref: str, job: str, created: str, run: int | None = None,
+           version: str = "b3708dc8") -> dict:
     run = cache_id if run is None else run
     key = f"julia-cache;workflow=CI;job={job};os=Linux;run_id={run};run_attempt=1"
-    return {"id": cache_id, "ref": ref, "key": key, "created_at": created}
+    return {"id": cache_id, "ref": ref, "key": key, "created_at": created, "version": version}
 
 
 class FakeApi:
@@ -215,6 +216,15 @@ class MaintenanceSelection(unittest.TestCase):
         api = FakeApi(caches)
         self.run_main(api)
         self.assertEqual(api.deleted, [9])
+
+    def test_entries_with_different_cache_versions_are_kept_apart(self) -> None:
+        caches = [
+            _cache(1, "refs/heads/vmm", "fast", "2026-11-01T00:00:00Z", version="aaaa"),
+            _cache(2, "refs/heads/vmm", "fast", "2026-11-02T00:00:00Z", version="bbbb"),
+        ]
+        api = FakeApi(caches)
+        self.run_main(api)
+        self.assertEqual(api.deleted, [])
 
     def test_deletes_every_entry_of_a_closed_pull_request(self) -> None:
         caches = [

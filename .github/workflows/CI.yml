@@ -304,9 +304,11 @@ jobs:
 
 
           def restore_identity(cache):
+              """Ref, key prefix up to run_id=, and cache version (paths and compression):
+              entries differing in any of these can never stand in for each other."""
               key = cache["key"]
               cut = key.find("run_id=")
-              return cache["ref"], key if cut < 0 else key[:cut]
+              return cache["ref"], key if cut < 0 else key[:cut], cache.get("version")
 
 
           def select(caches, pr_state):
