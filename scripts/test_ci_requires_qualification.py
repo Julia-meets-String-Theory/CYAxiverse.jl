@@ -44,9 +44,22 @@ class ClassifyPaths(unittest.TestCase):
         self.assertTrue(self.gate.requires_qualification(
             ["docs/src/api.md", "test/fixtures/scientific_certification/run_fixture.jl"]))
 
+    def test_qualification_inputs_and_gate_wiring_require_qualification(self) -> None:
+        # The qualification job runs run_fixture.jl, which includes
+        # test/coverage_support.jl and replays through
+        # scripts/verify_scientific_certificate.jl in the root project environment;
+        # the gate script and CI.yml decide whether the job runs at all.
+        for path in ("Project.toml", "Manifest.toml", "scripts/verify_scientific_certificate.jl",
+                     "test/coverage_support.jl", "scripts/ci_requires_qualification.py",
+                     ".github/workflows/CI.yml"):
+            with self.subTest(path=path):
+                self.assertTrue(self.gate.requires_qualification([path]))
+
     def test_other_paths_do_not(self) -> None:
         for path in ("docs/src/api.md", "test/runtests.jl", "scripts/local_only.py",
-                     "test/fixtures/other/data.h5", "srcs/x.jl", "test/fixtures/scientific"):
+                     "test/fixtures/other/data.h5", "srcs/x.jl", "test/fixtures/scientific",
+                     "docs/Project.toml", "notebooks/Manifest.toml", "Project.toml.orig",
+                     ".github/workflows/Documentation.yml"):
             with self.subTest(path=path):
                 self.assertFalse(self.gate.requires_qualification([path]))
         self.assertFalse(self.gate.requires_qualification([]))
@@ -127,6 +140,13 @@ class WorkflowWiring(unittest.TestCase):
         self.assertIn("!cancelled()", qualification)
         self.assertIn("contains(github.event.pull_request.labels.*.name, 'full-tests')",
                       qualification)
+
+    def test_pull_requests_to_bases_other_than_vmm_always_run_qualification(self) -> None:
+        # The path gate runs only for PRs to vmm; a PR to main, a maintenance line
+        # or a stacked branch skips it, so it must run qualification directly.
+        qualification = _job_block(self.workflow, "qualification")
+        self.assertIn("github.base_ref != 'vmm'", qualification)
+        self.assertNotIn("github.base_ref == 'main'", qualification)
 
     def test_python_test_requirements_trigger_pull_request_ci(self) -> None:
         # The lifecycle job installs requirements-test.txt, so a PR changing only

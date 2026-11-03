@@ -13,10 +13,24 @@ from collections.abc import Iterable
 # alter the producer/replay evidence that only the qualification job exercises.
 QUALIFICATION_PATH_PREFIXES = ("src/", "test/fixtures/scientific_certification/")
 
+# Single files the qualification job depends on. run_fixture.jl includes
+# test/coverage_support.jl and replays through scripts/verify_scientific_certificate.jl;
+# the root Project.toml and Manifest.toml select the packages whose versions the
+# release pins check; the gate script and CI.yml decide whether the job runs.
+QUALIFICATION_PATHS = frozenset({
+    "Project.toml",
+    "Manifest.toml",
+    "scripts/verify_scientific_certificate.jl",
+    "test/coverage_support.jl",
+    "scripts/ci_requires_qualification.py",
+    ".github/workflows/CI.yml",
+})
+
 
 def requires_qualification(paths: Iterable[str]) -> bool:
     """Return whether any changed repository path needs scientific qualification."""
-    return any(path.startswith(QUALIFICATION_PATH_PREFIXES) for path in paths)
+    return any(path in QUALIFICATION_PATHS or path.startswith(QUALIFICATION_PATH_PREFIXES)
+               for path in paths)
 
 
 def changed_paths(base: str, head: str) -> list[str]:
