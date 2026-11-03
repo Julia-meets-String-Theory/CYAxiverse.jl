@@ -250,6 +250,9 @@ jobs:
 
           PULL_MERGE_REF = re.compile(r"refs/pull/([0-9]+)/merge")
           PER_PAGE = 100
+          # Pull requests restore but never save this cache (cache-mode: read), so an
+          # entry under a pull-request ref is stale and would shadow the vmm base.
+          FAST_TESTS_PREFIX = "julia-cache;workflow=CI;job=fast;"
 
 
           class NotFound(Exception):
@@ -322,7 +325,8 @@ jobs:
 
 
           def select(caches, pr_state):
-              """Entries of closed pull requests, plus all but the newest per identity."""
+              """Entries of closed pull requests and Fast tests entries of any pull
+              request, plus all but the newest entry per restore identity."""
               selected, groups, closed = [], {}, {}
               for cache in caches:
                   match = PULL_MERGE_REF.fullmatch(cache["ref"])
@@ -330,7 +334,7 @@ jobs:
                       number = int(match.group(1))
                       if number not in closed:
                           closed[number] = pr_state(number) == "closed"
-                      if closed[number]:
+                      if closed[number] or cache["key"].startswith(FAST_TESTS_PREFIX):
                           selected.append(cache)
                           continue
                   groups.setdefault(restore_identity(cache), []).append(cache)

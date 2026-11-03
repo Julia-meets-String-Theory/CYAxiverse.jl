@@ -242,17 +242,30 @@ class MaintenanceSelection(unittest.TestCase):
         caches = [
             _cache(1, "refs/pull/215/merge", "fast", "2026-11-03T00:00:00Z"),
             _cache(2, "refs/pull/215/merge", "full", "2026-11-03T00:00:00Z"),
-            _cache(3, "refs/pull/190/merge", "fast", "2026-11-03T00:00:00Z"),
+            _cache(3, "refs/pull/190/merge", "lifecycle", "2026-11-03T00:00:00Z"),
         ]
         api = FakeApi(caches, states={215: "closed", 190: "open"})
         self.run_main(api)
         self.assertEqual(sorted(api.deleted), [1, 2])
 
     def test_reopened_pull_request_keeps_its_newest_entries(self) -> None:
-        caches = [_cache(1, "refs/pull/12/merge", "fast", "2026-11-03T00:00:00Z")]
+        caches = [_cache(1, "refs/pull/12/merge", "lifecycle", "2026-11-03T00:00:00Z")]
         api = FakeApi(caches, states={12: "open"})
         self.run_main(api)
         self.assertEqual(api.deleted, [])
+
+    def test_fast_tests_entries_on_open_pull_requests_are_deleted(self) -> None:
+        # Pull requests no longer save the Fast tests cache, so any such entry is
+        # stale and would be restored instead of the vmm base.
+        caches = [
+            _cache(1, "refs/pull/190/merge", "fast", "2026-11-03T00:00:00Z"),
+            _cache(2, "refs/pull/190/merge", "lifecycle", "2026-11-03T00:00:00Z"),
+            _cache(3, "refs/pull/190/merge", "fastx", "2026-11-03T00:00:00Z"),
+            _cache(4, "refs/heads/vmm", "fast", "2026-11-03T00:00:00Z"),
+        ]
+        api = FakeApi(caches, states={190: "open"})
+        self.run_main(api)
+        self.assertEqual(api.deleted, [1])
 
     def test_only_strict_pull_merge_refs_are_treated_as_pull_requests(self) -> None:
         caches = [
