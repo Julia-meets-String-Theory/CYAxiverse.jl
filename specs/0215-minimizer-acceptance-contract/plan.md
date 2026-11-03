@@ -11,14 +11,16 @@ R-003. The review of `92f4c71` required text corrections only, so the candidate
 did not change. The review of `898029d` required a help-text correction, so the
 candidate changed to `4abbd60`; that change is text only (help text, docstrings,
 comments and their test). After the review of `033f673` the owner kept
-`--method legacy` as the batch default, so the candidate changed to `a6a07da`. Against
-`a6a07da`, the review of `94a61f7` did not pass, and the reviews of `043cc3f`
-and `f88be82` passed; the corrections after them are text only. The owner
-approved `96169a1`. The G2 review of `f658144` found a CI qualification gap, and
-the owner had it fixed in PR #215, so the candidate changed to `4cca53d` (CI and
-qualification fixture only). The plan therefore maps each requirement to its
-implementation and evidence, and defines the path to approval and merge. It does
-not plan new implementation.
+`--method legacy` as the batch default, so the candidate changed to `a6a07da`.
+Against `a6a07da`, the review of `94a61f7` did not pass, and the reviews of
+`043cc3f` and `f88be82` passed; the corrections after them are text only. The
+owner approved `96169a1`. The G2 review of `f658144` found a CI qualification
+gap, and the owner had it fixed in PR #215, so the candidate changed to
+`4cca53d` (the CI qualification gate and its test, the qualification fixture and
+`test/scientific_certification.jl` only). The review of `6916f0d` passed; its
+text findings are corrected and receive a focused review. The plan therefore
+maps each requirement to its implementation and evidence, and defines the path
+to approval and merge. It does not plan new implementation.
 
 ## Requirement map
 
@@ -39,10 +41,9 @@ not plan new implementation.
 
 1. **G0.** An independent Scientific/Numerical Reviewer reviews the draft
    `spec.md` at a named commit SHA. The owner then approves that exact
-   revision in a PR #215 comment that names the SHA. By owner direction, the
-   provenance and editorial corrections after the review of `f88be82` are not
-   re-reviewed; the approval names the corrected revision and `f88be82`
-   (`spec.md` G0).
+   revision in a PR #215 comment that names the SHA. (The exception under
+   which the owner approved the unreviewed corrections of `96169a1` applied to
+   that approval only; it is superseded, `spec.md` G0.)
 2. **If G0 amends a decision, or a blocking finding needs an implementation
    change:** change the implementation, repeat the break checks and suites,
    update the implementation candidate, and repeat T001, T002, T003 and T005

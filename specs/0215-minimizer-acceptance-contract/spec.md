@@ -177,18 +177,38 @@ identifier matches the Issue number.
 - Owner decision after the G2 review of `f658144`: fix it in PR #215. With it,
   the same candidate restores the clean-tree check for direct qualification
   producers, which the test-suite restructuring had dropped; the PR #215
-  description discloses two changes it had not listed; and this specification
-  names #221 for the `auto` repair. The new candidate is `4cca53d`. Because
-  *Candidate identity* changes, T001, T002, T003 and T005 are repeated, and
-  the approval of `96169a1` no longer covers the candidate (G0).
+  description is to disclose two changes it had not listed (the notebook
+  initialization smoke test now runs in the full suite only, and
+  `scripts/orientifold_replay_projection.py` writes under the system temporary
+  directory instead of `/private/tmp`); and this specification names #221 for
+  the `auto` repair. The new candidate is `4cca53d`. Because *Candidate
+  identity* changes, T001, T002, T003 and T005 are repeated, and the approval
+  of `96169a1` no longer covers the candidate (G0).
+- Draft `6916f0d` (implementation candidate `4cca53d`): independent review
+  passed, with non-blocking findings. `plan.md` and `tasks.md` still described
+  the approval exception for `96169a1` as if it applied to the next approval;
+  this history did not name the two changes to be disclosed; `plan.md`
+  described `4cca53d` as changing only CI and the qualification fixture,
+  although it also changes `test/scientific_certification.jl`; a PR to `vmm`
+  that changes no qualification input no longer runs the release-pin check;
+  and `LocalPreferences.toml` is in neither the workflow path filter nor the
+  qualification gate, as before PR #215.
+- Owner decision after the review of `6916f0d`: the text findings are corrected
+  in `specs/` only, and the corrected revision receives a focused independent
+  review before the owner approves it. The residual release-pin exposure is
+  accepted as CI policy and disclosed in the PR #215 description. The
+  `LocalPreferences.toml` omission, and qualifying the `CI.yml` comment's
+  "always" by the workflow path filter, are left to a separate Issue, so that
+  the implementation candidate stays `4cca53d`.
 
-This list records nine specification reviews: seven did not pass, and the
-reviews of `043cc3f` and `f88be82` passed. It also records one G2 review, of
-`f658144`, which did not pass. The failed reviews are not relabelled as passed.
-The record of the review of `f88be82` is a PR #215 comment (T002). The records
-of the other eight specification reviews are not published on GitHub; this list
-is their only record in the repository. The amendments become durable when the
-owner approves the revision that contains them at G0.
+This list records ten specification reviews: seven did not pass, and the
+reviews of `043cc3f`, `f88be82` and `6916f0d` passed. It also records one G2
+review, of `f658144`, which did not pass. The failed reviews are not relabelled
+as passed. The records of the reviews of `f88be82` and `6916f0d` are PR #215
+comments (T002). The records of the other eight specification reviews are not
+published on GitHub; this list is their only record in the repository. The
+amendments become durable when the owner approves the revision that contains
+them at G0.
 
 ## Scope
 
@@ -821,7 +841,8 @@ Two identities are tracked:
     `043cc3f` and `f88be82`, passed, each followed by text corrections at the
     owner's request. Approved at `96169a1`. G2 review of `f658144` not passed
     (*Review and amendment history*).
-  - `4cca53d` (current): the next draft needs a fresh review (T002).
+  - `4cca53d` (current): reviewed with draft `6916f0d`, passed, followed by
+    text corrections that receive a focused review (T002).
 - **Final merge candidate:** the PR #215 head after the approval-recording
   commit. G1 checks that it differs from the implementation candidate only in
   `specs/0215-minimizer-acceptance-contract/`. G2 reviews it, and CI must pass

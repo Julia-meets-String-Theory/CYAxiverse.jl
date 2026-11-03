@@ -24,12 +24,14 @@
     review recorded on PR #215. By owner direction, the provenance and
     editorial corrections after it were not re-reviewed, and the owner approved
     `96169a1` (`spec.md` G0). That approval is superseded by the candidate
-    change after the G2 review of `f658144`; the next draft needs a fresh
-    review against `4cca53d`.
+    change after the G2 review of `f658144`. The review of `6916f0d` (against
+    `4cca53d`) passed; it is recorded on PR #215. Its text findings are
+    corrected, and the corrected draft receives a focused review.
   - Output: a review record, as a PR #215 comment, that names the reviewer
     role and the reviewed SHA, with no unresolved blocking finding.
-  - Verify: the owner approves in T003 the reviewed SHA, or the revision
-    corrected after it under the G0 exception in `spec.md`.
+  - Verify: the owner approves in T003 the SHA reviewed here. (The G0
+    exception in `spec.md` applied only to the superseded approval of
+    `96169a1`.)
   - Escalate if: review finds an unlisted scientific decision, or a blocking
     finding needs an implementation change (update the implementation
     candidate and repeat T001, T002, T003 and T005).
@@ -38,7 +40,7 @@
   - Input: the `spec.md` revision reviewed in T002.
   - Output: a durable owner comment on PR #215 that approves that revision by
     its commit SHA.
-  - Verify: the comment names the approved SHA and the SHA reviewed in T002.
+  - Verify: the comment names the SHA reviewed in T002.
   - Escalate if: the owner amends a requirement (update the implementation
     candidate if needed, and repeat T001, T002, T003 and T005 after the
     change).
