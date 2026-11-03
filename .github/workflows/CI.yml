@@ -349,7 +349,9 @@ jobs:
                   return 1
               out(f"listed {len(caches)} caches; selected {len(selected)} for deletion")
               for cache in selected:
-                  out(f"selected {cache['id']} {cache['ref']} {cache['key']}")
+                  # JSON-quoted: a ref or key written by PR code cannot start a new log
+                  # line, so it cannot inject a workflow command.
+                  out(f"selected {cache['id']} {json.dumps(cache['ref'])} {json.dumps(cache['key'])}")
               deleted = []
               for cache in selected:
                   try:

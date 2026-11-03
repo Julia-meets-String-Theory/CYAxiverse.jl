@@ -344,6 +344,20 @@ class MaintenanceSelection(unittest.TestCase):
         self.assertEqual(api.deleted, [2])
         self.assertTrue(any("1" in line and "already" in line for line in lines))
 
+    def test_logged_keys_and_refs_cannot_inject_workflow_commands(self) -> None:
+        hostile = _cache(1, "refs/heads/vmm", "fast", "2026-11-01T00:00:00Z")
+        hostile["key"] = hostile["key"] + "\n::error::injected"
+        hostile["ref"] = "refs/heads/vmm"
+        caches = [hostile, _cache(2, "refs/heads/vmm", "fast", "2026-11-02T00:00:00Z")]
+        # The suffix follows run_id=, so entry 1 shares entry 2's group and is selected.
+        api = FakeApi(caches)
+        _, lines = self.run_main(api)
+        self.assertTrue(any("injected" in line for line in lines))
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertNotIn("\n", line)
+                self.assertNotIn("\r", line)
+
     def test_every_selected_id_is_logged_before_deleting(self) -> None:
         caches = [
             _cache(1, "refs/heads/vmm", "fast", "2026-11-01T00:00:00Z"),
