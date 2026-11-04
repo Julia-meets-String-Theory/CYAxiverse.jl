@@ -1,4 +1,4 @@
-# Methodology v1: scope, assumptions, validity range
+# Methodology v1 and v2: scope, assumptions, validity range
 
 The engine applies one fixed, audited methodology (approved 2026-10-01 for the Shoroq study). It is stored in
 `configs/methodology_v1.json` and `configs/theta_methodology_v1.json` and enforced by the relic driver, which refuses
@@ -112,6 +112,68 @@ the R levels 0.1/0.8/0.95 of the reported thresholds. Output columns named `..._
 The derived scenario quantities (H_R, 1+z_R, g(T_R), the PRE constant) are computed by the 50-digit reference
 implementation B; for the three Shoroq temperatures they reproduce the frozen configuration bit for bit.
 
+## Methodology v2: constant pre-reheating equation of state w_R
+
+Methodology v2 (`configs/methodology_v2.json`, run files `cyaxiverse_relic_run/2`, output schema `configs/relic_output_schema_v2.json`,
+policy `configs/reheating_policy_v2.json`) lets each reheating scenario carry its own constant equation of state `w_R` of the epoch
+before reheating. **Everything else is methodology v1, unchanged**: the spectra, f = f_pert, the cosmology constants, the onset
+3H = m, the POST_REHEATING calculation, the classes and class thresholds (3H0, 3H(T_eq), 3H_R), the inflation cut, the PRIMARY and
+PARTIAL_VALIDITY populations, θ_ref = π/2 as a normalisation, Ω ∝ θ², the common-angle analysis. At `w_R = 0` the engine calls the v1
+function itself, so a v2 run at `w_R = 0` reproduces v1 bit for bit apart from the extra `w_R` column (tested, `tests/test_wR_general.py` D2–D4).
+Methodology v1 stays fixed at w_R = 0: a v1 run file with `w_R` is refused, and a hand-edited v1 configuration with a per-scenario `w_R` is
+refused by the engine.
+
+**Model.** p_R = w_R ρ_R before the instantaneous transition to radiation at T_R, so ρ_R ∝ a^(−3(1+w_R)) and
+H(z) = H_R [(1+z)/(1+z_R)]^(3(1+w_R)/2) for z ≥ z_R (Fuzzy Axions, arXiv:2412.12012, eq. (2.2)); after T_R the v1 cosmology holds.
+H_R is defined by ρ_r(T_R) = 3 H_R² M_pl² (radiation only), (1+z_R) by entropy conservation, (2.1); both as in v1.
+
+**Derivation.** For a mode with m > 3H_R the onset 3H(z_a) = m lies in the pre-reheating epoch:
+
+  (1+z_a) = (1+z_R) (m / 3H_R)^(2/(3(1+w_R)))                                   (2.15)
+  Ω h² = ρ_a(today)/(ρ_c/h²), ρ_a(onset) = ½ m² f² θ², ρ_a ∝ a⁻³ after onset (the number density is conserved through the instantaneous
+  transition and the entropy-conserving radiation era):
+  Ω h² = m² f² θ² / [2 (1+z_a)³ · 3 M_pl² H100²]                                 (2.10)
+
+Dividing by the same expression at w_R = 0 gives the **relative law** (full normalisation retained; both factors have the same dimension
+and the same (1+z_R)³ matching):
+
+  Ω(w_R) / Ω(0) = (m / 3H_R)^(2 w_R/(1+w_R)),   with Ω(0) = (9/2) f² θ² H_R² [s0/s(T_R)] / (3 M_pl² H100²), independent of m.
+
+Mass dependence at fixed f, θ, T_R, d ln Ω / d ln m = 2w_R/(1+w_R): 0 (w_R = 0), −1 (−1/3), −2 (−1/2), +1/2 (+1/3). These are examples; every
+w_R in the domain is supported (e.g. 0.17, −0.42, 0.77 are in the validation matrix). At m = 3H_R the onset is at reheating for every w_R: (1+z_a) = (1+z_R),
+Ω is w_R-independent and continuous with the POST value (they differ only by the matter and Λ terms that the POST branch's full H contains and
+the radiation-only H_R of (2.2) does not, relative O(T_eq/T_R)). The class boundary 3H_R does not depend on w_R, so **classes, inflation validity,
+inclusion and all POST, LATE and FROZEN values are independent of w_R at fixed T_R** (tested).
+
+**Supported domain (enforced).** `-1 < w_R <= 1`, a finite number (booleans, strings and null are refused; a missing `w_R` means the documented default 0.0).
+- w_R > −1 is required: H ∝ a^(−3(1+w_R)/2) must fall as the universe expands so that 3H = m is reached before reheating for m > 3H_R. w_R = −1 is a
+  constant-H (de Sitter) phase with no onset; w_R < −1 has H growing with a, so the "epoch before H_R" would have smaller H.
+- w_R ≤ 1: a causal fluid (sound speed ≤ c); w_R = 1 is kination.
+- A (T_reh, w_R) pair may appear once per run (two labels for identical physics would be ambiguous). T_reh limits are those of v1.
+
+**Warnings** (recorded in `relic/scenario_checks.json`, printed by the composer, no number changes):
+- w_R < −1/3: the pre-reheating epoch is **accelerating** (ä > 0; w_R = −1/3 itself is the coasting borderline). Mathematically executable, but it is
+  an inflation-like continuation, not a conventional reheating epoch; the instantaneous switch to radiation then needs a microphysical interpretation that a
+  constant-w_R prescription does not give. Conventional reheating epochs have w_R ≥ 0 (matter-like, w_R = 0) up to 1/3 (radiation-like, noted) and kination (1).
+- w_R < −0.9: 1+z_a grows very steeply (exponent 2/(3(1+w_R)) up to 6.7 and more); see numerical range.
+- A constant effective w_R is not a complete reheating model. The sudden-onset systematic grows with the expansion rate of the background (below).
+
+**Numerical range.** For w_R ≠ 0 the engine evaluates ln Ω = ln[m² f² θ²/(2 ρ_c/h²)] − 3 ln(1+z_R) − [2/(1+w_R)] ln(m/3H_R) in logarithms (no overflow of
+(1+z_a)³). An abundance or (1+z_a) outside the float64 normal range (|ln Ω| > 708) **stops the run with a message naming the mode; nothing is
+clamped, replaced by zero, or written as a bound.** For T_R = 5 MeV, modes up to 3H_I,max are in the PRE branch with m/3H_R up to about 10³⁶, so
+the heaviest valid mode (m = 1.4·10¹⁴ GeV, f = 10¹⁶ GeV) has ln Ω below −708 for w_R below about −0.82 (T_R = 5 MeV), −0.86 (10⁴ GeV) and −0.92 (10¹⁰ GeV); lighter modes reach the limit later (tested: w_R = −0.99 at 5 MeV stops; w_R = −0.5 at 5 MeV runs). Remedy: use a w_R closer to 0, a higher T_R, or
+a smaller set of heavy modes. The log-form engine result and the w_R → 0 limit agree with the exact ratio to about 10⁻¹⁴ (w = 10⁻¹², 10⁻⁶ tested).
+
+**Verification (independent of the engine's closed form).** `tests/test_wR_general.py`: the onset is found by bisection on H(z) of (2.2) in 50 digits and Ω from (2.10)
+(`omega_by_root_finding`), for every PRE row of a 21-scenario run (3 T_R × w_R ∈ {−1/2, −1/3, 0, 1/3, 0.17, −0.42, 0.77}) to 7·10⁻¹⁴;
+mass exponents, the normalisation at m = 3H_R, w_R → 0 and PRE/POST continuity at 50 digits; the independent verifiers C (float64, every row) and B (50-digit
+samples and whole geometries) are driven by the scenario's w_R read from the run configuration; theta thresholds and N_max are recomputed from the geometry totals.
+
+**Sudden-onset systematic of the pre-reheating prescription** (`python tests/ode_onset_check_wR.py`; idealised constant-mass, pure power-law setups, harmonic, small θ_i;
+not applied, not universal): exact/sudden = 0.403 (w_R = 1/3, a ∝ t^(1/2)), 0.330 (0.17), 0.250 (0), 0.131 (−1/4), 0.094 (−1/3), 0.061 (−0.42), 0.035 (−1/2); i.e. the
+sudden-onset value is 2.5, 3.0, 4.0, 7.6, 10.6, 16.5, 28 times larger. The approximation error therefore **grows rapidly as w_R decreases**, and the v1 statement
+that the TIGHT band does not cover the approximation uncertainty holds a fortiori. Results at negative w_R are results of the stated prescription, not precision predictions.
+
 ## Vacuum validity of the input spectra
 
 A spectrum is valid only at a minimum of the axion potential. At θ = 0 the production mass matrix can have tachyonic
@@ -176,8 +238,8 @@ Three kinds of uncertainty must not be mixed:
 
 ## Known limitations
 
-- **v1 scope.** Fixed cosmology and w_R = 0 only. Run files are strict: an unknown key (for instance `w_R`) is refused,
-  not ignored.
+- **Scope.** Fixed cosmology. Methodology v1: w_R = 0 only; run files are strict, an unknown key (for instance `w_R` in a v1 run file) is refused, not ignored.
+  Methodology v2: a constant w_R per scenario in −1 < w_R ≤ 1 (section above); no time-dependent w, no gradual reheating transition, no temperature-dependent mass.
 - **Spectra.** Only the leading h11 instantons enter the mass matrix; f_pert is basis-dependent by √2 for near-degenerate
   modes; a few modes have λ_self < 0. Two vmm conventions are inherited unchanged (`SCIENTIFIC_SCOPE_AND_CONVENTIONS.md`):
   - the pair-instanton amplitude, sign and phase prescription, adopted as a modelling choice (framework of arXiv:2309.01831);

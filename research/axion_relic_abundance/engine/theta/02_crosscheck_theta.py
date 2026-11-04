@@ -89,7 +89,12 @@ for lab in LABS:
     out["census"][lab] = {"python": {k: int(v) for k, v in cen.items()}, "agree": bool(c3)}; ok &= bool(c3)
     pre = m[(m.category == "PRE_REHEATING") & m.inflation_valid]
     k = (pre.Omega_h2_at_theta_ref.astype(float) / (pre.f_pert_GeV.astype(float) ** 2 * TR ** 2)).to_numpy()   # float even if every value is integral
-    kc = next(s_["Omega_pre_h2_per_fGeV2_theta2"] for s_ in pcfg["reheating"]["scenarios"] if s_["label"] == lab)
+    sc_ = next(s_ for s_ in pcfg["reheating"]["scenarios"] if s_["label"] == lab)
+    if pcfg.get("methodology_version", 1) == 1:
+        kc = sc_["Omega_pre_h2_per_fGeV2_theta2"]
+    else:             # v2: k(T_R) (m/3H_R)^(2 w_R/(1+w_R)), equal to k(T_R) at w_R = 0
+        mg = 10.0 ** (pre.log10_mass_eV.astype(float).to_numpy() - 9)
+        kc = sc_["Omega_pre_h2_per_fGeV2_theta2_at_m_eq_3H_R"] * (mg / (3 * sc_["H_R_GeV"])) ** sc_["PRE_mass_exponent_2w_over_1pw"]
     out["new6"][lab] = {"PRE_c_over_k_max_rel": float(np.max(np.abs(k / kc - 1))) if len(k) else 0.0}; ok &= out["new6"][lab]["PRE_c_over_k_max_rel"] < 1e-12
 
 out["all_checks_pass"] = bool(ok)

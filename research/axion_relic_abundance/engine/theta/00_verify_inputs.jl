@@ -145,8 +145,16 @@ for lab in LABS
     for r in eachrow(M)
         r.included_in_cdm_sum || continue
         if r.category == "PRE_REHEATING"
-            om = Base.invokelatest(P.pre_reheating_abundance, tab, r.log10_mass_eV, r.log10_f_pert_GeV, treh).omega
-            relk = max(relk, abs(r.Omega_h2_at_theta_ref / (r.f_pert_GeV^2 * TH_REF^2) / sc["Omega_pre_h2_per_fGeV2_theta2"] - 1))
+            w = WR[lab]
+            if w == 0.0      # v1 and v2 at w_R = 0: the frozen physics block itself
+                om = Base.invokelatest(P.pre_reheating_abundance, tab, r.log10_mass_eV, r.log10_f_pert_GeV, treh).omega
+                relk = max(relk, abs(r.Omega_h2_at_theta_ref / (r.f_pert_GeV^2 * TH_REF^2) / sc[METHOD_VERSION == 1 ? "Omega_pre_h2_per_fGeV2_theta2" : "Omega_pre_h2_per_fGeV2_theta2_at_m_eq_3H_R"] - 1))
+            else             # v2, w_R != 0: direct power form (2.15)+(2.10) from the physics block's constants, independent of the engine's logarithmic evaluation
+                mg = 10.0^(r.log10_mass_eV - 9); HR = Base.invokelatest(P.hubble_reheat, tab, treh); opz = Base.invokelatest(P.onepz_reheat, tab, treh) * (mg / (3HR))^(2 / (3 * (1 + w)))
+                om = 0.5 * mg^2 * (10.0^r.log10_f_pert_GeV)^2 * TH_REF^2 / opz^3 / P.RHO_CRIT_OVER_H2_GEV4
+                kexp = sc["Omega_pre_h2_per_fGeV2_theta2_at_m_eq_3H_R"] * (mg / (3 * sc["H_R_GeV"]))^sc["PRE_mass_exponent_2w_over_1pw"]   # relative form k(T_R) (m/3H_R)^(2w/(1+w))
+                relk = max(relk, abs(r.Omega_h2_at_theta_ref / (r.f_pert_GeV^2 * TH_REF^2) / kexp - 1))
+            end
         else
             om = Base.invokelatest(P.raw_abundance, tab, r.log10_mass_eV, r.log10_f_pert_GeV, r.T_osc_GeV).omega
         end

@@ -66,7 +66,7 @@ This contribution adds no file under `src/` and changes no upstream file.
 | units | masses in eV (log₁₀), decay constants in GeV (log₁₀), M_pl = 2.435·10¹⁸ GeV (reduced) |
 | physical modes | eigenmodes with m ≥ H₀ = 2.13·0.7·10⁻³³ eV, as stored by the vmm solver. The solver returns only positive-curvature directions, so θ = 0 stability is checked separately (vacuum-validation states) |
 | decay constant | f_relic = f_pert (C = 1) |
-| reheating | before T_reh: modulus (matter) domination, w_R = 0. PRE_REHEATING modes follow Fuzzy Axions, arXiv:2412.12012, eqs. (2.10) + (2.15). After T_reh: radiation domination with full H(T). g\*(T) is from Saikawa & Shirai, arXiv:1803.01038 |
+| reheating | before T_reh: modulus (matter) domination, w_R = 0 (methodology v1); methodology v2 lets each scenario state a constant w_R with -1 < w_R <= 1 (default 0), a model prescription with an instantaneous transition to radiation, not a microphysical reheating model (`METHODOLOGY.md`, "Methodology v2"). PRE_REHEATING modes follow Fuzzy Axions, arXiv:2412.12012, eqs. (2.10) + (2.15). After T_reh: radiation domination with full H(T). g\*(T) is from Saikawa & Shirai, arXiv:1803.01038 |
 | inflation validity | modes with m > 3H_I,max ≈ 1.4·10¹⁴ GeV (arXiv:2412.12012, footnote 16) are not evaluated (`INFLATION_VALIDITY_EXCLUDED`). This is not a zero abundance |
 | reference angle | θ_ref = π/2 is only the internal normalization of stored abundances, not a physical angle |
 | DM target | Ω_DM h² = 0.12; TIGHT band 0.9 ≤ Ω/Ω_DM ≤ 1 |

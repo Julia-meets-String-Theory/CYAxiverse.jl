@@ -41,7 +41,14 @@ csvw(path, df) = (mkpath(dirname(path)); CSV.write(path, df); println("wrote ", 
 jsonw(path, x) = (mkpath(dirname(path)); open(io -> JSON.print(io, x, 1), path, "w"); println("wrote ", relpath(path, FA)))
 # column types from the output schema, not from inference: %.17g writes an integral float such as 1.19e16 without a
 # decimal point, and a small table may hold only such values in a column (Int64 inference would then overflow f^2)
-const SCHEMA_TABLES = JSON.parsefile(joinpath(REPO, "configs", "relic_output_schema.json"))["tables"]
+# methodology v2 adds the column w_R to every table (configs/relic_output_schema_v2.json); a v1 run configuration has no methodology_version
+const METHOD_VERSION = Int(get(PCFG, "methodology_version", 1))
+METHOD_VERSION in (1, 2) || error("run configuration: unsupported methodology_version $(METHOD_VERSION) (1 or 2)")
+const SCHEMA_TABLES = JSON.parsefile(joinpath(REPO, "configs", METHOD_VERSION == 1 ? "relic_output_schema.json" : "relic_output_schema_v2.json"))["tables"]
+# constant pre-reheating equation of state of every scenario: fixed 0 in v1, the scenario's w_R in v2
+const WR = Dict(String(s["label"]) => (METHOD_VERSION == 1 ? 0.0 : Float64(s["w_R"])) for s in PCFG["reheating"]["scenarios"])
+# v2 theta outputs carry w_R next to every scenario label (v1 outputs are unchanged)
+tagw!(df) = (METHOD_VERSION >= 2 && nrow(df) > 0 && (df.w_R = [WR[l] for l in df.scenario]); df)
 floatcols(t) = Dict(Symbol(c["name"]) => Float64 for c in SCHEMA_TABLES[t] if c["type"] == "float")
 geometry(lab) = CSV.read(joinpath(PTAB, "geometry_summary_$(lab).csv"), DataFrame; missingstring="NA", types=floatcols("geometry_summary_<label>.csv"))
 master(lab) = CSV.read(joinpath(PTAB, "master_modes_$(lab).csv"), DataFrame; missingstring="NA", types=floatcols("master_modes_<label>.csv"))

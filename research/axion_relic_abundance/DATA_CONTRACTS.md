@@ -17,6 +17,23 @@ A mode is identified by `(geometry_id, mode_index)`.
 Unknown keys are refused at every level (run file, scenario objects — only `label`, `T_reh_GeV`, `description` — and
 theta sections `theta`, `dark_matter`, `optimisation`); labels must be unique also ignoring case; booleans are not numbers.
 
+### 1b. Run file of methodology v2 (`cyaxiverse_relic_run/2`; examples in `examples/wR_general/`)
+
+Same keys as 1, with `w_R` allowed in every scenario object. `engine/run_relic.sh` reads the run file's `schema` and selects the methodology:
+`cyaxiverse_relic_run/1` -> `configs/methodology_v1.json` (w_R = 0 fixed; a `w_R` key is refused), `cyaxiverse_relic_run/2` -> `configs/methodology_v2.json`.
+The two must match (a v1 run file with the v2 methodology file, or the reverse, is refused by the composer). `engine/run_theta.sh` uses the same run file
+(the theta analysis is the same in both versions and takes `w_R` from the relic run).
+
+| key | type | meaning |
+|---|---|---|
+| `scenarios[].w_R` | number, **-1 < w_R <= 1**, optional (default **0.0**) | constant equation of state p = w_R ρ of the pre-reheating epoch of this scenario (boolean, string, null, NaN refused) |
+
+- A (`T_reh_GeV`, `w_R`) pair may appear once per run. Labels are file names: choose self-explanatory ones (for example `T1e4-w0p17`); a label never carries the physics, the
+  `w_R` column does.
+- Accepted with a recorded warning: w_R < -1/3 (accelerating epoch), w_R < -0.9 (steep; the run stops for a mode whose abundance leaves the float64 range). Noted: w_R = 1/3.
+- The effective `w_R` of each scenario is written to `relic/run_config.json` (`methodology_version: 2`, `reheating.scenarios[].w_R`, with `PRE_mass_exponent_2w_over_1pw` and
+  `Omega_pre_h2_per_fGeV2_theta2_at_m_eq_3H_R`), to `relic/scenario_checks.json`, `run_metadata.json`, `global_summary.json`, and as column `w_R` of every output table.
+
 ## 2. Existing spectra list (`cyaxiverse_relic_spectra/1`; example `configs/spectra_list.example.json`)
 
 | key | meaning |
@@ -92,7 +109,9 @@ two files), `spectra/<geometry_id>/cyax.h5` (symlinks).
 
 ## 6. Outputs
 
-Column names, types, units and NA rules of every table: `configs/relic_output_schema.json` (null token `NA`, booleans
+Column names, types, units and NA rules of every table: `configs/relic_output_schema.json` (methodology v1) or `configs/relic_output_schema_v2.json` (v2: the same tables plus the
+column `w_R` appended last, and the branch label `fuzzy_wR_general_eq2.10_2.15` for PRE modes with w_R != 0; `fuzzy_wR0_eq2.10_2.15` for w_R = 0). v2 theta outputs carry `w_R` in
+every per-scenario table and summary (v1 theta outputs are unchanged). (null token `NA`, booleans
 `true`/`false`, floats written with `%.17g`, so round-trip exact). Read the tables with the schema types: an integral
 float such as 1.1873334118689998e16 is written without a decimal point, and type inference on a small table can
 otherwise yield an integer column. Main units: masses eV, decay constants GeV, temperatures GeV, H in GeV

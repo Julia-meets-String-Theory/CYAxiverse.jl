@@ -13,11 +13,12 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import SCHEMA, canonical_modes, check_run_location, dump_json, load_config
+from common import SCHEMA, canonical_modes, check_run_location, dump_json, load_config, methodology_version, scenario_w_R, schema_path
 
 OUT = os.path.abspath(sys.argv[1]); EXPECTED = int(sys.argv[2]) if len(sys.argv) > 2 else None
-cfg = load_config(); check_run_location(cfg, os.path.dirname(OUT)); sch = json.load(open(SCHEMA)); NA = sch["null_token"]
+cfg = load_config(); check_run_location(cfg, os.path.dirname(OUT)); MV = methodology_version(cfg); sch = json.load(open(schema_path(cfg))); NA = sch["null_token"]
 LABS = [s["label"] for s in cfg["reheating"]["scenarios"]]; TREH = {s["label"]: s["T_reh_GeV"] for s in cfg["reheating"]["scenarios"]}
+WR = {s["label"]: scenario_w_R(cfg, s) for s in cfg["reheating"]["scenarios"]}      # 0.0 for every scenario in v1
 errors = []
 def err(msg):
     if len(errors) < 200:
@@ -102,7 +103,7 @@ for lab in LABS:
         "FROZEN_state": bool((st[cat == "FROZEN"] == "NOT_INCLUDED_FROZEN").all()),
         "LATE_state": bool((st[(cat == "LATE") & val] == "NOT_INCLUDED_LATE").all()),
         "PRE_T_osc_NA": bool((M.T_osc_GeV[cat == "PRE_REHEATING"] == NA).all()),
-        "branch_matches_state": bool((M.abundance_branch == st.map({"INCLUDED_POST_REHEATING": "post_reheating_full_H", "INCLUDED_PRE_REHEATING": "fuzzy_wR0_eq2.10_2.15",
+        "branch_matches_state": bool((M.abundance_branch == st.map({"INCLUDED_POST_REHEATING": "post_reheating_full_H", "INCLUDED_PRE_REHEATING": "fuzzy_wR0_eq2.10_2.15" if WR[lab] == 0 else "fuzzy_wR_general_eq2.10_2.15",
                                        "NOT_INCLUDED_LATE": "late_full_H_census_only", "NOT_INCLUDED_FROZEN": "frozen_not_oscillating",
                                        "INFLATIONARY_VALIDITY_EXCLUDED": "not_evaluated_inflation_invalid"})).all()),
         "scenario_and_T_reh_constant": bool((M.scenario == lab).all() and (M.T_reh_GeV.astype(float) == TREH[lab]).all()),
@@ -111,6 +112,12 @@ for lab in LABS:
                                                 np.allclose(M.f_pert_GeV.astype(float), 10 ** M.log10_f_pert_GeV.astype(float), rtol=1e-15, atol=0)),
         "no_zero_written_for_excluded": bool((M.Omega_h2_at_theta_ref[st == "INFLATIONARY_VALIDITY_EXCLUDED"] == NA).all()),
     }
+    if MV == 2:        # w_R identity of the scenario in every table, in range, and in the summaries (v2 schema)
+        wcol = lambda T: T["w_R"].astype(float)
+        inv["w_R_equals_scenario_in_all_four_tables"] = bool(all((wcol(T) == WR[lab]).all() for T in (M, G, H, E)))
+        inv["w_R_in_supported_domain"] = bool(-1 < WR[lab] <= 1)
+        gsj = json.load(open(f"{OUT}/global_summary.json"))[lab]
+        inv["w_R_in_global_summary"] = gsj.get("w_R") == WR[lab]
     # flags identical to A1 for real modes
     real = M[M.vacuum_status != "SYNTHETIC_BENCHMARK"]
     a = A1.loc[list(zip(real.geometry_id, real.mode_index.astype(int)))]

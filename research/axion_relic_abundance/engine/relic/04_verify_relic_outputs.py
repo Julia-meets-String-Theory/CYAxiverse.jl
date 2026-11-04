@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import check_run_location, dump_json, load_config, read_table
+from common import check_run_location, dump_json, load_config, methodology_version, read_table, scenario_w_R
 import reference_mp as Bm
 import independent_relic as C
 
@@ -40,7 +40,7 @@ def is_tie(lm, HRc):
 # ---------------- (a) C on every row
 tosc_cache = {}; DIS = {}
 for s in SC:
-    lab, TR = s["label"], s["T_reh_GeV"]; A = M[lab]; HRc = C.fuzzy_HR(tab, TR)
+    lab, TR = s["label"], s["T_reh_GeV"]; A = M[lab]; HRc = C.fuzzy_HR(tab, TR); wR = scenario_w_R(cfg, s)     # w_R from the run configuration, never assumed
     cat, val, Om, Tos, opz = [], [], [], [], []
     for lm, lf in zip(A.log10_mass_eV.values, A.log10_f_pert_GeV.values):
         m, f = 10 ** (lm - 9), 10 ** lf
@@ -52,7 +52,10 @@ for s in SC:
                 t = tosc_cache[lm] = c.T_osc(m)
             o = c.omega_h2(m, f, TH, t); z = C.fuzzy_onepz_R(tab, t)
         elif v and k == "PRE_REHEATING":
-            o, z = C.fuzzy_pre_omega_h2(tab, m, f, TH, TR)
+            try:
+                o, z = C.fuzzy_pre_omega_h2(tab, m, f, TH, TR, wR)
+            except OverflowError:                          # float64 range exceeded: the engine stops in that case, so no such row exists
+                o = z = np.nan
         cat.append(k); val.append(v); Om.append(o); Tos.append(t); opz.append(z)
     X = A.assign(cat_C=cat, valid_C=val, Om_C=Om, Tosc_C=Tos, opz_C=opz)
     aom = X.Omega_h2_at_theta_ref.where(X.category != "LATE", X.Omega_h2_late_census_only_at_theta_ref)
@@ -95,13 +98,13 @@ for s in SC:
 
 # ---------------- (b) B on a stratified sample and on complete geometries
 R = Bm.Ref()
-def b_eval(row, TR):
-    b = R.evaluate(row.log10_mass_eV, row.log10_f_pert_GeV, TH, TR, HI3)
+def b_eval(row, TR, wR=0):
+    b = R.evaluate(row.log10_mass_eV, row.log10_f_pert_GeV, TH, TR, HI3, wR)
     return b
 rng = np.random.default_rng(20261001)
 hbin = lambda h: "4-10" if h <= 10 else "11-20" if h <= 20 else "21-30" if h <= 30 else "31-40" if h <= 40 else "41-50"
 for s in SC:
-    lab, TR = s["label"], s["T_reh_GeV"]; A = M[lab].assign(hb=M[lab].h11.map(hbin))
+    lab, TR = s["label"], s["T_reh_GeV"]; wR = scenario_w_R(cfg, s); A = M[lab].assign(hb=M[lab].h11.map(hbin))
     idx = []
     for _, d in A.groupby(["abundance_state", "hb", "vacuum_status"]):
         idx += list(rng.choice(d.index.values, size=min(2, len(d)), replace=False))
@@ -114,7 +117,7 @@ for s in SC:
     S = A.loc[sorted(set(idx))]
     rows = []
     for _, r in S.iterrows():
-        b = b_eval(r, TR)
+        b = b_eval(r, TR, wR)
         aom = r.Omega_h2_at_theta_ref if r.category != "LATE" else r.Omega_h2_late_census_only_at_theta_ref
         rows.append({"scenario": lab, "geometry_id": r.geometry_id, "mode_index": int(r.mode_index), "state": r.abundance_state,
                      "cat_agree": b["category"] == r.category, "valid_agree": b["inflation_valid"] == bool(r.inflation_valid),
@@ -147,7 +150,7 @@ for s in SC:
     for gid in dict.fromkeys(gids):
         modes = A[A.geometry_id == gid]; tot = mp.mpf(0); pre = mp.mpf(0); post = mp.mpf(0)
         for _, r in modes.iterrows():
-            b = b_eval(r, TR)
+            b = b_eval(r, TR, wR)
             if b["Omega_h2"] is not None and b["category"] in ("POST_REHEATING", "PRE_REHEATING"):
                 tot += b["Omega_h2"]; pre += b["Omega_h2"] if b["category"] == "PRE_REHEATING" else 0; post += b["Omega_h2"] if b["category"] == "POST_REHEATING" else 0
         g = Gl.set_index("geometry_id").loc[gid]
@@ -176,6 +179,9 @@ for lab, v in res["B_sample"].items():
     chk[f"B_{lab}_sample"] = ndis == nt and v["NA_pattern_ok"] and \
         v["POST_max_rel_Omega"] <= TOL["POST"] and v["PRE_max_rel_Omega"] <= TOL["PRE"] and v["LATE_max_rel_Omega"] <= TOL["POST"]
     chk[f"B_{lab}_geometries"] = res["B_geometries"][lab]["max_rel_total"] <= TOL["geometry"]
+if methodology_version(cfg) == 2:                  # the physics the verifiers used, per scenario (v1 files are unchanged)
+    res["methodology_version"] = 2
+    res["scenario_w_R"] = {s["label"]: scenario_w_R(cfg, s) for s in SC}
 res["tolerances"] = TOL; res["checks"] = chk; res["all_pass"] = all(chk.values())
 dump_json(res, f"{V}/production_verification.json")
 print(json.dumps(res, indent=1))

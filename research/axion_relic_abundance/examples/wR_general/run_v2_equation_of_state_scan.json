@@ -1,0 +1,12 @@
+{
+ "schema": "cyaxiverse_relic_run/2",
+ "description": "One reheating temperature (10^4 GeV), several constant pre-reheating equations of state, including the representative values -1/2, -1/3, 0, 1/3 and a non-special value 0.17. Labels are file names: they must be unique and each (T_reh_GeV, w_R) pair may appear once.",
+ "scenarios": [
+  {"label": "wm0p5", "T_reh_GeV": 1e4, "w_R": -0.5},
+  {"label": "wm1o3", "T_reh_GeV": 1e4, "w_R": -0.3333333333333333},
+  {"label": "w0", "T_reh_GeV": 1e4, "w_R": 0.0},
+  {"label": "w0p17", "T_reh_GeV": 1e4, "w_R": 0.17},
+  {"label": "wp1o3", "T_reh_GeV": 1e4, "w_R": 0.3333333333333333}
+ ],
+ "production_run_approved": false
+}

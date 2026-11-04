@@ -6,7 +6,7 @@ SHOROQ_RELIC_CONFIG (default: $WORK/relic/run_config.json). Nothing here is tied
 import hashlib, json, os
 
 REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-SCHEMA = os.path.join(REPO, "configs", "relic_output_schema.json")
+SCHEMA = os.path.join(REPO, "configs", "relic_output_schema.json")          # methodology v1; v2 runs: schema_path(cfg)
 GSTAR_TABLE = os.path.join(REPO, "data", "standardmodel2018.dat")
 
 
@@ -18,6 +18,27 @@ def config_path():
     if not work:
         raise SystemExit("set SHOROQ_RELIC_CONFIG (or WORK) to locate the relic run configuration")
     return os.path.join(work, "relic", "run_config.json")
+
+
+def methodology_version(cfg):
+    """1 for a v1 run configuration (no methodology_version key), else the stated version (1 or 2)."""
+    v = cfg.get("methodology_version", 1)
+    if v not in (1, 2):
+        raise SystemExit(f"run configuration: unsupported methodology_version {v!r} (this package implements 1 and 2)")
+    return v
+
+
+def schema_path(cfg=None):
+    """Output schema of the run: configs/relic_output_schema.json (v1) or relic_output_schema_v2.json (v2, adds the column w_R)."""
+    v = methodology_version(cfg if cfg is not None else load_config())
+    return SCHEMA if v == 1 else os.path.join(REPO, "configs", "relic_output_schema_v2.json")
+
+
+def scenario_w_R(cfg, scenario):
+    """Constant pre-reheating equation of state of a scenario dict: 0.0 in v1 (fixed), the stated w_R in v2."""
+    if methodology_version(cfg) == 1:
+        return 0.0
+    return float(scenario["w_R"])
 
 
 def sha256(path):
@@ -52,7 +73,7 @@ def read_table(path, table):
     integral float without a decimal point, so a column whose values are all integral would otherwise be read as int64
     (and e.g. 10 ** int64(-29) raises). NA cells become NaN in float columns."""
     import pandas as pd
-    spec = json.load(open(SCHEMA))["tables"][table]
+    spec = json.load(open(schema_path()))["tables"][table]
     dt = {c["name"]: float for c in spec if c["type"] == "float"}
     T = pd.read_csv(path, dtype=dt, na_values=["NA"], keep_default_na=False, float_precision="round_trip")
     for c in spec:                             # booleans also when the table is empty (no value to infer from)

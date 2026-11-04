@@ -128,7 +128,14 @@ def fuzzy_pre_omega_h2(tab, m_gev, f_gev, theta, Treh, wR=0.0):
     """(2.10) with (2.15): direct evaluation of the paper's pre-reheating prescription."""
     HR = fuzzy_HR(tab, Treh)
     onepz_a = fuzzy_onepz_R(tab, Treh) * (m_gev / (3 * HR)) ** (2 / (3 * (1 + wR)))
-    return 0.5 * m_gev**2 * f_gev**2 * theta**2 / onepz_a**3 / RHO_C_OVER_H2, onepz_a
+    if wR == 0:                                                   # v1 form, unchanged
+        return 0.5 * m_gev**2 * f_gev**2 * theta**2 / onepz_a**3 / RHO_C_OVER_H2, onepz_a
+    # constant w_R != 0 (methodology v2): (1+z_a)^3 can leave the float64 range while Omega does not, so combine in logarithms (math.exp
+    # raises OverflowError, handled by the caller, instead of returning inf/0 silently)
+    lnom = math.log(0.5 * m_gev**2 * f_gev**2 * theta**2 / RHO_C_OVER_H2) - 3 * math.log(onepz_a)
+    if not (math.isfinite(lnom) and math.isfinite(onepz_a) and -745 < lnom < 709):
+        raise OverflowError(f"Omega outside the float64 range (ln Omega = {lnom})")
+    return math.exp(lnom), onepz_a
 
 
 def fuzzy_216(tab, m_gev, f_gev, theta, Treh, wR=0.0):

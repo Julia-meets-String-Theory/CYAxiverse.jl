@@ -2,7 +2,8 @@
 
 This directory (`research/axion_relic_abundance/` of CYAxiverse.jl) computes the misalignment relic abundance of the
 physical axion modes of Calabi–Yau compactifications produced with CYAxiverse.jl (branch `vmm`), with the validated
-methodology of the Shoroq master's thesis study (v1). A researcher can:
+methodology of the Shoroq master's thesis study (v1), optionally with a **constant pre-reheating equation of state w_R per
+reheating scenario (methodology v2**, section below). A researcher can:
 
 - start from **existing CYAxiverse physical spectra** (no geometry generation, no spectrum recomputation), or
 - start from a **polytope manifest** and let the producers generate geometries, spectra and validated vacua first;
@@ -51,6 +52,24 @@ RELIC_RUN=examples/minimal/run.json engine/run_theta.sh
 ```
 `examples/minimal/README.md` explains the inputs and how to read the outputs.
 
+## Choosing the pre-reheating equation of state w_R (methodology v2)
+
+Methodology v1 fixes w_R = 0 (modulus-dominated epoch before reheating). With a **v2 run file** (`"schema": "cyaxiverse_relic_run/2"`) every scenario may state
+its own constant `w_R` with **-1 < w_R <= 1** (default 0.0), together with its `T_reh_GeV`; several (T_reh, w_R) pairs can be compared in one run. Same three commands, other run file:
+```bash
+engine/run_prepare_from_spectra.sh examples/minimal/spectra_list.json
+RELIC_RUN=examples/wR_general/run_v2_equation_of_state_scan.json engine/run_relic.sh      # w_R = -1/2, -1/3, 0, 0.17, 1/3 at T_reh = 10^4 GeV
+RELIC_RUN=examples/wR_general/run_v2_equation_of_state_scan.json engine/run_theta.sh      # common-angle analysis for every (T_reh, w_R)
+```
+Other examples: `run_v2_mixed_scenarios.json` (different T_reh and w_R in one run, one scenario using the default), `run_v2_w0_reproduces_v1.json` (v2 at w_R = 0
+reproduces the v1 example bit for bit apart from the extra `w_R` column). In a run file, a scenario is `{"label": "T1e4-w0p17", "T_reh_GeV": 1e4, "w_R": 0.17}`.
+
+- What changes: only the PRE_REHEATING abundances, Ω(w_R) = Ω(0) (m/3H_R)^(2w_R/(1+w_R)). Classes, inflation validity, POST/LATE/FROZEN values, the θ analysis rules do not.
+- Refused: w_R <= -1 or > 1, non-numbers, a repeated (T_reh, w_R), a `w_R` key under methodology v1. Warned: w_R < -1/3 (accelerating epoch, not conventional reheating),
+  w_R < -0.9. The run stops (nothing clamped) if a mode's abundance leaves the float64 range, which happens for strongly negative w_R at low T_reh.
+- Every output table has a `w_R` column; `relic/run_config.json` records `methodology_version` and each scenario's `w_R`.
+- Physics, derivation, domain, numerical range and the growing sudden-onset systematic at negative w_R: `METHODOLOGY.md` ("Methodology v2"). Validation: `python tests/test_wR_general.py WORK`.
+
 ## Questions a new user asks
 
 | question | answer |
@@ -61,7 +80,7 @@ RELIC_RUN=examples/minimal/run.json engine/run_theta.sh
 | Inputs? | One `cyax.h5` per geometry plus a vacuum statement, or a polytope manifest for the producers. |
 | Own spectra / own (m, f) tables? | Own vmm spectra: yes (route A). Direct mass and decay-constant tables: **not supported**; write a contract-valid `cyax.h5` (`DATA_CONTRACTS.md` §3a). |
 | Multiple triangulations? | `GEOMETRY_SELECTION=all` (default) or `first_frst`; see `DATA_CONTRACTS.md` §4. |
-| Reheating scenarios? | The run file (labels and T_reh in GeV); hard limits and BBN notes in `METHODOLOGY.md`. |
+| Reheating scenarios? | The run file (labels and T_reh in GeV, and w_R with a v2 run file); hard limits, BBN notes and the supported w_R domain in `METHODOLOGY.md`. |
 | Output tables? | See Outputs below and `DATA_CONTRACTS.md` §6; zero, partial and undefined results are distinct classes. |
 | Reproduce the frozen reference? | `references/shoroq/` (needs the external frozen archive). |
 | Limits of the approximations? | `METHODOLOGY.md`, "Accuracy and systematic uncertainty": the sudden-onset estimate is accurate to an order-one factor only, which the 10% TIGHT band does not cover. |
@@ -79,13 +98,16 @@ engine/                     general computation (no reference data)
 producers/                  optional: compute what the engine needs from a polytope manifest
   geometry/, run_geometry.sh          G2 geometries, materialization, audits, physical spectra (upstream vmm code)
   vacuum/,   run_vacuum_repair.sh     theta = 0 inertia scan, validated minima of saddles, relic input
-configs/                    methodology_v1.json, theta_methodology_v1.json, reheating_policy_v1.json, relic_output_schema.json,
+configs/                    methodology_v1.json (frozen) and methodology_v2.json (w_R per scenario), theta_methodology_v1.json, reheating_policy_v1/v2.json,
+                            relic_output_schema.json and relic_output_schema_v2.json,
                             run.example.json, spectra_list.example.json, paths.env.example
 data/standardmodel2018.dat  g_rho(T), g_s(T) (Saikawa & Shirai, arXiv:1803.01038), sha256-pinned
 references/shoroq/          frozen reference case: configs (run, expectations, frozen configurations), polytope manifest,
                             sample reconstruction (stage 1), run_reference.sh, regression tests
 examples/minimal/           two shipped non-Shoroq geometries, three T_reh: relic + theta in about a minute
-tests/                      test_static.py, test_external_acceptance.py (+ fixtures), test_general.sh (+ general_helpers.py)
+examples/wR_general/        v2 run files: w_R scan, mixed (T_reh, w_R) scenarios, w_R = 0 reproducing v1
+tests/                      test_static.py, test_external_acceptance.py (+ fixtures), test_general.sh (+ general_helpers.py),
+                            test_wR_general.py (methodology v2 validation), ode_onset_check_wR.py
 environment/                Julia projects (vmm 1.12.7; analysis 1.8.4) and Python requirements
 ```
 

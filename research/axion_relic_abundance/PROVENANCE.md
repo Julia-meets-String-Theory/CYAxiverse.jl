@@ -292,3 +292,26 @@ No computation, criterion, tolerance or physics block changed.
   `test_static.py` scans source files only; `test_external_acceptance.py` gained `theta_mixed` and `theta_retry` and a quoted engine-only
   environment file.
 - **`data/standardmodel2018.dat`**: unchanged; see `data/README.md` for its origin and terms.
+
+## Methodology v2: constant pre-reheating equation of state w_R (2026-11-04)
+
+Request: extend the relic engine from w_R = 0 to a researcher-configurable constant w_R per reheating scenario, as an explicitly versioned extension (Methodology v1 and
+the validated w_R = 0 results frozen). Base: PR head `8d1f268`. All v1 outputs (relic tables, theta outputs of the v1 example) are byte-identical to the pre-change engine
+(`tests/v1_example_sha256.json`; the Shoroq frozen regression is rerun on this code).
+
+- **`configs/methodology_v2.json`**, **`configs/reheating_policy_v2.json`**, **`configs/relic_output_schema_v2.json`**: *new*. Generated from the v1 files: v2 differs from v1 only in
+  schema/version/status/created, the `reheating` block (w_R domain, general PRE prescription), one methodology flag name and the `outputs` block (checked by `tests/test_static.py`); the schema
+  adds the column `w_R` to every table and the branch label `fuzzy_wR_general_eq2.10_2.15`. The v1 files are untouched.
+- **`engine/relic/compute_relic_abundance.jl`**: change G7 (recorded in `tests/driver_changes.json`; the physics block above the driver banner is untouched and still checksum-pinned):
+  `methodology_version`, per-scenario `w_R` validation (domain, no per-scenario `w_R` under v1, unique (T_reh, w_R)), `pre_reheating_abundance_w` (logarithmic evaluation; w_R = 0 calls the
+  frozen function), `w_R` columns and summary keys under v2 only.
+- **`engine/relic/00_compose_run_config.py`**: methodology/run-file schema match, v2 scenario key `w_R` with domain, duplicate-pair, accelerated/steep warnings; derived scenario constants
+  `Omega_pre_h2_per_fGeV2_theta2_at_m_eq_3H_R` and `PRE_mass_exponent_2w_over_1pw` (v2).
+- **`engine/relic/common.py`**, **`03_validate_outputs.py`**, **`04_verify_relic_outputs.py`**, **`reference_mp.py`**: methodology-version aware; the verifiers read each scenario's `w_R` from the run
+  configuration (never assume 0); `reference_mp.Ref.evaluate(..., wR)` and `omega_pre_closed_form_w` added.
+- **`engine/theta/common.jl`**, **`00_verify_inputs.jl`**, **`01_theta_final.jl`**, **`02_crosscheck_theta.py`**: schema selection by version, per-scenario `w_R` in the recomputation of PRE abundances
+  (a direct power form independent of the engine's logarithmic form), `w_R` columns/keys under v2 only. `01_theta_final.jl` checksum pin updated deliberately.
+- **`engine/run_relic.sh`**: methodology chosen from the run file schema.
+- **`examples/wR_general/`**, **`tests/test_wR_general.py`**, **`tests/v1_example_sha256.json`**, **`tests/ode_onset_check_wR.py`**: *new*.
+- Docs: `METHODOLOGY.md` (section "Methodology v2"), `DATA_CONTRACTS.md` (1b, 6), `README.md`, this file.
+- Exploratory material `relic_wR_sensitivity_exploratory/` (outside the repository, no input checksums) was **not** used as evidence; it was only a comparison target.

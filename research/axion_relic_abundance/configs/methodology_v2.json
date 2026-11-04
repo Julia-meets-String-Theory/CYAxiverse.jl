@@ -1,0 +1,256 @@
+{
+ "schema": "relic_abundance_production_run_config/2",
+ "methodology_version": 2,
+ "created": "2026-11-04",
+ "status": "Methodology v2: v1 (frozen 2026-10-01) plus a researcher-configurable constant pre-reheating equation of state w_R per reheating scenario. At w_R = 0 it reproduces v1 bit for bit (METHODOLOGY.md, section \"Methodology v2\")",
+ "run": {
+  "production_run_approved": "@run",
+  "production_output_dir": "<filled at run time by scripts/04_relic/02_write_run_config.py>",
+  "approval_note": "The Julia driver refuses an abundance run on more than max_rows_abundance_without_approval modes unless production_run_approved is true. It is true here because this template encodes the methodology approved for the frozen production run.",
+  "max_rows_abundance_without_approval": 1000,
+  "expected_geometries": "@expectation",
+  "expected_modes": "@expectation",
+  "h11_min": "@expectation",
+  "h11_max": "@expectation",
+  "expected_geometries_by_vacuum_status": "@expectation",
+  "expected_modes_by_vacuum_status": "@expectation"
+ },
+ "input": {
+  "input_dir": "<filled at run time by scripts/04_relic/02_write_run_config.py>",
+  "manifest": "<filled at run time by scripts/04_relic/02_write_run_config.py>",
+  "manifest_sha256": "<filled at run time by scripts/04_relic/02_write_run_config.py>",
+  "input_sha256sums_file": "<filled at run time by scripts/04_relic/02_write_run_config.py>",
+  "input_sha256sums_file_sha256": "<filled at run time by scripts/04_relic/02_write_run_config.py>",
+  "spectra_view": "<filled at run time by scripts/04_relic/02_write_run_config.py>",
+  "spectrum_checksums": "per-geometry spectrum_source_sha256 in the manifest; every file is re-hashed by A1 (scripts/01_a1_input_adapter.py); the sorted (geometry_id, sha256) list is hashed into spectrum_set_sha256 in results/a1_input_verification.json",
+  "datasets": {
+   "mass": "spectrum/physical/m (log10 eV)",
+   "f_pert": "spectrum/physical/fpert_log10 (log10 GeV)",
+   "mode_index": "spectrum/physical/mode_indices",
+   "cy_volume": "cytools/geometric/CY_volume"
+  },
+  "spectrum_settings": {
+   "prec": 500,
+   "quartics": true,
+   "threshold_log10_eV": -32.826522356547,
+   "schema_version": "cyaxiverse-physical-spectrum-3"
+  },
+  "canonical_ids": "geometry_id from the manifest (h11_XXX/np_POSITION/cy_0000001, unified position); mode key = (geometry_id, mode_index). File-internal polytope labels are never used as identifiers.",
+  "known_label_anomaly": "@expectation",
+  "canonical_mode_table": "<filled at run time by scripts/04_relic/02_write_run_config.py>",
+  "canonical_mode_table_sha256": "<filled at run time by scripts/04_relic/02_write_run_config.py>",
+  "spectrum_set_sha256": "<filled at run time by scripts/04_relic/02_write_run_config.py>",
+  "pinning_note": "02_write_run_config.py records the sha256 of the relic-input manifest, of the A1 canonical mode table and of the spectrum set actually used; the Julia driver refuses a population run whose mode table differs from the recorded checksum",
+  "canonical_geometry_table": "<filled at run time by scripts/04_relic/02_write_run_config.py>"
+ },
+ "code": {
+  "cyaxiverse_repo": "CYAxiverse.jl, branch vmm, commit a5eacd8cd4a5905161cab239a461ba252c64e8e0",
+  "relic_script": "scripts/04_relic/compute_relic_abundance.jl (physics block byte-identical to the frozen production script; see PROVENANCE.md)",
+  "physics_core_origin": "legacy compute_tosc_abundance_hfull.jl (sha256 6af20481...) + approved edits E1-E6 + Fuzzy pre-reheating F1-F5, audited 2026-10-01",
+  "independent_python_reference_C": "scripts/04_relic/independent_relic.py",
+  "high_precision_reference_B": "scripts/04_relic/reference_mp.py",
+  "fuzzy_supplementary_repo": "https://github.com/sheride/fuzzy_axions",
+  "fuzzy_supplementary_commit": "bc3bc401995534526d53e1f752d8b91ad6f37584",
+  "fuzzy_paper": "Sheridan et al., Fuzzy Axions and Associated Relics, arXiv:2412.12012 v1",
+  "julia": "Julia 1.8.4 (version used for the frozen production run)",
+  "python": "Python 3.11 with numpy, scipy, pandas, h5py, mpmath"
+ },
+ "cosmology": {
+  "H0_eV": 1.491e-33,
+  "H0_definition": "CYAxiverse generate.constants()['Hubble'] = 2.13*0.7e-33 eV, the VMM physical-spectrum threshold (Float64 2.13*0.7*1e-33 == 1.491e-33)",
+  "omega_m": 0.14309694,
+  "omega_m_definition": "Omega_m h^2 = 0.315*0.674^2 = 0.14309694 (quoted 0.14310): physical matter density of the legacy Planck-2018 cosmology, held fixed (E2)",
+  "T_CMB_K": 2.7255,
+  "T_CMB_GeV": 2.3486541805581e-13,
+  "M_pl_reduced_GeV": 2.435e+18,
+  "hbar_GeV_s": 6.582119569e-25,
+  "Mpc_km": 3.085677581491367e+19,
+  "H100_definition": "100 km/s/Mpc = (100/Mpc_km) * hbar_GeV_s GeV",
+  "Omega_m0_definition": "omega_m / h^2, h = H0/H100 (E1, E2)",
+  "Omega_r0_definition": "(pi^2/30) g_rho(T0) T0^4 / (3 M_pl^2 H0^2) (E3; radiation fixed by T_CMB, not by h)",
+  "Omega_L0_definition": "1 - Omega_m0 - Omega_r0 (flat closure)",
+  "H_of_T": "H(T) = H0 sqrt(Omega_r0 [g_rho(T)/g_rho0] (T/T0)^4 + Omega_m0 [g_s(T)/g_s0] (T/T0)^3 + Omega_L0)",
+  "scale_factor": "a(T) = (T0/T) [g_s(T0)/g_s(T)]^(1/3) (entropy conservation)",
+  "gstar_table": "<filled at run time by scripts/04_relic/02_write_run_config.py>",
+  "gstar_table_sha256": "a4bf5f18dacb084a00e7202a29c689b4ae385950cfeb00be69c98aeb30e8014b",
+  "gstar_source": "Saikawa & Shirai 2018, arXiv:1803.01038 (standardmodel2018.dat): column 2 g_*rho, column 4 g_*s; log-log interpolation, clamped to the end values outside [1.9953e-6, 9.9739e16] GeV",
+  "derived": {
+   "h": 0.6989762531315736,
+   "Omega_m0": 0.2928906474900799,
+   "Omega_r0": 8.564323213339273e-05,
+   "Omega_L0": 0.7070237092777867,
+   "Omega_total0": 1.0,
+   "H_today_GeV": 1.491e-42,
+   "H_today_eV": 1.491e-33,
+   "T_eq_GeV": 8.032144823802485e-10,
+   "T_eq_eV": 0.8032144823802485,
+   "one_plus_z_eq": 3419.892502817866,
+   "three_H0_eV": 4.473e-33,
+   "log10_three_H0_eV": -32.34940110182734,
+   "three_H_Teq_eV": 6.846763562801267e-28,
+   "log10_three_H_Teq_eV": -27.164514669232677,
+   "rho_crit_over_h2_GeV4": 8.093747096930565e-47,
+   "H100_GeV": 2.133119677986167e-42,
+   "g_rho_T0": 3.3830836,
+   "g_s_T0": 3.9309363
+  },
+  "derived_reference": "implementation B (50-digit mpmath); cross-checked against implementation C (float64) to < 1e-12",
+  "derived_cross_check_B_vs_C_max_rel": 1.3322676295501878e-15,
+  "derived_tolerance_rel": {
+   "default": 1e-12,
+   "T_eq_GeV": 1e-09
+  },
+  "gstar_table_file": "data/standardmodel2018.dat"
+ },
+ "axion": {
+  "f_convention": "f_pert",
+  "f_relic_over_f_pert": 1.0,
+  "f_relic_definition": "f_relic = 1 * f_pert = m/sqrt|lambda_self| (the f of Lambda^4 [1 - cos(phi/f)]; C = 1 proven in the method audit)",
+  "f_not_used": [
+   "f_K (geometry-level kinetic decay constants)",
+   "f_PQ = sqrt(2 pi) f_pert",
+   "2 pi f_pert"
+  ],
+  "theta_reference": 1.5707963267948966,
+  "theta_reference_expression": "pi/2 (every mode)",
+  "theta_rescaling": "Omega(theta) = Omega(pi/2) * [theta/(pi/2)]^2 (harmonic; applied only in post-processing)",
+  "theta_scan_performed": false,
+  "theta_ref_interpretation": "pi/2 is a normalisation/reference angle ONLY; it is not an adopted, preferred, best-fit or allowed physical angle. Every abundance field is named *_at_theta_ref.",
+  "theta_small_angle_domain": "NOT YET ESTABLISHED: recovered separately from the legacy analysis and the Fuzzy paper before any theta analysis; pi/2 is not assumed to be inside it",
+  "theta_rescaling_validity": "only inside the approved small-angle (harmonic) domain; rho_a ~ theta^2 without anharmonic correction",
+  "initial_energy_density": "rho_a(onset) = (1/2) m_a^2 f^2 theta_i^2 (harmonic, no anharmonic factor)",
+  "mass_temperature_dependence": "none (constant mass)"
+ },
+ "oscillation": {
+  "criterion": "m_a = 3 H",
+  "categories": {
+   "FROZEN": "m_a <= 3 H0",
+   "LATE": "3 H0 < m_a <= 3 H(T_eq)  (onset after matter-radiation equality: T_osc <= T_eq)",
+   "POST_REHEATING": "3 H(T_eq) < m_a <= 3 H_R  (T_eq < T_osc <= T_R)",
+   "PRE_REHEATING": "m_a > 3 H_R  (onset before reheating; T_osc undefined)"
+  },
+  "classification_rule": "thresholds 3H0 = 3 Hfull(T_CMB), 3 Hfull(T_eq), 3 H_R; for LATE/POST the abundance run also solves 3 Hfull(T_osc) = m_a and stops if (T_osc <= T_eq) disagrees with the threshold class",
+  "T_search_max_GeV": 1e+18,
+  "post_reheating_abundance": "Omega h^2 = (1/2) m^2 f^2 theta^2 (g_s0/g_s(T_osc)) (T0/T_osc)^3 / (3 M_pl^2 H100^2)"
+ },
+ "reheating": {
+  "scenarios": "@run",
+  "w_R_default": 0.0,
+  "w_R_default_meaning": "value used by a scenario that does not state w_R; w_R = 0 is the v1 modulus-domination scenario (Fuzzy scenario (2))",
+  "w_R_domain": {
+   "rule": "-1 < w_R <= 1, finite number (boolean, string and null are refused)",
+   "lower_exclusive": -1.0,
+   "upper_inclusive": 1.0,
+   "lower_reason": "H(a) ~ a^(-3(1+w_R)/2) must decrease as the universe expands, so that 3H = m_a is reached before reheating for m_a > 3H_R: this requires 1+w_R > 0 (w_R = -1 is a constant-H de Sitter phase with no onset; w_R < -1 has H growing with a)",
+   "upper_reason": "w_R <= 1: causal (sound speed <= c) fluid; w_R = 1 is kination",
+   "warn_accelerated_below": -0.3333333333333333,
+   "warn_accelerated_text": "w_R < -1/3: the pre-reheating epoch is accelerating (a_ddot > 0), i.e. it is a continuation of inflation-like expansion rather than a conventional reheating epoch; the instantaneous transition to radiation then needs a microphysical interpretation that this prescription does not provide",
+   "warn_near_de_sitter_below": -0.9,
+   "warn_near_de_sitter_text": "w_R < -0.9: 1+z_a ~ (m/3H_R)^(2/(3(1+w_R))) grows very steeply; abundances can leave the float64 range and the run stops if one does (never clamped)",
+   "warn_radiation_like_note_at": 0.3333333333333333,
+   "warn_radiation_like_text": "w_R = 1/3: the pre-reheating epoch is radiation-like, so the PRE prescription describes an extended radiation era; ok mathematically, check that this is the intended history"
+  },
+  "pre_reheating_prescription": "Fuzzy arXiv:2412.12012 Sec. 2: (2.1) 1+z_R; (2.2) H(z) = H_R ((1+z)/(1+z_R))^(3(1+w_R)/2) for z >= z_R with rho_r(T_R) = 3 H_R^2 M_pl^2 (radiation only), instantaneous transition to radiation at T_R; (2.15) 1+z_a = (1+z_R)(m_a/3H_R)^(2/(3(1+w_R))) for m_a > 3H_R; (2.10) Omega h^2 = m^2 f^2 theta^2 / [2 (1+z_a)^3 3 M_pl^2 H100^2]",
+  "pre_reheating_relative_scaling": "Omega(w_R) / Omega(0) = (m_a / 3H_R)^(2 w_R / (1 + w_R)) at fixed m_a, f, theta, T_R",
+  "pre_reheating_evaluation": "w_R == 0.0: the v1 power form (bit-identical to v1); w_R != 0: ln Omega = ln[m^2 f^2 theta^2 / (2 rho_c/h^2)] - 3 ln(1+z_R) - [2/(1+w_R)] ln(m/3H_R) evaluated in logarithms; a result outside the float64 range stops the run (no clamping)",
+  "eq_2_16_printed_normalization_used": false,
+  "eq_2_16_note": "The printed closed form (2.16) is 2.5034x the paper's own (2.10)+(2.15) for every mode; the paper's worked examples (4.7), (4.11) follow (2.10)+(2.15). Only (2.10)+(2.15) is used (FUZZY_PRE_REHEATING_FOLLOWUP.md).",
+  "legacy_pre_reheating_zeroing_used": false,
+  "T_osc_for_pre_reheating": "undefined (no thermal bath before reheating in the paper's parameterisation); reported as NA, with 1+z_a and H_osc = m_a/3",
+  "constant_w_R_caveat": "A constant effective w_R with instantaneous reheating is a model prescription, not a microphysical reheating model. Class boundaries (3H_R), POST abundances and inflation validity do not depend on w_R."
+ },
+ "categories_in_cdm_sum": {
+  "FROZEN": {
+   "in_census": true,
+   "in_cdm_sum": false,
+   "state": "NOT_INCLUDED_FROZEN",
+   "reason": "not oscillating today (m_a <= 3 H0)"
+  },
+  "LATE": {
+   "in_census": true,
+   "in_cdm_sum": false,
+   "state": "NOT_INCLUDED_LATE",
+   "reason": "thesis-analysis choice (onset after equality); its formula value is kept in Omega_h2_late_census_only_at_theta_ref"
+  },
+  "POST_REHEATING": {
+   "in_census": true,
+   "in_cdm_sum": true,
+   "state": "INCLUDED_POST_REHEATING"
+  },
+  "PRE_REHEATING": {
+   "in_census": true,
+   "in_cdm_sum": true,
+   "state": "INCLUDED_PRE_REHEATING",
+   "condition": "inflation_valid"
+  }
+ },
+ "validity": {
+  "inflation_cut": {
+   "enabled": true,
+   "unit": "mode (never the geometry)",
+   "rule": "a mode with m_a > 3 H_I,max is excluded from the misalignment abundance (state INFLATIONARY_VALIDITY_EXCLUDED); m_a <= 3 H_I,max is valid",
+   "three_H_I_max_GeV": 140000000000000.0,
+   "log10_three_H_I_max_eV": 23.146128035678238,
+   "source": "Fuzzy arXiv:2412.12012 footnote 16 (p. 14): 'we always discard axions with masses m_a > 3H_I,max ~ 1.4 x 10^14 GeV, where H_I,max is the observational bound due to CMB measurements'",
+   "precision_note": "Neither the paper nor its supplementary notebook gives a formula or a more precise value; 1.4e14 GeV is the paper's stated threshold and is used as stated. Sensitivity to the CMB-bound convention is reported in results/dry_run_census_check.json.",
+   "interpretation": "excluded from the calculated misalignment abundance because the assumed inflationary displacement prescription is not valid (the axion is heavier than H_I during inflation and its onset would precede the end of inflation); NOT a prediction of zero abundance",
+   "expected_modes": "@expectation",
+   "expected_geometries": "@expectation"
+  },
+  "mKK_flag": {
+   "exclusion": false,
+   "definition": "m_KK = M_pl / V^(2/3)",
+   "M_pl_GeV": 2.4e+18,
+   "V": "CY volume, cytools/geometric/CY_volume of the spectrum file",
+   "source": "Fuzzy supplementary notebook cell 24 (mPl_GeV = 2.4e18; cy.compute_cy_volume(kahler)); the paper imposes no m_a < m_KK cut",
+   "flag_rule": "above_mKK = m_a > m_KK (GeV)",
+   "expected_modes_above": "@expectation",
+   "expected_geometries": "@expectation",
+   "not_used": "sqrt(pi) g_s^(1/4) prefactor (an earlier mistaken recollection)"
+  },
+  "fpert_flag": {
+   "exclusion": false,
+   "flag_rule": "above_fpert = m_a > f_pert (both GeV)",
+   "expected_modes_above": "@expectation",
+   "expected_geometries": "@expectation"
+  },
+  "light_window_100eV": {
+   "applied": false,
+   "note": "legacy LIGHT_LOG10M_MAX_EV = 2.0 was a thesis light-population window ('NOT a universal stability boundary'); removed"
+  },
+  "other_mass_cuts": "none"
+ },
+ "expected_census_before_inflation_cut": "@expectation",
+ "outputs": {
+  "per_mode_master": "master_modes_<label>.csv (one per T_reh)",
+  "per_geometry": "geometry_summary_<label>.csv",
+  "per_h11": "h11_summary_<label>.csv",
+  "global": "global_summary.json",
+  "metadata": "run_metadata.json",
+  "null_token": "NA",
+  "float_format": "%.17g (round-trip)",
+  "schema": "configs/relic_output_schema_v2.json",
+  "per_scenario_identity": "scenario label, T_reh_GeV and w_R are written in every table row (column w_R); a (T_reh_GeV, w_R) pair may appear once per run"
+ },
+ "methodology_flags": {
+  "E1_H0_unified": true,
+  "E2_omega_m_fixed": true,
+  "E3_Omega_r_from_TCMB": true,
+  "E4_search_ceiling_not_frozen": true,
+  "E5_h11_4_to_50": true,
+  "E6_metadata": true,
+  "A1_manifest_adapter": true,
+  "A2_scan_updated": true,
+  "fuzzy_constant_wR_pre_reheating": true,
+  "pre_reheating_in_cdm_sum": true,
+  "late_in_cdm_sum": false,
+  "frozen_in_cdm_sum": false,
+  "inflation_cut_per_mode": true,
+  "mKK_exclusion": false,
+  "fpert_exclusion": false,
+  "light_window_100eV": false,
+  "theta_scan": false,
+  "anharmonic_corrections": false,
+  "temperature_dependent_masses": false
+ }
+}

@@ -15,6 +15,8 @@ Equations (approved methodology, production_run_config.json):
      (2.15) 1+z_a = (1+z_R) (m_a/3H_R)^(2/(3(1+w_R)))
      (2.10) Omega h^2 = m^2 f^2 theta^2 / [2 (1+z_a)^3 3 H100^2 M^2]
   closed form for w_R = 0 (algebraically identical):  Omega h^2 = (9/2) f^2 theta^2 H_R^2 [s0/s(T_R)] / (3 M^2 H100^2)
+  constant w_R (methodology v2; -1 < w_R <= 1): (2.15) and (2.10) as printed, and the algebraically equivalent relative form
+     Omega(w_R) = Omega(0) (m_a/3H_R)^(2 w_R/(1+w_R))      (omega_pre_closed_form_w)
 """
 import bisect
 import os
@@ -159,7 +161,12 @@ class Ref:
         TR = mp.mpf(TR)
         return mp.mpf(9) / 2 * f**2 * theta**2 * self.HR(TR) ** 2 * (self.s(T0) / self.s(TR)) / RHO_C_H2
 
-    def evaluate(self, log10_m_eV, log10_f_GeV, theta, TR, three_HImax_GeV):
+    def omega_pre_closed_form_w(self, m, f, theta, TR, wR):
+        """Constant-w_R closed form: the w_R = 0 closed form times (m/3H_R)^(2 w_R/(1+w_R)) (algebraically identical to (2.10)+(2.15))."""
+        wR = mp.mpf(wR)
+        return self.omega_pre_closed_form(f, theta, TR) * (m / (3 * self.HR(TR))) ** (2 * wR / (1 + wR))
+
+    def evaluate(self, log10_m_eV, log10_f_GeV, theta, TR, three_HImax_GeV, wR=0):
         """Full per-mode evaluation (category, validity, T_osc, 1+z_osc, Omega h^2) for one scenario."""
         m = mp.power(10, mp.mpf(log10_m_eV) - 9)
         f = mp.power(10, mp.mpf(log10_f_GeV))
@@ -171,8 +178,9 @@ class Ref:
         if cat == "FROZEN" or not valid:
             return out
         if cat == "PRE_REHEATING":
-            om, opz = self.omega_pre_eq210_215(m, f, theta, TR)
-            out.update(one_plus_z_osc=opz, Omega_h2=om, Omega_h2_closed_form=self.omega_pre_closed_form(f, theta, TR))
+            om, opz = self.omega_pre_eq210_215(m, f, theta, TR, wR)
+            cf = self.omega_pre_closed_form(f, theta, TR) if wR == 0 else self.omega_pre_closed_form_w(m, f, theta, TR, wR)
+            out.update(one_plus_z_osc=opz, Omega_h2=om, Omega_h2_closed_form=cf)
             return out
         T = self.T_osc(m)
         out.update(T_osc_GeV=T, one_plus_z_osc=self.onepz(T), Omega_h2=self.omega_post(m, f, theta, T))

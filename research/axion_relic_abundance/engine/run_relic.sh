@@ -10,8 +10,15 @@ R="$WORK/relic"; S="$REPO/engine/relic"
 require "$RELIC_RUN" "$WORK/relic_input/relic_abundance_input_manifest.json" "$WORK/relic_input/SHA256SUMS.txt" "$WORK/relic_input/spectra" "$REPO/data/standardmodel2018.dat"
 [[ -e "$R" ]] && die "$R exists: refusing to overwrite a previous run"
 mkdir -p "$R"
-log "stage 4: run configuration from the v1 methodology, the run file${RELIC_EXPECTATIONS:+ and the expectations}"
-"$PYTHON" "$S/00_compose_run_config.py" relic "$REPO/configs/methodology_v1.json" "$RELIC_RUN" "$R/template.json" \
+# The run file's schema selects the methodology: cyaxiverse_relic_run/1 -> methodology v1 (w_R = 0 fixed), /2 -> v2 (constant w_R per scenario)
+RUN_SCHEMA="$("$PYTHON" -c 'import json, sys; print(json.load(open(sys.argv[1])).get("schema", ""))' "$RELIC_RUN")"
+case "$RUN_SCHEMA" in
+    cyaxiverse_relic_run/1) MV=1 ;;
+    cyaxiverse_relic_run/2) MV=2 ;;
+    *) die "$RELIC_RUN: schema must be cyaxiverse_relic_run/1 (methodology v1) or cyaxiverse_relic_run/2 (methodology v2), got '$RUN_SCHEMA'" ;;
+esac
+log "stage 4: run configuration from the v$MV methodology, the run file${RELIC_EXPECTATIONS:+ and the expectations}"
+"$PYTHON" "$S/00_compose_run_config.py" relic "$REPO/configs/methodology_v$MV.json" "$RELIC_RUN" "$R/template.json" \
     ${RELIC_EXPECTATIONS:+--expectations "$RELIC_EXPECTATIONS"} --checks "$R/scenario_checks.json" | tee "$WORK/logs/04_compose.log"
 log "stage 4: A1 canonical mode table"
 "$PYTHON" "$S/01_build_mode_table.py" "$R/template.json" "$WORK/relic_input" "$R/a1" > "$WORK/logs/04_a1.log"

@@ -202,6 +202,34 @@ const COS=CFG["cosmology"]; const VAL=CFG["validity"]; const RUN=CFG["run"]
 const THREE_HI_MAX_GEV=Float64(VAL["inflation_cut"]["three_H_I_max_GeV"])
 const MPL_KK_GEV=Float64(VAL["mKK_flag"]["M_pl_GeV"])
 const SCEN=[(String(s["label"]),Float64(s["T_reh_GeV"]),s) for s in CFG["reheating"]["scenarios"]]
+# [G7] methodology version and per-scenario constant pre-reheating equation of state w_R (methodology v2). A v1 configuration has
+# no methodology_version and no per-scenario w_R: every scenario then uses w_R = W_REHEAT = 0 through the frozen v1 function.
+const METHOD_VERSION=Int(get(CFG,"methodology_version",1))
+METHOD_VERSION in (1,2) || error("unsupported methodology_version $(get(CFG,"methodology_version",1)) (this script implements 1 and 2)")
+function scenario_wR(lab,s)
+    if METHOD_VERSION==1
+        haskey(s,"w_R") && error("scenario $lab: w_R is fixed at 0 in methodology v1; use methodology v2 to choose it")
+        return W_REHEAT
+    end
+    w=get(s,"w_R",CFG["reheating"]["w_R_default"])
+    (w isa Real && !(w isa Bool) && isfinite(w) && -1<w<=1) ||
+        error("scenario $lab: w_R must be a finite number with -1 < w_R <= 1 (H ~ a^(-3(1+w_R)/2) must fall with expansion; causal fluid), got $(repr(w))")
+    Float64(w)
+end
+const WR_OF=Dict(lab=>scenario_wR(lab,s) for (lab,treh,s) in SCEN)
+length(unique((treh,WR_OF[lab]) for (lab,treh,s) in SCEN))==length(SCEN) ||
+    error("two scenarios share the same (T_reh_GeV, w_R): identical physics under two labels is ambiguous")
+# [G7] constant-w_R PRE_REHEATING abundance, (2.10)+(2.15) evaluated in logarithms (no overflow of (1+z_a)^3). w_R == 0 calls the
+# frozen v1 function, so a v2 run at w_R = 0 is bit-identical to v1. An abundance outside the float64 range stops the run: never clamped.
+function pre_reheating_abundance_w(tab,logm_ev,logf_gev,treh,w)
+    w==0.0 && return pre_reheating_abundance(tab,logm_ev,logf_gev,treh)
+    m=10.0^(logm_ev-9); HR=hubble_reheat(tab,treh)
+    lnopz_a=log(onepz_reheat(tab,treh))+(2/(3*(1+w)))*log(m/(3HR))                                   # (2.15)
+    lnom=log(0.5)+2*log(m)+2*(logf_gev*log(10.0))+2*log(THETA_INITIAL)-log(RHO_CRIT_OVER_H2_GEV4)-3*lnopz_a   # (2.10)
+    (isfinite(lnom) && isfinite(lnopz_a) && -708<lnom<708 && lnopz_a<708) ||
+        error("PRE_REHEATING abundance outside the float64 normal range (ln Omega = $lnom, ln(1+z_a) = $lnopz_a) for log10 m = $logm_ev eV, log10 f = $logf_gev GeV, w_R = $w, T_reh = $treh GeV; it is not clamped to 0 or to a bound. Use a w_R closer to 0 or a higher T_reh (METHODOLOGY.md, numerical range of the PRE prescription)")
+    (;omega=exp(lnom),a_osc=exp(-lnopz_a),H_osc=m/3,HR)
+end
 const EXCL_REASON="m_a>3H_I_max(Fuzzy_fn16;1.4e14_GeV)"
 const THETA_REF_NOTE="theta_ref = pi/2 is a normalisation/reference angle only, NOT an adopted, preferred or allowed physical misalignment angle; "*
     "Omega(theta) = Omega_at_theta_ref (theta/theta_ref)^2 holds only inside the small-angle (harmonic) domain, which is established separately"
@@ -218,7 +246,7 @@ for (name,script,cfgv,tol) in (("H0_eV",H0_GEV*1e9,COS["H0_eV"],1e-15),("omega_m
         ("T_CMB_GeV",T_CMB_GEV,COS["T_CMB_GeV"],0.0),("M_pl_reduced_GeV",MPL_REDUCED_GEV,COS["M_pl_reduced_GeV"],0.0),
         ("hbar_GeV_s",HBAR_GEV_S,COS["hbar_GeV_s"],0.0),("H100_GeV",H100_GEV,COS["derived"]["H100_GeV"],1e-15),
         ("rho_crit_over_h2_GeV4",RHO_CRIT_OVER_H2_GEV4,COS["derived"]["rho_crit_over_h2_GeV4"],2e-15),
-        ("theta_reference",THETA_INITIAL,CFG["axion"]["theta_reference"],0.0),("w_R",W_REHEAT,CFG["reheating"]["w_R"],0.0),
+        ("theta_reference",THETA_INITIAL,CFG["axion"]["theta_reference"],0.0),("w_R",W_REHEAT,get(CFG["reheating"],"w_R",get(CFG["reheating"],"w_R_default",NaN)),0.0),
         ("T_search_max_GeV",T_SEARCH_MAX_GEV,CFG["oscillation"]["T_search_max_GeV"],0.0))
     e=relerr(Float64(script),Float64(cfgv)); e<=tol || error("constant $name: script $script vs config $cfgv")
     push!(constcheck,name=>OD(["script"=>Float64(script),"config"=>Float64(cfgv),"rel_diff"=>e]))
@@ -246,6 +274,7 @@ for (lab,treh,s) in SCEN
     HR<THREE_HI_MAX_GEV/3 || error("scenario $lab: H_R >= H_I,max")
     push!(scen_derived,lab=>OD(["T_reh_GeV"=>treh,"H_R_GeV"=>HR,"three_H_R_eV"=>3HR*1e9,"one_plus_z_R"=>opzR,
         "rel_diff_three_H_R_vs_config"=>e1,"rel_diff_one_plus_z_R_vs_config"=>e2]))
+    METHOD_VERSION>=2 && (push!(scen_derived[end].second,"w_R"=>WR_OF[lab]))   # [G7]
 end
 
 # ---------------------------------------------------------------- input mode table (A1 schema)
@@ -347,8 +376,8 @@ function evaluate(r,lab,treh,HR)
     if st=="NOT_INCLUDED_FROZEN"; branch="frozen_not_oscillating"
     elseif st=="INFLATIONARY_VALIDITY_EXCLUDED"; branch="not_evaluated_inflation_invalid"
     elseif cat=="PRE_REHEATING"
-        pr=pre_reheating_abundance(tab,r.logm,r.logf,treh)          # (2.10)+(2.15), w_R = 0
-        branch="fuzzy_wR0_eq2.10_2.15"; z=1/pr.a_osc-1; Hosc=pr.H_osc; om=pr.omega
+        pr=pre_reheating_abundance_w(tab,r.logm,r.logf,treh,WR_OF[lab])   # (2.10)+(2.15); [G7] w_R of the scenario (0 in v1)
+        branch=WR_OF[lab]==0.0 ? "fuzzy_wR0_eq2.10_2.15" : "fuzzy_wR_general_eq2.10_2.15"; z=1/pr.a_osc-1; Hosc=pr.H_osc; om=pr.omega
     else
         tosc=solve_tosc(tab,m)
         isfinite(tosc) && tosc>T_CMB_GEV || error("T_osc not found for $(r.geometry_id) mode $(r.mode_index)")
@@ -491,6 +520,9 @@ const H11_COLS=["h11","scenario","geometries","modes","n_FROZEN","n_LATE","n_POS
     "p84_log10_Omega_geometry_h2_at_theta_ref"]
 
 # ---------------------------------------------------------------- run
+# [G7] v2: column w_R appended to every table (schema relic_abundance_production_outputs/2); v1 tables are unchanged
+tagw(X,lab)=(for x in X; x["w_R"]=WR_OF[lab]; end; X)
+METHOD_VERSION>=2 && for c in (MASTER_COLS,GEOM_COLS,VALIDITY_COLS,H11_COLS); push!(c,"w_R"); end
 summary=OD(); POPSUM=OD(); census_cols=["geometry_id","h11","mode_index","mode_rank_desc","log10_mass_eV","vacuum_status","inflation_valid","above_mKK","above_fpert"]   # [G6]
 census_rows=[Dict{String,Any}("geometry_id"=>r.geometry_id,"h11"=>r.h11,"mode_index"=>r.mode_index,"mode_rank_desc"=>r.mode_rank_desc,
     "log10_mass_eV"=>r.logm,"vacuum_status"=>r.vacuum_status) for r in modes]
@@ -511,15 +543,16 @@ for (lab,treh,s) in SCEN
         end
         append!(census_cols,["category_$lab","abundance_state_$lab","included_in_cdm_sum_$lab"])
         G=geometry_rows(rows,lab,treh,false)
-        write_table(joinpath(OUTDIR,"census_h11_$lab.csv"),H11_COLS,h11_rows(G,lab,false))
+        write_table(joinpath(OUTDIR,"census_h11_$lab.csv"),H11_COLS,tagw(h11_rows(G,lab,false),lab))
         push!(summary,lab=>OD(["T_reh_GeV"=>treh,"three_H_R_eV"=>3HR*1e9,"census"=>census_block(rows,G),"abundance"=>"NOT COMPUTED (census/dry-run mode)"]))
+        METHOD_VERSION>=2 && (push!(summary[end].second,"w_R"=>WR_OF[lab]))   # [G7]
     else
-        rows=[evaluate(r,lab,treh,HR) for r in modes]
-        G=geometry_rows(rows,lab,treh)
+        rows=tagw([evaluate(r,lab,treh,HR) for r in modes],lab)
+        G=tagw(geometry_rows(rows,lab,treh),lab)
         write_table(joinpath(OUTDIR,"master_modes_$lab.csv"),MASTER_COLS,rows)
         write_table(joinpath(OUTDIR,"geometry_summary_$lab.csv"),GEOM_COLS,G)
-        write_table(joinpath(OUTDIR,"h11_summary_$lab.csv"),H11_COLS,h11_rows(G,lab,true))
-        VR=validity_rows(G); write_table(joinpath(OUTDIR,"geometry_abundance_validity_$lab.csv"),VALIDITY_COLS,VR)   # [G6]
+        write_table(joinpath(OUTDIR,"h11_summary_$lab.csv"),H11_COLS,tagw(h11_rows(G,lab,true),lab))
+        VR=tagw(validity_rows(G),lab); write_table(joinpath(OUTDIR,"geometry_abundance_validity_$lab.csv"),VALIDITY_COLS,VR)   # [G6]
         push!(POPSUM,lab=>OD(["geometries"=>length(VR),"by_abundance_validity"=>validity_counts(VR),   # [G6]
             "theta_primary_geometries"=>count(v->v["theta_population"]=="PRIMARY",VR),"theta_sensitivity_geometries"=>count(v->v["theta_population"]!="EXCLUDED_NOT_EVALUATED",VR),
             "theta_excluded_not_evaluated"=>count(v->v["theta_population"]=="EXCLUDED_NOT_EVALUATED",VR)]))
@@ -531,6 +564,7 @@ for (lab,treh,s) in SCEN
             "sum_over_included_modes_POST"=>sumornothing([r["Omega_h2_at_theta_ref"] for r in rows if r["abundance_state"]=="INCLUDED_POST_REHEATING"]),
             "sum_over_included_modes_PRE"=>sumornothing(pre),"note"=>"sums across geometries are bookkeeping only; each geometry is a separate universe"])
         push!(summary,lab=>OD(["T_reh_GeV"=>treh,"three_H_R_eV"=>3HR*1e9,"census"=>census_block(rows,G),"abundance"=>ab]))
+        METHOD_VERSION>=2 && (push!(summary[end].second,"w_R"=>WR_OF[lab]))   # [G7]
     end
 end
 MODE=="census" && write_table(joinpath(OUTDIR,"census_modes.csv"),census_cols,census_rows)
@@ -547,9 +581,10 @@ meta=OD(["mode"=>MODE,"rows"=>N,"is_full_population"=>is_population,"production_
         "three_H0_eV"=>3*H0NOW*1e9,"three_H_Teq_eV"=>3*HEQ*1e9,"M_pl_reduced_GeV"=>MPL_REDUCED_GEV]),
     "methodology"=>OD(["criterion"=>"m_a = 3H","theta_ref"=>THETA_INITIAL,"theta_ref_interpretation"=>THETA_REF_NOTE,
         "theta_rescaling"=>"Omega(theta) = Omega_h2_at_theta_ref * (theta/theta_ref)^2, harmonic; valid only in the small-angle domain (not pi/2 by default)",
-        "theta_scan_performed"=>false,"f_relic"=>"f_pert (C = 1)","w_R"=>W_REHEAT,
+        "theta_scan_performed"=>false,"f_relic"=>"f_pert (C = 1)","w_R"=>(METHOD_VERSION==1 ? W_REHEAT : "per scenario: see scenarios[].w_R"),
         "pre_reheating"=>"Fuzzy (2.10)+(2.15); printed (2.16) normalisation not used","three_H_I_max_GeV"=>THREE_HI_MAX_GEV,
         "inflation_cut_unit"=>"mode","mKK_flag_M_pl_GeV"=>MPL_KK_GEV,"mKK_and_fpert"=>"flags only","light_window_100eV"=>"not applied",
         "FROZEN_LATE"=>"census only"])])
+METHOD_VERSION>=2 && pushfirst!(meta,"methodology_version"=>METHOD_VERSION)   # [G7] v1 metadata keeps its frozen key set
 json_write(joinpath(OUTDIR,"run_metadata.json"),meta)
 println("[$(stamp())] done: outputs in $OUTDIR")

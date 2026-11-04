@@ -46,7 +46,7 @@ DC = json.loads(rd("tests/driver_changes.json")); rev = body; ok = True
 for blk in DC["blocks"]:
     ok &= rev.count(blk["new"]) == 1; rev = rev.replace(blk["new"], blk["old"])
 ok &= rev.count(DC["G1"]["new"]) == 1; rev = rev.replace(DC["G1"]["new"], DC["G1"]["old"])
-check(f"relic script body = frozen production script except the documented driver changes G1-G6 ({len(DC['blocks']) + 1} blocks)",
+check(f"relic script body = frozen production script except the documented driver changes G1-G7 ({len(DC['blocks']) + 1} blocks)",
       ok and sha(rev.encode()) == "9f73b9c63fd159a252a4cbd8582906c0148289123ccc272307fda7c6db877064")
 a, b = src.index("# ============================== physics block"), src.index("# ============================== end of physics block")
 check("relic physics block checksum", sha(src[a:b].encode()) == "a0c613f17cd8da72e93834396b0a1a0663d201454216e9427ef3895beace884a")
@@ -58,8 +58,10 @@ check("relic physics block checksum", sha(src[a:b].encode()) == "a0c613f17cd8da7
 # references/shoroq/tests/regression_relic_theta.sh.
 # 88488246... was the generalised version; c86e47a4... adds only `promote=true` to the per-scenario append (external audit I-01:
 # a NO_MATCH scenario has all-missing angle columns). No mathematics changed; the Shoroq regressions must stay byte-identical.
+# bd568493... = c86e47a4... plus the methodology-v2 w_R columns/keys (all conditional on METHOD_VERSION >= 2: v1 theta outputs are byte-identical,
+# checked in tests/test_wR_general.py and references/shoroq/tests/regression_relic_theta.sh).
 check("01_theta_final.jl is the reviewed generalised version",
-      sha(rd("engine/theta/01_theta_final.jl")) == "c86e47a4929ae3e57ed50b3386bc2182a4182bb732436d23120fe74063ccebe8")
+      sha(rd("engine/theta/01_theta_final.jl")) == "bd5684931ecf2bb4c5e2f1837744227d1b4fa9dbdc09f087c3570ce5e2d9c707")
 cj = rd("engine/theta/common.jl").decode()
 check("theta interval machinery present", "function exact_profile" in cj and "function maximal_set" in cj and "function smoothed" in cj)
 
@@ -74,6 +76,16 @@ check("relic: POST and PRE summed, FROZEN and LATE census only",
 check("relic: f = f_pert (C = 1), w_R = 0, printed Fuzzy (2.16) not used, three T_reh",
       rc["axion"]["f_relic_over_f_pert"] == 1.0 and rc["reheating"]["w_R"] == 0.0 and rc["reheating"]["eq_2_16_printed_normalization_used"] is False
       and [s["T_reh_GeV"] for s in rc["reheating"]["scenarios"]] == [0.005, 1e4, 1e10])
+# methodology v2 (constant w_R per scenario): identical to v1 except the documented keys; v1 itself is frozen
+m1, m2 = json.loads(rd("configs/methodology_v1.json")), json.loads(rd("configs/methodology_v2.json"))
+changed = sorted(k for k in set(m1) | set(m2) if m1.get(k) != m2.get(k))
+check("methodology v2 differs from v1 only in schema/version/status/created, reheating, methodology_flags and outputs",
+      changed == sorted(["schema", "methodology_version", "created", "status", "reheating", "methodology_flags", "outputs"]), ",".join(changed))
+check("methodology v1 states w_R = 0 and has no methodology_version (frozen)", m1["reheating"]["w_R"] == 0.0 and "methodology_version" in m2 and "methodology_version" not in m1)
+s1, s2 = json.loads(rd("configs/relic_output_schema.json")), json.loads(rd("configs/relic_output_schema_v2.json"))
+check("output schema v2 = v1 plus the w_R column in every table (and the general-w branch label)",
+      all([c["name"] for c in s2["tables"][t]] == [c["name"] for c in s1["tables"][t]] + ["w_R"] for t in s1["tables"])
+      and "fuzzy_wR_general_eq2.10_2.15" in s2["abundance_branches"] and "fuzzy_wR_general_eq2.10_2.15" not in s1["abundance_branches"])
 tc = json.loads(rd("references/shoroq/configs/theta_analysis_config.frozen.json"))
 check("theta: domain 0 < theta <= 0.5, no lower cut, TIGHT 0.9 <= R <= 1, Omega_DM h^2 = 0.12",
       tc["theta"]["theta_max"] == 0.5 and tc["theta"]["theta_min"] is None and tc["dark_matter"]["TIGHT_DM"] == [0.9, 1.0]

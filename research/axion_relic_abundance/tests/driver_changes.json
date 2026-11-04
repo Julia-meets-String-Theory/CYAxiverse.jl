@@ -1,5 +1,5 @@
 {
- "description": "Driver changes of engine/relic/compute_relic_abundance.jl relative to the frozen 2026-10-01 production script, as (new, old) text blocks (each tagged [G2]..[G6]); replacing every new block by its old block and then G1 restores the frozen body (sha256 9f73b9c6...). Checked by tests/test_static.py. The physics block is not touched.",
+ "description": "Driver changes of engine/relic/compute_relic_abundance.jl relative to the frozen 2026-10-01 production script, as (new, old) text blocks (each tagged [G2]..[G6]); replacing every new block by its old block and then G1 restores the frozen body (sha256 9f73b9c6...). Checked by tests/test_static.py. The physics block is not touched. || G7 (2026-11-04, methodology v2: per-scenario constant w_R): blocks added after the original G1-G6 ones; the physics block above the driver banner is untouched.",
  "G1": {
   "new": "is_population=haskey(RUN,\"expected_modes\") && N==RUN[\"expected_modes\"]   # [G1] expected counts optional",
   "old": "is_population=N==RUN[\"expected_modes\"]"
@@ -42,16 +42,56 @@
    "old": "end\n"
   },
   {
-   "new": "# ---------------------------------------------------------------- run\nsummary=OD(); POPSUM=OD(); census_cols=[\"geometry_id\",\"h11\",\"mode_index\",\"mode_rank_desc\",\"log10_mass_eV\",\"vacuum_status\",\"inflation_valid\",\"above_mKK\",\"above_fpert\"]   # [G6]\n",
+   "new": "# ---------------------------------------------------------------- run\n# [G7] v2: column w_R appended to every table (schema relic_abundance_production_outputs/2); v1 tables are unchanged\ntagw(X,lab)=(for x in X; x[\"w_R\"]=WR_OF[lab]; end; X)\nMETHOD_VERSION>=2 && for c in (MASTER_COLS,GEOM_COLS,VALIDITY_COLS,H11_COLS); push!(c,\"w_R\"); end\nsummary=OD(); POPSUM=OD(); census_cols=[\"geometry_id\",\"h11\",\"mode_index\",\"mode_rank_desc\",\"log10_mass_eV\",\"vacuum_status\",\"inflation_valid\",\"above_mKK\",\"above_fpert\"]   # [G6]\n",
    "old": "# ---------------------------------------------------------------- run\nsummary=OD(); census_cols=[\"geometry_id\",\"h11\",\"mode_index\",\"mode_rank_desc\",\"log10_mass_eV\",\"vacuum_status\",\"inflation_valid\",\"above_mKK\",\"above_fpert\"]\n"
   },
   {
-   "new": "        write_table(joinpath(OUTDIR,\"h11_summary_$lab.csv\"),H11_COLS,h11_rows(G,lab,true))\n        VR=validity_rows(G); write_table(joinpath(OUTDIR,\"geometry_abundance_validity_$lab.csv\"),VALIDITY_COLS,VR)   # [G6]\n        push!(POPSUM,lab=>OD([\"geometries\"=>length(VR),\"by_abundance_validity\"=>validity_counts(VR),   # [G6]\n            \"theta_primary_geometries\"=>count(v->v[\"theta_population\"]==\"PRIMARY\",VR),\"theta_sensitivity_geometries\"=>count(v->v[\"theta_population\"]!=\"EXCLUDED_NOT_EVALUATED\",VR),\n            \"theta_excluded_not_evaluated\"=>count(v->v[\"theta_population\"]==\"EXCLUDED_NOT_EVALUATED\",VR)]))\n",
+   "new": "        write_table(joinpath(OUTDIR,\"h11_summary_$lab.csv\"),H11_COLS,tagw(h11_rows(G,lab,true),lab))\n        VR=tagw(validity_rows(G),lab); write_table(joinpath(OUTDIR,\"geometry_abundance_validity_$lab.csv\"),VALIDITY_COLS,VR)   # [G6]\n        push!(POPSUM,lab=>OD([\"geometries\"=>length(VR),\"by_abundance_validity\"=>validity_counts(VR),   # [G6]\n            \"theta_primary_geometries\"=>count(v->v[\"theta_population\"]==\"PRIMARY\",VR),\"theta_sensitivity_geometries\"=>count(v->v[\"theta_population\"]!=\"EXCLUDED_NOT_EVALUATED\",VR),\n            \"theta_excluded_not_evaluated\"=>count(v->v[\"theta_population\"]==\"EXCLUDED_NOT_EVALUATED\",VR)]))\n",
    "old": "        write_table(joinpath(OUTDIR,\"h11_summary_$lab.csv\"),H11_COLS,h11_rows(G,lab,true))\n"
   },
   {
    "new": "MODE==\"census\" && write_table(joinpath(OUTDIR,\"census_modes.csv\"),census_cols,census_rows)\nMODE==\"abundance\" && json_write(joinpath(OUTDIR,\"population_validity_summary.json\"),OD([\"definition\"=>\"abundance validity classes (METHODOLOGY.md); theta primary = EVALUATED_POSITIVE + EVALUATED_ZERO, sensitivity adds PARTIAL_VALIDITY (partial sums), INFLATION_INVALID_ALL is not evaluated\",\n    \"scenarios\"=>POPSUM]))   # [G6]\n",
    "old": "MODE==\"census\" && write_table(joinpath(OUTDIR,\"census_modes.csv\"),census_cols,census_rows)\n"
+  },
+  {
+   "old": "(\"w_R\",W_REHEAT,CFG[\"reheating\"][\"w_R\"],0.0)",
+   "new": "(\"w_R\",W_REHEAT,get(CFG[\"reheating\"],\"w_R\",get(CFG[\"reheating\"],\"w_R_default\",NaN)),0.0)"
+  },
+  {
+   "old": "        pr=pre_reheating_abundance(tab,r.logm,r.logf,treh)          # (2.10)+(2.15), w_R = 0\n        branch=\"fuzzy_wR0_eq2.10_2.15\"; z=1/pr.a_osc-1; Hosc=pr.H_osc; om=pr.omega",
+   "new": "        pr=pre_reheating_abundance_w(tab,r.logm,r.logf,treh,WR_OF[lab])   # (2.10)+(2.15); [G7] w_R of the scenario (0 in v1)\n        branch=WR_OF[lab]==0.0 ? \"fuzzy_wR0_eq2.10_2.15\" : \"fuzzy_wR_general_eq2.10_2.15\"; z=1/pr.a_osc-1; Hosc=pr.H_osc; om=pr.omega"
+  },
+  {
+   "old": "",
+   "new": "# [G7] methodology version and per-scenario constant pre-reheating equation of state w_R (methodology v2). A v1 configuration has\n# no methodology_version and no per-scenario w_R: every scenario then uses w_R = W_REHEAT = 0 through the frozen v1 function.\nconst METHOD_VERSION=Int(get(CFG,\"methodology_version\",1))\nMETHOD_VERSION in (1,2) || error(\"unsupported methodology_version $(get(CFG,\"methodology_version\",1)) (this script implements 1 and 2)\")\nfunction scenario_wR(lab,s)\n    if METHOD_VERSION==1\n        haskey(s,\"w_R\") && error(\"scenario $lab: w_R is fixed at 0 in methodology v1; use methodology v2 to choose it\")\n        return W_REHEAT\n    end\n    w=get(s,\"w_R\",CFG[\"reheating\"][\"w_R_default\"])\n    (w isa Real && !(w isa Bool) && isfinite(w) && -1<w<=1) ||\n        error(\"scenario $lab: w_R must be a finite number with -1 < w_R <= 1 (H ~ a^(-3(1+w_R)/2) must fall with expansion; causal fluid), got $(repr(w))\")\n    Float64(w)\nend\nconst WR_OF=Dict(lab=>scenario_wR(lab,s) for (lab,treh,s) in SCEN)\nlength(unique((treh,WR_OF[lab]) for (lab,treh,s) in SCEN))==length(SCEN) ||\n    error(\"two scenarios share the same (T_reh_GeV, w_R): identical physics under two labels is ambiguous\")\n# [G7] constant-w_R PRE_REHEATING abundance, (2.10)+(2.15) evaluated in logarithms (no overflow of (1+z_a)^3). w_R == 0 calls the\n# frozen v1 function, so a v2 run at w_R = 0 is bit-identical to v1. An abundance outside the float64 range stops the run: never clamped.\nfunction pre_reheating_abundance_w(tab,logm_ev,logf_gev,treh,w)\n    w==0.0 && return pre_reheating_abundance(tab,logm_ev,logf_gev,treh)\n    m=10.0^(logm_ev-9); HR=hubble_reheat(tab,treh)\n    lnopz_a=log(onepz_reheat(tab,treh))+(2/(3*(1+w)))*log(m/(3HR))                                   # (2.15)\n    lnom=log(0.5)+2*log(m)+2*(logf_gev*log(10.0))+2*log(THETA_INITIAL)-log(RHO_CRIT_OVER_H2_GEV4)-3*lnopz_a   # (2.10)\n    (isfinite(lnom) && isfinite(lnopz_a) && -708<lnom<708 && lnopz_a<708) ||\n        error(\"PRE_REHEATING abundance outside the float64 normal range (ln Omega = $lnom, ln(1+z_a) = $lnopz_a) for log10 m = $logm_ev eV, log10 f = $logf_gev GeV, w_R = $w, T_reh = $treh GeV; it is not clamped to 0 or to a bound. Use a w_R closer to 0 or a higher T_reh (METHODOLOGY.md, numerical range of the PRE prescription)\")\n    (;omega=exp(lnom),a_osc=exp(-lnopz_a),H_osc=m/3,HR)\nend\n"
+  },
+  {
+   "old": "write_table(joinpath(OUTDIR,\"census_h11_$lab.csv\"),H11_COLS,h11_rows(G,lab,false))",
+   "new": "write_table(joinpath(OUTDIR,\"census_h11_$lab.csv\"),H11_COLS,tagw(h11_rows(G,lab,false),lab))"
+  },
+  {
+   "old": "        rows=[evaluate(r,lab,treh,HR) for r in modes]\n        G=geometry_rows(rows,lab,treh)\n",
+   "new": "        rows=tagw([evaluate(r,lab,treh,HR) for r in modes],lab)\n        G=tagw(geometry_rows(rows,lab,treh),lab)\n"
+  },
+  {
+   "old": "        push!(summary,lab=>OD([\"T_reh_GeV\"=>treh,\"three_H_R_eV\"=>3HR*1e9,\"census\"=>census_block(rows,G),\"abundance\"=>\"NOT COMPUTED (census/dry-run mode)\"]))",
+   "new": "        push!(summary,lab=>OD([\"T_reh_GeV\"=>treh,\"three_H_R_eV\"=>3HR*1e9,\"census\"=>census_block(rows,G),\"abundance\"=>\"NOT COMPUTED (census/dry-run mode)\"]))\n        METHOD_VERSION>=2 && (push!(summary[end].second,\"w_R\"=>WR_OF[lab]))   # [G7]"
+  },
+  {
+   "old": "        push!(summary,lab=>OD([\"T_reh_GeV\"=>treh,\"three_H_R_eV\"=>3HR*1e9,\"census\"=>census_block(rows,G),\"abundance\"=>ab]))",
+   "new": "        push!(summary,lab=>OD([\"T_reh_GeV\"=>treh,\"three_H_R_eV\"=>3HR*1e9,\"census\"=>census_block(rows,G),\"abundance\"=>ab]))\n        METHOD_VERSION>=2 && (push!(summary[end].second,\"w_R\"=>WR_OF[lab]))   # [G7]"
+  },
+  {
+   "old": "        \"rel_diff_three_H_R_vs_config\"=>e1,\"rel_diff_one_plus_z_R_vs_config\"=>e2]))\nend",
+   "new": "        \"rel_diff_three_H_R_vs_config\"=>e1,\"rel_diff_one_plus_z_R_vs_config\"=>e2]))\n    METHOD_VERSION>=2 && (push!(scen_derived[end].second,\"w_R\"=>WR_OF[lab]))   # [G7]\nend"
+  },
+  {
+   "old": "json_write(joinpath(OUTDIR,\"run_metadata.json\"),meta)",
+   "new": "METHOD_VERSION>=2 && pushfirst!(meta,\"methodology_version\"=>METHOD_VERSION)   # [G7] v1 metadata keeps its frozen key set\njson_write(joinpath(OUTDIR,\"run_metadata.json\"),meta)"
+  },
+  {
+   "old": "\"w_R\"=>W_REHEAT,\n        \"pre_reheating\"=>\"Fuzzy (2.10)+(2.15); printed (2.16) normalisation not used\"",
+   "new": "\"w_R\"=>(METHOD_VERSION==1 ? W_REHEAT : \"per scenario: see scenarios[].w_R\"),\n        \"pre_reheating\"=>\"Fuzzy (2.10)+(2.15); printed (2.16) normalisation not used\""
   }
  ]
 }

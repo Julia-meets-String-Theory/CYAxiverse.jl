@@ -73,6 +73,7 @@ for lab in LABS
     G = G[keep, :]; omv = omv[keep]; nsize[lab] = nrow(G)
     if nrow(G) == 0
         summ[lab] = Dict("T_reh_GeV" => TREH[lab], "status" => "EMPTY_POPULATION", "n_geometries" => 0)
+        METHOD_VERSION >= 2 && (summ[lab]["w_R"] = WR[lab])
         continue
     end
     nmiss = count(ismissing, omv)
@@ -178,6 +179,7 @@ for lab in LABS
         "tight_lower_edge_sensitivity" => edge, "min_theta_90" => fin(minimum(t90)), "min_theta_100" => fin(minimum(t100)),
         "N_theta_90_le_0p5" => count(t90 .<= TH_MAX), "N_theta_100_le_0p5_overabundant_at_theta_max" => count(t100 .< TH_MAX),
         "spearman_h11_vs_log_theta_90" => fin(rho), "n_PRE_dominated" => count(pdom))
+    METHOD_VERSION >= 2 && (summ[lab]["w_R"] = WR[lab])
     # keys that exist only when the condition occurs (the reference-case outputs stay unchanged)
     nzero > 0 && (summ[lab]["n_geometries_Omega_zero"] = nzero)
     any(==("NO_MATCH"), bb.status) && (summ[lab]["bootstrap"]["fraction_NO_MATCH"] = mean(bb.status .== "NO_MATCH"))
@@ -211,13 +213,13 @@ for lab in LABS
             frac_overabundant_at_rep=NM ? missing : mean(isequal("OVERABUNDANT"), cls[s]), frac_overabundant_at_theta_max=mean(t100[s] .< TH_MAX), frac_PRE_dominated=mean(pdom[s])); promote=true)
     end
 end
-csvw(joinpath(OUT, "theta_geometry_final.csv"), geo_rows)
-csvw(joinpath(OUT, "theta_summary_final.csv"), sum_rows)
-csvw(joinpath(OUT, "theta_per_h11_final.csv"), h11_rows)
-csvw(joinpath(OUT, "theta_per_h11bin_final.csv"), hb_rows)
-csvw(joinpath(OUT, "theta_exact_overlap_intervals.csv"), iv_rows)
-csvw(joinpath(OUT, "theta_threshold_quantiles.csv"), q_rows)
-csvw(joinpath(OUT, "theta_bootstrap.csv"), boot_rows)
+csvw(joinpath(OUT, "theta_geometry_final.csv"), tagw!(geo_rows))
+csvw(joinpath(OUT, "theta_summary_final.csv"), tagw!(sum_rows))
+csvw(joinpath(OUT, "theta_per_h11_final.csv"), tagw!(h11_rows))
+csvw(joinpath(OUT, "theta_per_h11bin_final.csv"), tagw!(hb_rows))
+csvw(joinpath(OUT, "theta_exact_overlap_intervals.csv"), tagw!(iv_rows))
+csvw(joinpath(OUT, "theta_threshold_quantiles.csv"), tagw!(q_rows))
+csvw(joinpath(OUT, "theta_bootstrap.csv"), tagw!(boot_rows))
 summ["global"] = Dict("min_theta_90_all_scenarios" => fin(global_min90), "domain" => CFG["theta"]["domain"], "theta_min" => nothing,
                       "Omega_DM_h2" => ODM, "TIGHT_DM" => [X_LO, X_HI], "tight_window_width_dex" => W)
 summ["population"] = POP
@@ -254,6 +256,7 @@ for lab in LABS
     psum["scenarios"][lab] = Dict("total_geometries" => nrow(V), "by_abundance_validity" => cnt, "primary" => pp, "sensitivity_partial_validity" => ss,
         "excluded_not_evaluated" => Dict("n_geometries" => cnt["INFLATION_INVALID_ALL"],
                                          "geometry_ids" => V.geometry_id[V.abundance_validity .== "INFLATION_INVALID_ALL"]))
+    METHOD_VERSION >= 2 && (psum["scenarios"][lab]["w_R"] = WR[lab])
 end
-csvw(joinpath(PRIM, "theta_population.csv"), prow)
+csvw(joinpath(PRIM, "theta_population.csv"), tagw!(prow))
 jsonw(joinpath(PRIM, "theta_population_summary.json"), psum)
