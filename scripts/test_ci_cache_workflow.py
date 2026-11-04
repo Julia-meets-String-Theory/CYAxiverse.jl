@@ -147,6 +147,10 @@ class WorkflowWiring(unittest.TestCase):
                     self.assertNotIn("    permissions:", block)
                     self.assertNotIn(": write", block.replace("cache-mode: write", ""))
 
+    def test_maintenance_job_has_a_time_limit(self) -> None:
+        job = _job_block(self.workflow, "cache-maintenance")
+        self.assertIn("    timeout-minutes: 10\n", job)
+
     def test_maintenance_job_is_push_only_serialised_and_runs_no_repository_code(self) -> None:
         job = _job_block(self.workflow, "cache-maintenance")
         self.assertIn("    if: github.event_name == 'push'\n", job)
@@ -354,6 +358,23 @@ class MaintenanceSelection(unittest.TestCase):
         self.assertEqual(paths[0][0], "GET")
         self.assertIn("sort=created_at", paths[0][1])
         self.assertIn("direction=asc", paths[0][1])
+
+    def test_listing_stops_at_a_page_limit_and_deletes_nothing(self) -> None:
+        # An API that keeps returning the same non-empty page must not loop forever.
+        class Endless(FakeApi):
+            def list_caches_page(self, page, per_page):
+                self.calls.append(("list", page))
+                if len(self.calls) > 500:
+                    raise AssertionError("listing did not stop")
+                return [_cache(1, "refs/heads/vmm", "fast", "2026-11-01T00:00:00Z"),
+                        _cache(2, "refs/heads/vmm", "fast", "2026-11-02T00:00:00Z")], 10**6
+
+        api = Endless([])
+        code, lines = self.run_main(api)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(api.deleted, [])
+        self.assertLessEqual(len(api.calls), self.ns["MAX_PAGES"])
+        self.assertTrue(any(line.startswith("::error::") and "page" in line for line in lines))
 
     def test_selection_failure_deletes_nothing_and_fails(self) -> None:
         for kwargs in ({"fail_list": True}, {"fail_state": True}):

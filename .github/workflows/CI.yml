@@ -252,6 +252,8 @@ jobs:
     # nothing and runs no repository file: the logic below is its only code.
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Listing and deleting a few dozen caches takes seconds; bound a hung API call.
+    timeout-minutes: 10
     permissions:
       actions: write
       pull-requests: read
@@ -275,6 +277,9 @@ jobs:
 
           PULL_MERGE_REF = re.compile(r"refs/pull/([0-9]+)/merge")
           PER_PAGE = 100
+          # 100 pages = 10,000 entries. This repository's entries are 0.35-2.2 GB under a
+          # 10 GB quota, so more pages means the API is misbehaving: stop, delete nothing.
+          MAX_PAGES = 100
           # Pull requests restore but never save this cache (cache-mode: read), so an
           # entry under a pull-request ref is stale and would shadow the vmm base.
           FAST_TESTS_PREFIX = "julia-cache;workflow=CI;job=fast;"
@@ -322,6 +327,8 @@ jobs:
               """Read every page into one snapshot, each cache once, before selecting."""
               caches, seen, page = [], set(), 1
               while True:
+                  if page > MAX_PAGES:
+                      raise RuntimeError(f"cache list did not end within {MAX_PAGES} pages")
                   entries, total = api.list_caches_page(page, PER_PAGE)
                   for cache in entries:
                       if cache["id"] not in seen:  # an entry repeated across pages counts once
