@@ -79,8 +79,8 @@ check("relic: f = f_pert (C = 1), w_R = 0, printed Fuzzy (2.16) not used, three 
 # methodology v2 (constant w_R per scenario): identical to v1 except the documented keys; v1 itself is frozen
 m1, m2 = json.loads(rd("configs/methodology_v1.json")), json.loads(rd("configs/methodology_v2.json"))
 changed = sorted(k for k in set(m1) | set(m2) if m1.get(k) != m2.get(k))
-check("methodology v2 differs from v1 only in schema/version/status/created, reheating, methodology_flags and outputs",
-      changed == sorted(["schema", "methodology_version", "created", "status", "reheating", "methodology_flags", "outputs"]), ",".join(changed))
+check("methodology v2 differs from v1 only in schema/version/status/created, run/code provenance text, reheating, methodology_flags and outputs",
+      changed == sorted(["schema", "methodology_version", "created", "status", "run", "code", "reheating", "methodology_flags", "outputs"]), ",".join(changed))
 check("methodology v1 states w_R = 0 and has no methodology_version (frozen)", m1["reheating"]["w_R"] == 0.0 and "methodology_version" in m2 and "methodology_version" not in m1)
 s1, s2 = json.loads(rd("configs/relic_output_schema.json")), json.loads(rd("configs/relic_output_schema_v2.json"))
 check("output schema v2 = v1 plus the w_R column in every table (and the general-w branch label)",

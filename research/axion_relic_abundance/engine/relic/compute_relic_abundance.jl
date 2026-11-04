@@ -376,7 +376,9 @@ function evaluate(r,lab,treh,HR)
     if st=="NOT_INCLUDED_FROZEN"; branch="frozen_not_oscillating"
     elseif st=="INFLATIONARY_VALIDITY_EXCLUDED"; branch="not_evaluated_inflation_invalid"
     elseif cat=="PRE_REHEATING"
-        pr=pre_reheating_abundance_w(tab,r.logm,r.logf,treh,WR_OF[lab])   # (2.10)+(2.15); [G7] w_R of the scenario (0 in v1)
+        pr=try pre_reheating_abundance_w(tab,r.logm,r.logf,treh,WR_OF[lab]) catch e   # (2.10)+(2.15); [G7] w_R of the scenario (0 in v1)
+            error("scenario $lab, geometry $(r.geometry_id), mode $(r.mode_index): "*(e isa ErrorException ? e.msg : sprint(showerror,e)))
+        end
         branch=WR_OF[lab]==0.0 ? "fuzzy_wR0_eq2.10_2.15" : "fuzzy_wR_general_eq2.10_2.15"; z=1/pr.a_osc-1; Hosc=pr.H_osc; om=pr.omega
     else
         tosc=solve_tosc(tab,m)

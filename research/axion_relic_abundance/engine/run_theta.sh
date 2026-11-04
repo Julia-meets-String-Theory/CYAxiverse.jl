@@ -18,6 +18,17 @@ stage5_cleanup() {
     fi
 }
 trap stage5_cleanup EXIT
+# The scenarios of stage 5 are those of the relic run (relic/run_config.json). A different run file would only change the theta_analysis overrides,
+# so a run file whose scenarios differ from the relic run's is refused instead of being ignored silently.
+"$PYTHON" - "$RELIC_RUN" "$WORK/relic/run_config.json" <<'PY' || die "RELIC_RUN differs from the run file of the relic stage (scenario labels, T_reh or w_R): use the same run file for stages 4 and 5"
+import json, sys
+run, cfg = (json.load(open(p)) for p in sys.argv[1:3])
+mv = cfg.get("methodology_version", 1)
+key = lambda s: (s["label"], float(s["T_reh_GeV"]), float(s.get("w_R", cfg["reheating"].get("w_R_default", 0.0))) if mv == 2 else 0.0)
+want = [key(s) for s in cfg["reheating"]["scenarios"]]
+have = [key(s) if mv == 1 or "w_R" in s else (s["label"], float(s["T_reh_GeV"]), 0.0) for s in run["scenarios"]]
+sys.exit(0 if want == have else 1)
+PY
 log "stage 5: theta configuration from the v1 theta methodology${RELIC_EXPECTATIONS:+ and the expectations}"
 "$PYTHON" "$REPO/engine/relic/00_compose_run_config.py" theta "$REPO/configs/theta_methodology_v1.json" "$RELIC_RUN" "$F/theta_config.json" \
     ${RELIC_EXPECTATIONS:+--expectations "$RELIC_EXPECTATIONS"} | tee "$WORK/logs/05_compose.log"

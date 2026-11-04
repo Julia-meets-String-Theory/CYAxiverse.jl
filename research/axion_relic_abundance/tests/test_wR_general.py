@@ -346,7 +346,11 @@ if codes == [0, 0, 0] and codes0 == [0, 0, 0]:
     sha = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
     pin = json.load(open(f"{REPO}/tests/v1_example_sha256.json")) if os.path.exists(f"{REPO}/tests/v1_example_sha256.json") else {}
     bad = [f for f, h in pin.get("relic_tables", {}).items() if sha(f"{W1}/relic/tables/{f}") != h]
-    bad += [f for f, h in pin.get("theta", {}).items() if sha(f"{W1}/final_analysis/{f}") != h]
+    # verification/input_verification.json records the absolute path of the checkout (production script); it is compared by content below instead
+    PATHDEP = {"verification/input_verification.json"}
+    bad += [f for f, h in pin.get("theta", {}).items() if f not in PATHDEP and sha(f"{W1}/final_analysis/{f}") != h]
+    iv1 = json.load(open(f"{W1}/final_analysis/verification/input_verification.json"))
+    bad += ["input_verification.json (not all checks pass)"] if not (iv1["all_pass"] and iv1["n_checks"] == 41) else []
     record("D2 v1 example: relic tables and theta outputs byte-identical to the checksums recorded before methodology v2", pin and not bad, f"{len(pin.get('relic_tables', {}))}+{len(pin.get('theta', {}))} files, differing {bad[:3]}")
     diff = []
     for f in sorted(os.listdir(f"{W1}/relic/tables")):
@@ -386,8 +390,15 @@ def one_run(name, scenarios):
 
 c, Wf = one_run("range_stop", [{"label": "extreme", "T_reh_GeV": 0.005, "w_R": -0.99}])
 log = open(f"{T}/range_stop.run_relic.sh.log").read() if os.path.exists(f"{T}/range_stop.run_relic.sh.log") else ""
-record("F1 w_R = -0.99 at 5 MeV: heavy PRE modes leave the float64 range, the run stops with a named reason, no table is written, nothing is clamped",
-       c[-1] != 0 and "outside the float64 normal range" in log and not os.path.exists(f"{Wf}/relic/tables/master_modes_extreme.csv"), log.strip()[-160:])
+record("F1 w_R = -0.99 at 5 MeV: heavy PRE modes leave the float64 range, the run stops naming scenario, geometry and mode, no table is written, nothing is clamped",
+       c[-1] != 0 and "outside the float64 normal range" in log and "scenario extreme, geometry h11_015/np_0000" in log and not os.path.exists(f"{Wf}/relic/tables/master_modes_extreme.csv"), log.strip()[-160:])
+failed = [d for d in os.listdir(Wf) if d.startswith("relic.failed.")]
+record("F1b the failed stage 4 does not block the rerun: partial output kept as relic.failed.<UTC>, and a corrected run file then succeeds in the same WORK",
+       bool(failed) and not os.path.exists(f"{Wf}/relic"), str(failed))
+if failed:
+    good = f"{T}/range_stop_fixed.json"; json.dump({"schema": "cyaxiverse_relic_run/2", "scenarios": [{"label": "ok", "T_reh_GeV": 1e4, "w_R": -0.5}]}, open(good, "w"))
+    r_ = sh(["bash", f"{REPO}/engine/run_relic.sh"], {"WORK": Wf, "RELIC_RUN": good}, log=f"{T}/range_stop_rerun.log")
+    record("F1c rerun of stage 4 in the same WORK with the corrected run file succeeds", r_.returncode == 0 and os.path.exists(f"{Wf}/relic/tables/master_modes_ok.csv"), r_.stderr.strip()[-120:])
 tamper = json.load(open(f"{WG}/relic/run_config.json"))
 tamper["reheating"]["scenarios"][0]["w_R"] = -1.0
 os.makedirs(f"{T}/tamper", exist_ok=True); json.dump(tamper, open(f"{T}/tamper/run_config.json", "w"))
@@ -415,6 +426,29 @@ if c == [0, 0]:
     record("F4 w_R -> 0 through the engine (w = 1e-12, 1e-6): logarithmic evaluation agrees with the w=0 branch times the exact ratio", worst < 1e-12, f"max rel {worst:.1e}")
 else:
     record("F4 small-w run", False, str(c))
+
+# ------------------------------------------------------------------ H: researcher-facing behaviour (blind acceptance findings)
+for ex in ("run_v2_equation_of_state_scan", "run_v2_mixed_scenarios", "run_v2_w0_reproduces_v1"):
+    r = sh([PY, COMPOSE, "relic", f"{REPO}/configs/methodology_v2.json", f"{REPO}/examples/wR_general/{ex}.json", f"{T}/h_{ex}.json"])
+    record(f"H1 every shipped v2 example run file composes: {ex}", r.returncode == 0, (r.stderr or r.stdout).strip()[-120:])
+r = sh([PY, COMPOSE, "relic", f"{REPO}/configs/methodology_v1.json", f"{REPO}/examples/minimal/run.json", f"{T}/h_v1min.json"])
+record("H1 the v1 example run file still composes under methodology v1", r.returncode == 0)
+mixed = json.load(open(f"{T}/h_run_v2_mixed_scenarios.json"))
+sc_ = {s["label"]: s for s in mixed["reheating"]["scenarios"]}
+record("H2 provenance: a defaulted w_R is marked (w_R_defaulted true), a stated one is not", sc_["T1e4-default"]["w_R_defaulted"] is True and sc_["T1e4-w0p17"]["w_R_defaulted"] is False and sc_["T1e4-default"]["w_R"] == 0.0)
+chk = f"{T}/h_checks.json"
+sh([PY, COMPOSE, "relic", f"{REPO}/configs/methodology_v2.json", f"{REPO}/examples/wR_general/run_v2_mixed_scenarios.json", f"{T}/h_m.json", "--checks", chk])
+notes = json.load(open(chk))["notes"]
+record("H3 negative w_R scenarios carry the recorded sudden-onset-systematic note; the accelerating-epoch warning is recorded for w_R < -1/3",
+       sum("sudden-onset" in n.get("note", "") for n in notes) == 2 and any("accelerating" in w["warning"] for w in json.load(open(chk))["warnings"]))
+badtheta = f"{T}/h_badtheta.json"; json.dump({"schema": "cyaxiverse_relic_run/2", "scenarios": [{"label": "a", "T_reh_GeV": 1e4, "w_R": 0.1}], "theta_analysis": {"theta": {"theta_max": 2.0}}}, open(badtheta, "w"))
+rr = sh(["bash", f"{REPO}/engine/run_prepare_from_spectra.sh", LISTMIN], {"WORK": f"{T}/h_early"})
+rr = sh(["bash", f"{REPO}/engine/run_relic.sh"], {"WORK": f"{T}/h_early", "RELIC_RUN": badtheta})
+record("H4 an invalid theta_analysis override is refused at stage 4 (before the expensive stages), not first at stage 5", rr.returncode != 0 and "theta_max must satisfy" in (rr.stdout + rr.stderr), (rr.stderr or rr.stdout).strip()[-120:])
+other = f"{T}/h_other.json"; json.dump({"schema": "cyaxiverse_relic_run/2", "scenarios": [{"label": "w0", "T_reh_GeV": 1e4, "w_R": 0.0}, {"label": "w1o3", "T_reh_GeV": 1e4, "w_R": 0.33}]}, open(other, "w"))
+if os.path.exists(f"{Wc}/relic/run_config.json"):
+    rt = sh(["bash", f"{REPO}/engine/run_theta.sh"], {"WORK": Wc, "RELIC_RUN": other})
+    record("H5 stage 5 refuses a run file whose scenarios differ from the relic run's (no silent mix-up)", rt.returncode != 0 and "differs from the run file of the relic stage" in (rt.stdout + rt.stderr), (rt.stderr or rt.stdout).strip()[-120:])
 
 # ------------------------------------------------------------------ G: edges of the supported domain through the engine
 EDGE = [{"label": "T1e10-w1", "T_reh_GeV": 1e10, "w_R": 1.0}, {"label": "T1e10-w0.999", "T_reh_GeV": 1e10, "w_R": 0.999},

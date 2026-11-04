@@ -6,7 +6,7 @@
  "run": {
   "production_run_approved": "@run",
   "production_output_dir": "<filled at run time by scripts/04_relic/02_write_run_config.py>",
-  "approval_note": "The Julia driver refuses an abundance run on more than max_rows_abundance_without_approval modes unless production_run_approved is true. It is true here because this template encodes the methodology approved for the frozen production run.",
+  "approval_note": "The Julia driver refuses an abundance run on more than max_rows_abundance_without_approval modes unless run.production_run_approved is true. The composed run configuration takes this value from the run file (default false); the methodology template carries no approval.",
   "max_rows_abundance_without_approval": 1000,
   "expected_geometries": "@expectation",
   "expected_modes": "@expectation",
@@ -44,11 +44,11 @@
   "canonical_geometry_table": "<filled at run time by scripts/04_relic/02_write_run_config.py>"
  },
  "code": {
-  "cyaxiverse_repo": "CYAxiverse.jl, branch vmm, commit a5eacd8cd4a5905161cab239a461ba252c64e8e0",
-  "relic_script": "scripts/04_relic/compute_relic_abundance.jl (physics block byte-identical to the frozen production script; see PROVENANCE.md)",
+  "cyaxiverse_repo": "CYAxiverse.jl branch vmm; byte-identical reproduction of the Shoroq reference is demonstrated at commit a5eacd8cd4a5905161cab239a461ba252c64e8e0 (configs/paths.env.example); the engine itself needs only the g* table and the spectra files",
+  "relic_script": "engine/relic/compute_relic_abundance.jl (physics block byte-identical to the frozen production script; see PROVENANCE.md)",
   "physics_core_origin": "legacy compute_tosc_abundance_hfull.jl (sha256 6af20481...) + approved edits E1-E6 + Fuzzy pre-reheating F1-F5, audited 2026-10-01",
-  "independent_python_reference_C": "scripts/04_relic/independent_relic.py",
-  "high_precision_reference_B": "scripts/04_relic/reference_mp.py",
+  "independent_python_reference_C": "engine/relic/independent_relic.py",
+  "high_precision_reference_B": "engine/relic/reference_mp.py",
   "fuzzy_supplementary_repo": "https://github.com/sheride/fuzzy_axions",
   "fuzzy_supplementary_commit": "bc3bc401995534526d53e1f752d8b91ad6f37584",
   "fuzzy_paper": "Sheridan et al., Fuzzy Axions and Associated Relics, arXiv:2412.12012 v1",
@@ -148,7 +148,8 @@
    "warn_near_de_sitter_below": -0.9,
    "warn_near_de_sitter_text": "w_R < -0.9: 1+z_a ~ (m/3H_R)^(2/(3(1+w_R))) grows very steeply; abundances can leave the float64 range and the run stops if one does (never clamped)",
    "warn_radiation_like_note_at": 0.3333333333333333,
-   "warn_radiation_like_text": "w_R = 1/3: the pre-reheating epoch is radiation-like, so the PRE prescription describes an extended radiation era; ok mathematically, check that this is the intended history"
+   "warn_radiation_like_text": "w_R = 1/3: the pre-reheating epoch is radiation-like, so the PRE prescription describes an extended radiation era; ok mathematically, check that this is the intended history",
+   "onset_systematic_note_text": "w_R < 0: the sudden-onset (3H = m) estimate overestimates the exact field evolution by a factor that grows quickly as w_R decreases (idealised constant-mass power-law setups: 4.0 at w_R = 0, 10.6 at -1/3, 28 at -1/2; METHODOLOGY.md, Methodology v2); results are results of the stated prescription, not precision predictions, and no output is rescaled"
   },
   "pre_reheating_prescription": "Fuzzy arXiv:2412.12012 Sec. 2: (2.1) 1+z_R; (2.2) H(z) = H_R ((1+z)/(1+z_R))^(3(1+w_R)/2) for z >= z_R with rho_r(T_R) = 3 H_R^2 M_pl^2 (radiation only), instantaneous transition to radiation at T_R; (2.15) 1+z_a = (1+z_R)(m_a/3H_R)^(2/(3(1+w_R))) for m_a > 3H_R; (2.10) Omega h^2 = m^2 f^2 theta^2 / [2 (1+z_a)^3 3 M_pl^2 H100^2]",
   "pre_reheating_relative_scaling": "Omega(w_R) / Omega(0) = (m_a / 3H_R)^(2 w_R / (1 + w_R)) at fixed m_a, f, theta, T_R",

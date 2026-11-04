@@ -50,7 +50,14 @@ engine/run_prepare_from_spectra.sh examples/minimal/spectra_list.json
 RELIC_RUN=examples/minimal/run.json engine/run_relic.sh
 RELIC_RUN=examples/minimal/run.json engine/run_theta.sh
 ```
-`examples/minimal/README.md` explains the inputs and how to read the outputs.
+`examples/minimal/README.md` explains the inputs and how to read the outputs. The scripts read `configs/paths.env`; in a read-only checkout, or to keep several
+configurations, point `SHOROQ_PATHS=/path/to/paths.env` at another copy (the name is historical; it is a general paths file). Stages refuse to overwrite: use a new `WORK`
+per run. A stage-4 or stage-5 failure keeps the partial output as `relic.failed.<UTC>` / `final_analysis.failed.<UTC>`, so fixing the cause and rerunning the same command works.
+
+**Reading the outputs.** `Omega_h2_at_theta_ref` is the abundance of a mode at the *normalisation* angle θ_ref = π/2: it is huge for light and for heavy modes (10⁷–10³¹ occur) and is not
+a physical abundance. Physical statements need the common-angle analysis (stage 5): Ω(θ) = Ω(θ_ref)(θ/θ_ref)² for θ in the small-angle domain. `NA` means "not evaluated" (never zero);
+a geometry with Ω = 0 has an evaluated empty sum. A geometry in class `PARTIAL_VALIDITY` carries only the sum over its valid modes (sensitivity population): that partial sum is not
+an abundance and, at negative w_R, can differ by many orders of magnitude between scenarios because the surviving modes are the PRE ones.
 
 ## Choosing the pre-reheating equation of state w_R (methodology v2)
 

@@ -31,6 +31,7 @@ The two must match (a v1 run file with the v2 methodology file, or the reverse, 
 - A (`T_reh_GeV`, `w_R`) pair may appear once per run. Labels are file names: choose self-explanatory ones (for example `T1e4-w0p17`); a label never carries the physics, the
   `w_R` column does.
 - Accepted with a recorded warning: w_R < -1/3 (accelerating epoch), w_R < -0.9 (steep; the run stops for a mode whose abundance leaves the float64 range). Noted: w_R = 1/3.
+- A scenario without `w_R` is recorded with `w_R = 0.0` and `w_R_defaulted: true` (`relic/run_config.json`, `relic/scenario_checks.json`). `w_R` is written to the tables with `%.17g`.
 - The effective `w_R` of each scenario is written to `relic/run_config.json` (`methodology_version: 2`, `reheating.scenarios[].w_R`, with `PRE_mass_exponent_2w_over_1pw` and
   `Omega_pre_h2_per_fGeV2_theta2_at_m_eq_3H_R`), to `relic/scenario_checks.json`, `run_metadata.json`, `global_summary.json`, and as column `w_R` of every output table.
 

@@ -123,6 +123,7 @@ if a.kind == "relic":
         t = float(t)
         w = 0.0
         if METHOD_VERSION == 2:
+            w_defaulted = "w_R" not in s
             w = s.get("w_R", M["reheating"]["w_R_default"])
             isinstance(w, (int, float)) and not isinstance(w, bool) and math.isfinite(w) or \
                 sys.exit(f"scenario {s['label']}: w_R must be a finite number, got {w!r}")
@@ -136,6 +137,8 @@ if a.kind == "relic":
                 checks["warnings"].append({"scenario": s["label"], "w_R": w, "warning": WD["warn_accelerated_text"]})
             if w < WD["warn_near_de_sitter_below"]:
                 checks["warnings"].append({"scenario": s["label"], "w_R": w, "warning": WD["warn_near_de_sitter_text"]})
+            if w < 0:
+                checks["notes"].append({"scenario": s["label"], "w_R": w, "note": WD["onset_systematic_note_text"]})
             if w == 1 / 3:
                 checks["notes"].append({"scenario": s["label"], "w_R": w, "note": WD["warn_radiation_like_text"]})
         TR = mp.mpf(repr(t)); HR = B.HR(TR)
@@ -149,7 +152,7 @@ if a.kind == "relic":
             checks["warnings"].append({"scenario": s["label"], "T_reh_GeV": t, "warning": pol["warnings"]["bbn_warning"]})
         elif t < pol["warnings"]["bbn_edge_note_below_GeV"]:
             checks["notes"].append({"scenario": s["label"], "T_reh_GeV": t, "note": pol["warnings"]["bbn_edge_note"]})
-        out.append({"label": s["label"], "T_reh_GeV": t, **({"w_R": w} if METHOD_VERSION == 2 else {}), "H_R_GeV": float(HR), "three_H_R_eV": float(3 * HR * mp.mpf(10) ** 9),
+        out.append({"label": s["label"], "T_reh_GeV": t, **({"w_R": w, "w_R_defaulted": w_defaulted} if METHOD_VERSION == 2 else {}), "H_R_GeV": float(HR), "three_H_R_eV": float(3 * HR * mp.mpf(10) ** 9),
                     "log10_three_H_R_eV": float(mp.log10(3 * HR * mp.mpf(10) ** 9)), "one_plus_z_R": float(B.onepz_R(TR)),
                     "g_rho_T_R": float(B.tab.grho(TR)), "g_s_T_R": float(B.tab.gs(TR)),
                     # v1: the w_R = 0 constant k(T_R) = Omega/(f^2 theta^2) of every PRE mode. v2: the same quantity at m = 3 H_R (continuity
@@ -163,7 +166,7 @@ if a.kind == "relic":
     isinstance(appr, bool) or sys.exit("production_run_approved must be true or false")
     setp(cfg, ("run", "production_run_approved"), appr)
     checks.update(methodology_version=METHOD_VERSION, T_eq_GeV=teq, gstar_table_range_GeV=[tmin, tmax],
-                  scenarios=[{"label": s["label"], "T_reh_GeV": s["T_reh_GeV"], **({"w_R": s["w_R"]} if METHOD_VERSION == 2 else {})} for s in out])
+                  scenarios=[{"label": s["label"], "T_reh_GeV": s["T_reh_GeV"], **({"w_R": s["w_R"], "w_R_defaulted": s["w_R_defaulted"]} if METHOD_VERSION == 2 else {})} for s in out])
 else:
     # theta overrides: only these keys, each with its admissible range (methodology defaults otherwise)
     th = R.get("theta_analysis", {}) or {}

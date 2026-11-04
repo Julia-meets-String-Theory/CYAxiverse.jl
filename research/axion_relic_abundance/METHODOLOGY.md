@@ -112,6 +112,10 @@ the R levels 0.1/0.8/0.95 of the reported thresholds. Output columns named `..._
 The derived scenario quantities (H_R, 1+z_R, g(T_R), the PRE constant) are computed by the 50-digit reference
 implementation B; for the three Shoroq temperatures they reproduce the frozen configuration bit for bit.
 
+**Convention note (v1, inherited).** The "today" entropy and energy degrees of freedom g_s0, g_ρ0 are the values of the g* table clamped at its lower edge
+(T_CMB = 2.35·10⁻¹³ GeV lies far below the first table entry, 2·10⁻⁶ GeV): g_s0 = 3.9309, g_ρ0 = 3.3831. Other conventions differ by about 0.5 % in g_s0 and enter the
+normalisation of every POST and PRE abundance equally (Ω ∝ g_s0). It is part of the frozen v1 convention and is kept unchanged in v2.
+
 ## Methodology v2: constant pre-reheating equation of state w_R
 
 Methodology v2 (`configs/methodology_v2.json`, run files `cyaxiverse_relic_run/2`, output schema `configs/relic_output_schema_v2.json`,
@@ -168,6 +172,10 @@ a smaller set of heavy modes. The log-form engine result and the w_R → 0 limit
 (`omega_by_root_finding`), for every PRE row of a 21-scenario run (3 T_R × w_R ∈ {−1/2, −1/3, 0, 1/3, 0.17, −0.42, 0.77}) to 7·10⁻¹⁴;
 mass exponents, the normalisation at m = 3H_R, w_R → 0 and PRE/POST continuity at 50 digits; the independent verifiers C (float64, every row) and B (50-digit
 samples and whole geometries) are driven by the scenario's w_R read from the run configuration; theta thresholds and N_max are recomputed from the geometry totals.
+
+**Reading w_R results.** The scenario's `w_R` is a column of every table and of `relic/run_config.json`; `w_R_defaulted` there says whether it was stated or defaulted. Floats are written with
+`%.17g` (−0.3 appears as −0.29999999999999999). A negative-w_R scenario also records a note on the systematic below in `relic/scenario_checks.json`. Partial sums of `PARTIAL_VALIDITY` geometries
+are sensitivity-only quantities and change by many orders of magnitude with w_R; they are not abundances.
 
 **Sudden-onset systematic of the pre-reheating prescription** (`python tests/ode_onset_check_wR.py`; idealised constant-mass, pure power-law setups, harmonic, small θ_i;
 not applied, not universal): exact/sudden = 0.403 (w_R = 1/3, a ∝ t^(1/2)), 0.330 (0.17), 0.250 (0), 0.131 (−1/4), 0.094 (−1/3), 0.061 (−0.42), 0.035 (−1/2); i.e. the

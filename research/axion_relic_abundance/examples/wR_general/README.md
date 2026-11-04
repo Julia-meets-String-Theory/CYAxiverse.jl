@@ -14,7 +14,8 @@ RELIC_RUN=examples/wR_general/run_v2_equation_of_state_scan.json engine/run_reli
 RELIC_RUN=examples/wR_general/run_v2_equation_of_state_scan.json engine/run_theta.sh
 ```
 
-Read `relic/tables/master_modes_<label>.csv` (columns `w_R`, `abundance_branch` = `fuzzy_wR_general_eq2.10_2.15` for PRE modes with w_R ≠ 0, `Omega_h2_at_theta_ref`), the per-geometry
+Stage 5 must use the same run file as stage 4 (a run file with other scenarios is refused). `Omega_h2_at_theta_ref` is the abundance at the normalisation angle θ_ref = π/2, not a physical
+abundance (`README.md`, "Reading the outputs"). Read `relic/tables/master_modes_<label>.csv` (columns `w_R`, `abundance_branch` = `fuzzy_wR_general_eq2.10_2.15` for PRE modes with w_R ≠ 0, `Omega_h2_at_theta_ref`), the per-geometry
 `geometry_summary_<label>.csv`, `relic/run_config.json` (`methodology_version`, `reheating.scenarios[].w_R`) and `final_analysis/theta/theta_summary_final.json` (one entry per scenario, with `w_R`).
 Ω(w_R)/Ω(0) = (m/3H_R)^(2w_R/(1+w_R)) for PRE modes; POST, LATE, FROZEN modes and all classes are unchanged. Accepted: −1 < w_R ≤ 1. Warned: w_R < −1/3 (accelerating epoch).
 The 10⁴ GeV scan is quick; strongly negative w_R at low T_reh can stop with a "float64 normal range" message (nothing is clamped): see `METHODOLOGY.md`.
