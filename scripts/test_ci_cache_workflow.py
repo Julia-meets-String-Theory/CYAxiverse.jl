@@ -12,13 +12,22 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "CI.yml"
 FAST_CACHE_NAME = "julia-cache;workflow=CI;job=fast"
 GC_STEP = (
-    "      - name: Collect unused depot entries before the cache is saved\n"
+    "      - name: Collect unused depot entries before the tests\n"
     "        # julia-actions/cache runs Pkg.gc() only in the post step that\n"
-    "        # delete-old-caches: 'false' turns off (CYAX-0223). Housekeeping\n"
+    "        # delete-old-caches: 'false' turns off (CYAX-0223). Run before the\n"
+    "        # tests: packages that only the tests use look unused to Pkg.gc(), so\n"
+    "        # whatever it deletes is reinstalled by the tests and saved. Housekeeping\n"
     "        # only, as upstream: a failure must not fail the tests.\n"
     "        continue-on-error: true\n"
     "        run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'\n"
 )
+# The step that each cache-saving job runs right after Pkg.gc(): its tests.
+GC_FOLLOWED_BY = {
+    "lifecycle": "      - uses: actions/setup-python@v5\n",
+    "fast-cache": "      - uses: julia-actions/julia-runtest@v1\n",
+    "qualification": "      - name: Watchdog self-test, then fast and public qualification",
+    "full": "      - name: Run package tests\n",
+}
 BEGIN = "# BEGIN cache-maintenance"
 END = "# END cache-maintenance"
 
@@ -95,24 +104,26 @@ class WorkflowWiring(unittest.TestCase):
         fast = _job_block(self.workflow, "fast")
         producer = _job_block(self.workflow, "fast-cache")
         self.assertEqual(_section(fast, "env"), _section(producer, "env"))
-        # The producer adds only the depot garbage collection before its save.
-        self.assertEqual(_section(fast, "steps").rstrip("\n") + "\n" + GC_STEP,
-                         _section(producer, "steps").rstrip("\n") + "\n")
+        # The producer adds only the depot garbage collection, before its tests.
+        runtest = "      - uses: julia-actions/julia-runtest@v1\n"
+        self.assertEqual(_section(fast, "steps").replace(runtest, GC_STEP + runtest, 1),
+                         _section(producer, "steps"))
 
-    def test_every_job_that_saves_a_julia_cache_collects_garbage_last(self) -> None:
+    def test_every_job_that_saves_a_julia_cache_collects_garbage_before_its_tests(self) -> None:
         saving = []
         for job in _job_names(self.workflow):
             block = _job_block(self.workflow, job)
             if "uses: julia-actions/cache@" not in block:
                 continue
-            steps = _section(block, "steps").rstrip("\n") + "\n"
+            steps = _section(block, "steps")
             with self.subTest(job=job):
                 if "    cache-mode: read\n" in block:
                     self.assertNotIn("Pkg.gc()", block)
                 else:
                     saving.append(job)
-                    self.assertTrue(steps.endswith(GC_STEP), steps[-300:])
-        self.assertEqual(sorted(saving), ["fast-cache", "full", "lifecycle", "qualification"])
+                    self.assertEqual(steps.count("-e 'using Pkg; Pkg.gc()'"), 1)
+                    self.assertIn(GC_STEP + GC_FOLLOWED_BY[job], steps)
+        self.assertEqual(sorted(saving), sorted(GC_FOLLOWED_BY))
 
     def test_only_fast_and_its_producer_share_a_cache_name(self) -> None:
         named = {job: re.findall(r"cache-name: (.+)\n", _job_block(self.workflow, job))

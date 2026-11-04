@@ -48,6 +48,14 @@ jobs:
           delete-old-caches: 'false'
       - name: Install documentation routing test dependencies
         run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+      - name: Collect unused depot entries before the tests
+        # julia-actions/cache runs Pkg.gc() only in the post step that
+        # delete-old-caches: 'false' turns off (CYAX-0223). Run before the
+        # tests: packages that only the tests use look unused to Pkg.gc(), so
+        # whatever it deletes is reinstalled by the tests and saved. Housekeeping
+        # only, as upstream: a failure must not fail the tests.
+        continue-on-error: true
+        run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -56,12 +64,6 @@ jobs:
       - name: Run all portable Python tests
         # CYTools-dependent tests skip themselves (scripts/local_only.py).
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
-      - name: Collect unused depot entries before the cache is saved
-        # julia-actions/cache runs Pkg.gc() only in the post step that
-        # delete-old-caches: 'false' turns off (CYAX-0223). Housekeeping
-        # only, as upstream: a failure must not fail the tests.
-        continue-on-error: true
-        run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
 
   fast:
     name: Fast tests
@@ -128,15 +130,17 @@ jobs:
         run: |
           julia --startup-file=no --project=notebooks -e 'using Pkg; Pkg.instantiate()'
           git diff --exit-code -- notebooks/Project.toml notebooks/Manifest.toml
-      - uses: julia-actions/julia-runtest@v1
-        with:
-          coverage: false
-      - name: Collect unused depot entries before the cache is saved
+      - name: Collect unused depot entries before the tests
         # julia-actions/cache runs Pkg.gc() only in the post step that
-        # delete-old-caches: 'false' turns off (CYAX-0223). Housekeeping
+        # delete-old-caches: 'false' turns off (CYAX-0223). Run before the
+        # tests: packages that only the tests use look unused to Pkg.gc(), so
+        # whatever it deletes is reinstalled by the tests and saved. Housekeeping
         # only, as upstream: a failure must not fail the tests.
         continue-on-error: true
         run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
+      - uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: false
 
   changes:
     name: Scientific qualification gate
@@ -182,17 +186,19 @@ jobs:
         with:
           delete-old-caches: 'false'
       - uses: julia-actions/julia-buildpkg@v1
+      - name: Collect unused depot entries before the tests
+        # julia-actions/cache runs Pkg.gc() only in the post step that
+        # delete-old-caches: 'false' turns off (CYAX-0223). Run before the
+        # tests: packages that only the tests use look unused to Pkg.gc(), so
+        # whatever it deletes is reinstalled by the tests and saved. Housekeeping
+        # only, as upstream: a failure must not fail the tests.
+        continue-on-error: true
+        run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
       - name: Watchdog self-test, then fast and public qualification (clean tree, pinned profile)
         run: |
           julia --startup-file=no --project=. test/fixtures/scientific_certification/run_fixture.jl --watchdog-self-test
           julia --startup-file=no --project=. test/fixtures/scientific_certification/run_fixture.jl --suite fast --evidence-dir "$RUNNER_TEMP/qualification-fast"
           julia --startup-file=no --project=. test/fixtures/scientific_certification/run_fixture.jl --suite public --evidence-dir "$RUNNER_TEMP/qualification-public"
-      - name: Collect unused depot entries before the cache is saved
-        # julia-actions/cache runs Pkg.gc() only in the post step that
-        # delete-old-caches: 'false' turns off (CYAX-0223). Housekeeping
-        # only, as upstream: a failure must not fail the tests.
-        continue-on-error: true
-        run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
 
   full:
     name: Full test suite
@@ -224,6 +230,14 @@ jobs:
         run: |
           julia --startup-file=no --project=notebooks -e 'using Pkg; Pkg.instantiate()'
           git diff --exit-code -- notebooks/Project.toml notebooks/Manifest.toml
+      - name: Collect unused depot entries before the tests
+        # julia-actions/cache runs Pkg.gc() only in the post step that
+        # delete-old-caches: 'false' turns off (CYAX-0223). Run before the
+        # tests: packages that only the tests use look unused to Pkg.gc(), so
+        # whatever it deletes is reinstalled by the tests and saved. Housekeeping
+        # only, as upstream: a failure must not fail the tests.
+        continue-on-error: true
+        run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
       - name: Run package tests
         uses: julia-actions/julia-runtest@v1
       - name: Job summary
@@ -238,12 +252,6 @@ jobs:
           | Commit | \`${{ github.sha }}\` |
           | Status | \`${{ job.status }}\` |
           EOF
-      - name: Collect unused depot entries before the cache is saved
-        # julia-actions/cache runs Pkg.gc() only in the post step that
-        # delete-old-caches: 'false' turns off (CYAX-0223). Housekeeping
-        # only, as upstream: a failure must not fail the tests.
-        continue-on-error: true
-        run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
 
   cache-maintenance:
     name: Cache maintenance
