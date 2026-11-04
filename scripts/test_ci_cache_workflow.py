@@ -14,7 +14,9 @@ FAST_CACHE_NAME = "julia-cache;workflow=CI;job=fast"
 GC_STEP = (
     "      - name: Collect unused depot entries before the cache is saved\n"
     "        # julia-actions/cache runs Pkg.gc() only in the post step that\n"
-    "        # delete-old-caches: 'false' turns off (CYAX-0223).\n"
+    "        # delete-old-caches: 'false' turns off (CYAX-0223). Housekeeping\n"
+    "        # only, as upstream: a failure must not fail the tests.\n"
+    "        continue-on-error: true\n"
     "        run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'\n"
 )
 BEGIN = "# BEGIN cache-maintenance"

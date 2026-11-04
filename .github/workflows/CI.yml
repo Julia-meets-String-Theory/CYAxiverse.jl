@@ -58,7 +58,9 @@ jobs:
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Collect unused depot entries before the cache is saved
         # julia-actions/cache runs Pkg.gc() only in the post step that
-        # delete-old-caches: 'false' turns off (CYAX-0223).
+        # delete-old-caches: 'false' turns off (CYAX-0223). Housekeeping
+        # only, as upstream: a failure must not fail the tests.
+        continue-on-error: true
         run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
 
   fast:
@@ -131,7 +133,9 @@ jobs:
           coverage: false
       - name: Collect unused depot entries before the cache is saved
         # julia-actions/cache runs Pkg.gc() only in the post step that
-        # delete-old-caches: 'false' turns off (CYAX-0223).
+        # delete-old-caches: 'false' turns off (CYAX-0223). Housekeeping
+        # only, as upstream: a failure must not fail the tests.
+        continue-on-error: true
         run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
 
   changes:
@@ -185,7 +189,9 @@ jobs:
           julia --startup-file=no --project=. test/fixtures/scientific_certification/run_fixture.jl --suite public --evidence-dir "$RUNNER_TEMP/qualification-public"
       - name: Collect unused depot entries before the cache is saved
         # julia-actions/cache runs Pkg.gc() only in the post step that
-        # delete-old-caches: 'false' turns off (CYAX-0223).
+        # delete-old-caches: 'false' turns off (CYAX-0223). Housekeeping
+        # only, as upstream: a failure must not fail the tests.
+        continue-on-error: true
         run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
 
   full:
@@ -234,7 +240,9 @@ jobs:
           EOF
       - name: Collect unused depot entries before the cache is saved
         # julia-actions/cache runs Pkg.gc() only in the post step that
-        # delete-old-caches: 'false' turns off (CYAX-0223).
+        # delete-old-caches: 'false' turns off (CYAX-0223). Housekeeping
+        # only, as upstream: a failure must not fail the tests.
+        continue-on-error: true
         run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
 
   cache-maintenance:
