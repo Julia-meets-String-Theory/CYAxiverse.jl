@@ -75,11 +75,11 @@ base-cache miss.
 
 WHEN a push to `vmm` runs `CI.yml`, a job `fast-cache` SHALL run the same steps
 as the Fast tests job (checkout, Julia 1.12 x64, Julia cache, build, notebook
-environment, package tests with the same environment variables), then the
-garbage collection of R-006, and save its depot cache under the Fast tests
-cache name `julia-cache;workflow=CI;job=fast`. It SHALL NOT run on pull
-requests, on pushes to `main` or on tags (a tag ref's cache can be restored only
-by runs on that tag).
+environment, package tests with the same environment variables), with the
+garbage collection of R-006 before the package tests, and save its depot cache
+under the Fast tests cache name `julia-cache;workflow=CI;job=fast`. It SHALL NOT
+run on pull requests, on pushes to `main` or on tags (a tag ref's cache can be
+restored only by runs on that tag).
 
 ### R-003 — Restore-only Fast tests on pull requests
 
@@ -106,9 +106,14 @@ the `full-tests` label. It SHALL NOT run on push to `vmm`.
 Every job that checks out and runs repository or PR code SHALL keep the
 workflow's `contents: read` and no other write permission, and SHALL set
 `delete-old-caches: 'false'` on `julia-actions/cache`. Every job that can save
-a Julia cache (lifecycle, `fast-cache`, qualification, Full) SHALL end with
-`Pkg.gc()` at its default delay, replacing the garbage collection that the
-skipped post step performed. That step is housekeeping, as upstream: it has
+a Julia cache (lifecycle, `fast-cache`, qualification, Full) SHALL run
+`Pkg.gc()` at its default delay once its environments are set up and
+immediately before its tests, replacing the garbage collection that the skipped
+post step performed after the tests. Packages that only the tests use (resolved
+in `Pkg.test`'s temporary environment) look unused to every `Pkg.gc()`, and
+Pkg keeps the date one was first found unused; run before the tests, whatever
+it deletes is reinstalled by the tests and is in the saved cache. That step is
+housekeeping, as upstream: it has
 `continue-on-error: true`, so its failure neither fails the job nor stops the
 cache save. The restore-only PR Fast tests job saves nothing and has no such
 step.
@@ -126,7 +131,9 @@ A job `cache-maintenance` SHALL:
 4. list all caches of the repository, oldest first by creation
    (`sort=created_at&direction=asc`), following every page up to 100 pages,
    into a fixed snapshot that holds each cache ID once, before selecting
-   anything; a listing that does not end within 100 pages is an error;
+   anything; a listing that does not end within 100 pages (10,000 entries,
+   far more than the 10 GB quota holds at this repository's entry sizes of
+   0.35 to 2.2 GB) is an error;
 5. group entries by restore identity: Git ref, the key up to `run_id=`, and the
    cache `version` (cached paths and compression);
 6. select for deletion (a) every entry of a ref matching exactly
@@ -161,14 +168,18 @@ and Full keep saving their own caches.
   starts cold until the next push to `vmm`. Frequency and cost are recorded.
 - Pull requests not based on `vmm` (release PRs to `main`, stacked PRs) run
   Fast tests cold on every run: `fast-cache` saves only on `vmm`, PRs no longer
-  save, and maintenance deletes older PR Fast tests entries. Before this change
+  save, and maintenance deletes every PR Fast tests entry. Before this change
   such a PR reused its own cache after its first run. This follows from the
   owner's decision to produce the Fast tests cache on `vmm` only.
-- `Pkg.gc()` can delete packages used only by the tests (for example
-  CairoMakie, resolved in `Pkg.test`'s temporary environment) once they have
-  been unused for seven days by the depot's own record, so a `vmm` push's saved
-  cache can lack them until the next push. Upstream behaved the same on
-  branches other than the default branch.
+- Packages used only by the tests, at versions no remaining manifest pins,
+  look unused to every `Pkg.gc()`, and Pkg keeps the date one was first found
+  unused. From seven days after that date, every push to `vmm` deletes them in
+  its `Pkg.gc()` step and its tests reinstall them (a download, and possibly a
+  precompilation), until their version changes. Because the step runs before
+  the tests (R-006), the saved `vmm` cache still holds them, so pull requests
+  are unaffected; the cost falls on the `vmm` push runs. Upstream ran
+  `Pkg.gc()` after the tests, so its saved caches on branches other than the
+  default branch lacked such packages permanently.
 - Maintenance runs only on pushes. Between pushes, lifecycle, qualification and
   labelled Full runs on PRs still save entries (about 0.5, 0.4 and 1.6 GB), and
   GitHub can evict caches, including the `vmm` base. Obsolete entries are
@@ -195,8 +206,9 @@ commit SHA.
 ### CYAX-0223 G1 — Implementation (pre-merge)
 
 - `scripts/test_ci_cache_workflow.py` checks the wiring of R-001 to R-008 in
-  `CI.yml`, including the exact permission sets, the final non-fatal garbage
-  collection step and the maintenance time limit, and, by executing the inline
+  `CI.yml`, including the exact permission sets, the non-fatal garbage
+  collection step before each saving job's tests and the job-level maintenance
+  time limit, and, by executing the inline
   maintenance logic against a fake API, the selection rules of R-007: request
   order, pagination with a list that shifts between pages, de-duplication,
   grouping by ref, key prefix and version, newest kept by parsed time, closed,
@@ -209,7 +221,7 @@ commit SHA.
   expected, because no `vmm` Fast tests cache exists before the first push to
   `vmm`), logs the skipped save, and no new `job=fast` entry appears on the
   PR's merge ref; the other jobs behave as before, and each job that saves a
-  cache ends with `Pkg.gc()`.
+  cache runs `Pkg.gc()` before its tests.
 
 ### CYAX-0223 G2 — Post-merge evidence (on #223, not a merge gate)
 
@@ -222,8 +234,8 @@ commit SHA.
 | PR with no usable `vmm` cache | Recorded as a base-cache miss, with its cost |
 | Push after a PR closes (same-repository or fork) | Only that PR's merge-ref entries deleted |
 | Failed `fast-cache` on a `vmm` push | Previous `vmm` Fast entry kept |
-| Every push to `vmm` | Size of the `vmm` Fast tests entry, to show whether `Pkg.gc()` bounds its growth; whether the `Pkg.gc()` step failed |
-| PR runs after a `vmm` push whose `Pkg.gc()` deleted packages | Precompilation and download counts, to show the cost of packages missing from the base |
+| Every push to `vmm` | Size of the `vmm` Fast tests entry, to show whether `Pkg.gc()` bounds its growth; whether the `Pkg.gc()` step failed; packages it deleted that the tests reinstalled, with the added download and precompilation time |
+| PR runs from seven days after the first `vmm` push | Precompilation and download counts, to confirm the saved `vmm` base holds the test-only packages |
 
 Single-run timings are evidence, not guarantees. The restore-only policy is
 revisited if measurements show that repeated compilation makes PR iteration
@@ -257,9 +269,19 @@ CI only. No package, API, schema, environment or version change.
   cold; `Pkg.gc()` can drop test-only packages from the `vmm` base; a
   `Pkg.gc()` failure would fail the job; the listing had no page cap and the
   job no time limit; a superseded `vmm` push runs none of the jobs. By owner
-  decision all five are addressed before approval: the first, second and fifth
-  as accepted limitations and CYAX-0223 G2 records, the third and fourth in
-  R-006 and R-007.
+  decision all five are addressed before approval: the first and fifth as
+  accepted limitations, the second as a limitation with CYAX-0223 G2 records,
+  the third in R-006 (with a CYAX-0223 G2 record of step failures) and the
+  fourth in R-007.
+- Independent focused review of `3656f2d`: not passed. Blocking finding: the
+  second limitation was misstated. Because Pkg keeps the first date a package
+  was found unused and test-only packages are unused at every `Pkg.gc()`, a
+  final `Pkg.gc()` step would have deleted them before every `vmm` save from
+  seven days on, so every saved `vmm` cache would have lacked them. Owner
+  decision: run `Pkg.gc()` before the tests instead (R-006). Non-blocking
+  findings, all corrected: weak tests of the time limit and page limit, the
+  workflow comment on the time limit, the page-limit basis missing from R-007,
+  and imprecise wording here and in the limitations.
 
 ## Open owner decisions
 
