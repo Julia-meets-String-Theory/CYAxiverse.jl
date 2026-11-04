@@ -260,7 +260,8 @@ jobs:
     # nothing and runs no repository file: the logic below is its only code.
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    # Listing and deleting a few dozen caches takes seconds; bound a hung API call.
+    # Listing and deleting a few dozen caches takes seconds. Each API call already
+    # times out after 30 s; this bounds the whole run.
     timeout-minutes: 10
     permissions:
       actions: write

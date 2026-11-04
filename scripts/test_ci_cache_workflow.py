@@ -160,7 +160,9 @@ class WorkflowWiring(unittest.TestCase):
 
     def test_maintenance_job_has_a_time_limit(self) -> None:
         job = _job_block(self.workflow, "cache-maintenance")
-        self.assertIn("    timeout-minutes: 10\n", job)
+        # Job level (four spaces), not on a step.
+        self.assertRegex(job, r"(?m)^    timeout-minutes: 10$")
+        self.assertNotRegex(job, r"(?m)^ {5,}timeout-minutes:")
 
     def test_maintenance_job_is_push_only_serialised_and_runs_no_repository_code(self) -> None:
         job = _job_block(self.workflow, "cache-maintenance")
@@ -384,7 +386,8 @@ class MaintenanceSelection(unittest.TestCase):
         code, lines = self.run_main(api)
         self.assertNotEqual(code, 0)
         self.assertEqual(api.deleted, [])
-        self.assertLessEqual(len(api.calls), self.ns["MAX_PAGES"])
+        self.assertEqual(self.ns["MAX_PAGES"], 100)
+        self.assertEqual(api.calls, [("list", page) for page in range(1, 101)])
         self.assertTrue(any(line.startswith("::error::") and "page" in line for line in lines))
 
     def test_selection_failure_deletes_nothing_and_fails(self) -> None:
