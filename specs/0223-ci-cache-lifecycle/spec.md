@@ -3,14 +3,14 @@ spec_id: CYAX-0223
 title: Warm vmm Julia cache and CI cache lifecycle
 issue: 223
 class: S1
-status: draft
+status: approved
 workstream: CI workflow triggers, Julia cache identities, permissions and cache lifecycle
 parent: null
 depends_on: []
 created: 2026-11-03
-last_reviewed: null
+last_reviewed: 2026-11-05
 review_required: repository-owner approval
-approval_ref: N/A while draft
+approval_ref: "PR #224 comment 6667807506 — approves spec revision 5f01c9f"
 version_impact: none (CI only)
 ---
 
