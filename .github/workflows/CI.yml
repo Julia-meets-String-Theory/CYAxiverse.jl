@@ -51,8 +51,8 @@ jobs:
       - name: Collect unused depot entries before the tests
         # julia-actions/cache runs Pkg.gc() only in the post step that
         # delete-old-caches: 'false' turns off (CYAX-0223). Run before the
-        # tests: packages that only the tests use look unused to Pkg.gc(), so
-        # whatever it deletes is reinstalled by the tests and saved. Housekeeping
+        # tests: packages only the tests use look unused to Pkg.gc(), so any
+        # that it deletes are reinstalled by the tests and saved. Housekeeping
         # only, as upstream: a failure must not fail the tests.
         continue-on-error: true
         run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
@@ -133,8 +133,8 @@ jobs:
       - name: Collect unused depot entries before the tests
         # julia-actions/cache runs Pkg.gc() only in the post step that
         # delete-old-caches: 'false' turns off (CYAX-0223). Run before the
-        # tests: packages that only the tests use look unused to Pkg.gc(), so
-        # whatever it deletes is reinstalled by the tests and saved. Housekeeping
+        # tests: packages only the tests use look unused to Pkg.gc(), so any
+        # that it deletes are reinstalled by the tests and saved. Housekeeping
         # only, as upstream: a failure must not fail the tests.
         continue-on-error: true
         run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
@@ -189,8 +189,8 @@ jobs:
       - name: Collect unused depot entries before the tests
         # julia-actions/cache runs Pkg.gc() only in the post step that
         # delete-old-caches: 'false' turns off (CYAX-0223). Run before the
-        # tests: packages that only the tests use look unused to Pkg.gc(), so
-        # whatever it deletes is reinstalled by the tests and saved. Housekeeping
+        # tests: packages only the tests use look unused to Pkg.gc(), so any
+        # that it deletes are reinstalled by the tests and saved. Housekeeping
         # only, as upstream: a failure must not fail the tests.
         continue-on-error: true
         run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
@@ -233,8 +233,8 @@ jobs:
       - name: Collect unused depot entries before the tests
         # julia-actions/cache runs Pkg.gc() only in the post step that
         # delete-old-caches: 'false' turns off (CYAX-0223). Run before the
-        # tests: packages that only the tests use look unused to Pkg.gc(), so
-        # whatever it deletes is reinstalled by the tests and saved. Housekeeping
+        # tests: packages only the tests use look unused to Pkg.gc(), so any
+        # that it deletes are reinstalled by the tests and saved. Housekeeping
         # only, as upstream: a failure must not fail the tests.
         continue-on-error: true
         run: julia --startup-file=no -e 'using Pkg; Pkg.gc()'
