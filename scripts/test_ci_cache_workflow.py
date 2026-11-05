@@ -121,7 +121,10 @@ class WorkflowWiring(unittest.TestCase):
                     self.assertNotIn("Pkg.gc()", block)
                 else:
                     saving.append(job)
-                    self.assertEqual(steps.count("-e 'using Pkg; Pkg.gc()'"), 1)
+                    # Exactly one call in any spelling; comment lines may mention it.
+                    calls = [line for line in steps.splitlines()
+                             if "Pkg.gc(" in line and not line.lstrip().startswith("#")]
+                    self.assertEqual(len(calls), 1, calls)
                     self.assertIn(GC_STEP + GC_FOLLOWED_BY[job], steps)
         self.assertEqual(sorted(saving), sorted(GC_FOLLOWED_BY))
 
