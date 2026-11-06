@@ -53,7 +53,12 @@ suite = unittest.TestSuite()
 problems = []
 for name in tests:
     path = os.path.join(scripts, name)
-    stem = os.path.splitext(os.path.basename(name))[0]
+    stem = os.path.splitext(name)[0]
+    if os.path.basename(name) != name or name in ("", ".", ".."):
+        # A name with a directory component would be imported by stem from
+        # the top level, possibly running a different file than the one listed.
+        problems.append(f"Test file must be a bare file name in scripts/: {name}")
+        continue
     if not os.path.isfile(path):
         problems.append(f"Test file not found: {name}")
         continue
@@ -73,6 +78,12 @@ for name in tests:
             self.fail(f"Import of {stem} failed:\\n{text}")
 
         suite.addTest(placeholder("ModuleImportError", stem, fail))
+        continue
+    module_file = getattr(module, "__file__", None)
+    if not module_file or not os.path.samefile(module_file, path):
+        problems.append(
+            f"Imported {stem} from {module_file}, not from the listed file: {name}"
+        )
         continue
     module_suite = loader.loadTestsFromModule(module)
     if not module_suite.countTestCases():
