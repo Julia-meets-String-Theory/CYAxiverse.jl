@@ -31,6 +31,10 @@ class PassingTests(unittest.TestCase):
         self.assertTrue(True)
 """
 
+BROKEN_IMPORT = """\
+import a_module_that_does_not_exist
+"""
+
 FAILING = """\
 import unittest
 
@@ -41,14 +45,22 @@ class FailingTests(unittest.TestCase):
 """
 
 
-def _run_runner(modules):
-    """Write ``modules`` (name -> source) to a temp dir and run the runner on it."""
+def _run_runner(modules, listed=None):
+    """Write ``modules`` (path -> source) to a temp dir and run the runner on it.
+
+    ``listed`` is the list of test files passed to the runner; by default the
+    top-level files of ``modules``.
+    """
+    if listed is None:
+        listed = [name for name in modules if "/" not in name]
     with tempfile.TemporaryDirectory(prefix="rprt_test_") as tmp:
         for name, source in modules.items():
-            with open(os.path.join(tmp, name), "w") as f:
+            path = os.path.join(tmp, *name.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
                 f.write(textwrap.dedent(source))
         result = subprocess.run(
-            [sys.executable, "-B", RUNNER, "--scripts-dir", tmp, *modules],
+            [sys.executable, "-B", RUNNER, "--scripts-dir", tmp, *listed],
             capture_output=True, text=True, shell=False,
         )
     return result.returncode, result.stdout + result.stderr
@@ -72,14 +84,39 @@ class RunPythonRegressionTests(unittest.TestCase):
         self.assertNotEqual(rc, 0, out)
         self.assertIn("deliberate failure", out)
 
-    def test_missing_module_gives_nonzero_exit(self):
-        with tempfile.TemporaryDirectory(prefix="rprt_test_") as tmp:
-            result = subprocess.run(
-                [sys.executable, "-B", RUNNER, "--scripts-dir", tmp,
-                 "test_absent.py"],
-                capture_output=True, text=True, shell=False,
-            )
-        self.assertNotEqual(result.returncode, 0)
+    def test_missing_module_gives_nonzero_exit_and_names_the_file(self):
+        rc, out = _run_runner({"test_passing.py": PASSING}, listed=["test_absent.py"])
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("test_absent.py", out)
+        self.assertIn("not found", out)
+
+    def test_non_skip_import_error_fails_and_names_the_error(self):
+        rc, out = _run_runner(
+            {"test_broken.py": BROKEN_IMPORT, "test_passing.py": PASSING}
+        )
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("a_module_that_does_not_exist", out)
+        self.assertIn("test_broken", out)
+
+    def test_module_without_tests_fails_with_message(self):
+        rc, out = _run_runner({"test_empty.py": "x = 1\n"})
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("test_empty.py", out)
+        self.assertIn("No tests found", out)
+
+    def test_packages_under_scripts_are_not_imported(self):
+        rc, out = _run_runner(
+            {
+                "test_passing.py": PASSING,
+                "pkg/__init__.py": "raise RuntimeError('package import must not happen')\n",
+                "pkg/test_passing.py": PASSING,
+            },
+            listed=["test_passing.py"],
+        )
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Ran 1 test in", out)
+        self.assertNotIn("package import must not happen", out)
+        self.assertNotIn("__pycache__", out)
 
 
 if __name__ == "__main__":

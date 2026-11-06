@@ -6,10 +6,12 @@ unittest modules with ``scripts/`` as the import root and current directory so
 direct CLI imports and package-level discovery cannot silently select different
 code.
 
-Each module is loaded with ``TestLoader.discover`` (one file per call), not
-``python -m unittest <file>``: discovery reports an import-time
-``unittest.SkipTest`` (for example, CYTools being absent) as a skipped test,
-whereas loading by name lets it crash the whole run.
+Each listed file is imported by its stem, and only that module is loaded.
+Loading by name (``python -m unittest <file>``) lets an import-time
+``unittest.SkipTest`` (for example, CYTools being absent) crash the whole run,
+and ``TestLoader.discover`` would also import every package under ``scripts/``.
+Here an import-time ``SkipTest`` becomes one skipped test, and any other import
+error becomes one failing test that shows the original traceback.
 """
 
 from __future__ import annotations
@@ -26,22 +28,61 @@ DEFAULT_TESTS = (
 )
 
 _CHILD = """\
+import importlib
+import os
 import sys
+import traceback
 import unittest
 
 scripts, tests = sys.argv[1], sys.argv[2:]
+sys.path.insert(0, scripts)
+
+
+def placeholder(kind, stem, body):
+    # One synthetic test per module that could not be loaded; its name
+    # identifies the module in the output.
+    def run(self):
+        body(self)
+
+    run.__name__ = stem
+    return type(kind, (unittest.TestCase,), {stem: run})(stem)
+
+
 loader = unittest.TestLoader()
-suites = {
-    name: loader.discover(start_dir=scripts, pattern=name, top_level_dir=scripts)
-    for name in tests
-}
-missing = [name for name, suite in suites.items() if not suite.countTestCases()]
-if missing:
-    print("No tests found in: " + ", ".join(missing), file=sys.stderr)
-    raise SystemExit(1)
-suite = unittest.TestSuite(suites.values())
+suite = unittest.TestSuite()
+problems = []
+for name in tests:
+    path = os.path.join(scripts, name)
+    stem = os.path.splitext(os.path.basename(name))[0]
+    if not os.path.isfile(path):
+        problems.append(f"Test file not found: {name}")
+        continue
+    try:
+        module = importlib.import_module(stem)
+    except unittest.SkipTest as exc:
+        reason = str(exc)
+        suite.addTest(placeholder(
+            "ModuleSkipped", stem, lambda self, reason=reason: self.skipTest(reason)))
+        continue
+    except BaseException as exc:
+        if isinstance(exc, KeyboardInterrupt):
+            raise
+        text = "".join(traceback.format_exception(exc))
+
+        def fail(self, stem=stem, text=text):
+            self.fail(f"Import of {stem} failed:\\n{text}")
+
+        suite.addTest(placeholder("ModuleImportError", stem, fail))
+        continue
+    module_suite = loader.loadTestsFromModule(module)
+    if not module_suite.countTestCases():
+        problems.append(f"No tests found in: {name}")
+        continue
+    suite.addTest(module_suite)
+for problem in problems:
+    print(problem, file=sys.stderr)
 result = unittest.TextTestRunner(verbosity=2).run(suite)
-raise SystemExit(0 if result.wasSuccessful() else 1)
+raise SystemExit(0 if result.wasSuccessful() and not problems else 1)
 """
 
 
