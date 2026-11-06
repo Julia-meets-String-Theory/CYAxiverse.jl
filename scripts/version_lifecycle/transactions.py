@@ -21,6 +21,7 @@ from typing import Any, Mapping, Protocol
 from .codec import sha256_hex
 from .authorization import AuthorizationError, verify_owner_authorization
 from .certification import is_safe_public_environment, is_safe_public_value
+from .github_protection import GitHubProtectionAdapter
 from .manifests import (
     canonical_manifest_bytes,
     lifecycle_ref_for_manifest,
@@ -51,10 +52,17 @@ PUBLIC_MANIFEST_TYPES = frozenset(
 class TransactionError(RuntimeError):
     """A known fail-closed transaction outcome."""
 
-    def __init__(self, reason_code: str, detail: str = "") -> None:
+    def __init__(
+        self,
+        reason_code: str,
+        detail: str = "",
+        *,
+        evidence: Mapping[str, Any] | None = None,
+    ) -> None:
         super().__init__(detail or reason_code)
         self.reason_code = reason_code
         self.detail = detail
+        self.evidence = dict(evidence or {})
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +154,7 @@ class TransactionResult:
     evidence: dict[str, Any] = field(default_factory=dict)
     frozen: bool = False
     phase: str = ""
+    freeze_state: str = "not_started"
 
     @property
     def complete(self) -> bool:
@@ -213,6 +222,9 @@ def _call(port: Any, name: str, *args: Any) -> Any:
     except TransactionError:
         raise
     except Exception as error:
+        reason_code = getattr(error, "reason_code", None)
+        if isinstance(reason_code, str) and reason_code:
+            raise TransactionError(reason_code) from error
         raise TransactionError("PORT_OPERATION_FAILED", f"{name}: {error}") from error
 
 
@@ -224,10 +236,133 @@ def _optional_call(port: Any, names: tuple[str, ...], *args: Any) -> Any:
 
 
 def _freeze(port: Any, names: tuple[str, ...], intent: Any) -> Any:
-    token = _optional_call(port, names, intent)
+    adapter = getattr(port, "github_protection_adapter", None)
+    if not isinstance(adapter, GitHubProtectionAdapter):
+        raise TransactionError("LINE_FREEZE_UNAVAILABLE")
+    if names != ("freeze_line",):
+        raise TransactionError("LINE_FREEZE_UNAVAILABLE")
+    try:
+        token = adapter.freeze_line(intent)
+    except Exception as error:
+        reason_code = getattr(error, "reason_code", None)
+        raise TransactionError(
+            reason_code if isinstance(reason_code, str) else "LINE_FREEZE_UNAVAILABLE",
+            evidence=getattr(error, "evidence", None),
+        ) from error
     if not token:
         raise TransactionError("LINE_FREEZE_UNAVAILABLE")
+    try:
+        verified = adapter.verify_live_freeze_lease(
+            token, ref="refs/heads/vmm", expected_branch_sha=token.branch_sha
+        )
+    except Exception as error:
+        details = {
+            "freeze_state": "active",
+            "observed_enforcement": "active",
+            "lease_id": getattr(token, "lease_id", None),
+            "target_ref": "refs/heads/vmm",
+            "branch_sha": getattr(token, "branch_sha", None),
+        }
+        details.update(getattr(error, "evidence", {}) or {})
+        raise TransactionError("LINE_FREEZE_UNAVAILABLE", evidence=details) from error
+    if verified is not True:
+        raise TransactionError(
+            "LINE_FREEZE_UNAVAILABLE",
+            evidence={
+                "freeze_state": "active",
+                "observed_enforcement": "active",
+                "lease_id": getattr(token, "lease_id", None),
+                "target_ref": "refs/heads/vmm",
+                "branch_sha": getattr(token, "branch_sha", None),
+            },
+        )
     return token
+
+
+def _carry_freeze_failure(
+    error: TransactionError, evidence: dict[str, Any]
+) -> str | None:
+    details = error.evidence
+    if not isinstance(details, Mapping) or not details:
+        return None
+    if error.reason_code.startswith("FREEZE_WRITE_"):
+        evidence["freeze_write_reconciliation"] = dict(details)
+    else:
+        evidence["freeze_activation_reconciliation"] = dict(details)
+    if error.reason_code == "FREEZE_WRITE_UNKNOWN":
+        return "unknown"
+    state = details.get("freeze_state")
+    if state in {"active", "unknown"}:
+        return state
+    if details.get("observed_enforcement") == "active":
+        return "active"
+    return None
+
+
+def _unfreeze(
+    port: Any,
+    method_name: str,
+    token: Any,
+    ref: str,
+    expected_branch_sha: str,
+) -> None:
+    adapter = getattr(port, "github_protection_adapter", None)
+    if not isinstance(adapter, GitHubProtectionAdapter):
+        raise TransactionError("FREEZE_RELEASE_UNVERIFIED")
+    try:
+        if adapter.verify_live_freeze_lease(token, ref=ref) is not True:
+            raise TransactionError("FREEZE_LEASE_UNVERIFIED")
+        if method_name == "unfreeze_line":
+            adapter.unfreeze_line(token, expected_branch_sha=expected_branch_sha)
+        elif method_name == "unfreeze_main":
+            adapter.unfreeze_main(token, expected_branch_sha=expected_branch_sha)
+        else:
+            raise TransactionError("FREEZE_RELEASE_UNVERIFIED")
+        still_live = adapter.is_live_freeze_lease(token, ref=ref)
+    except TransactionError:
+        raise
+    except Exception as error:
+        reason_code = getattr(error, "reason_code", None)
+        raise TransactionError(
+            reason_code if isinstance(reason_code, str) else "FREEZE_RELEASE_UNVERIFIED",
+            evidence=getattr(error, "evidence", None),
+        ) from error
+    if still_live is not False:
+        raise TransactionError("FREEZE_RELEASE_UNVERIFIED")
+
+
+def _candidate_protection(port: Any, intent: Any) -> Any:
+    adapter = getattr(port, "github_protection_adapter", None)
+    if not isinstance(adapter, GitHubProtectionAdapter):
+        raise TransactionError("CANDIDATE_PROTECTION_UNAVAILABLE")
+    try:
+        evidence = adapter.verify_candidate_ref(intent.candidate_ref)
+        verified = adapter.is_live_protection_evidence(
+            evidence,
+            ref=intent.candidate_ref,
+            repository=intent.repository,
+        )
+        if verified is not True:
+            raise TransactionError("CANDIDATE_PROTECTION_UNAVAILABLE")
+        evidence.require(intent.candidate_ref, creation=True)
+    except Exception as error:
+        if isinstance(error, TransactionError):
+            raise
+        reason_code = getattr(error, "reason_code", None)
+        raise TransactionError(
+            reason_code if isinstance(reason_code, str) else "CANDIDATE_PROTECTION_UNAVAILABLE"
+        ) from error
+    return evidence
+
+
+def _make_candidate(port: Any, intent: Any, protection: Any) -> Any:
+    adapter = getattr(port, "github_protection_adapter", None)
+    if not isinstance(adapter, GitHubProtectionAdapter):
+        raise TransactionError("CANDIDATE_PORT_UNSUPPORTED")
+    protected = getattr(port, "make_durable_candidate_protected", None)
+    if not callable(protected):
+        raise TransactionError("CANDIDATE_PORT_UNSUPPORTED")
+    return _call(port, "make_durable_candidate_protected", intent, protection)
 
 
 def _release_exclusion(port: Any, lease: Any) -> None:
@@ -572,6 +707,7 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
     evidence: dict[str, Any] = {}
     token: Any = None
     lease: Any = None
+    freeze_state = "not_started"
     try:
         if intent.owner_line != "principal":
             raise TransactionError("PRINCIPAL_LINE_REQUIRED")
@@ -587,6 +723,7 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
                 or not intent.repository or not intent.predecessor_refs):
             raise TransactionError("OWNER_AUTHORIZATION_UNVERIFIED")
         token = _freeze(port, ("freeze_line",), intent)
+        freeze_state = "active"
         evidence["freeze_token"] = token
         phase = "frozen"
         lease = _acquire_exclusion(port, intent)
@@ -760,34 +897,48 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
         )
         phase = "correspondence_verified"
 
+        expected_vmm_head = activation.get("head", reopened.get("head"))
+        if not _sha(expected_vmm_head):
+            raise TransactionError("FREEZE_TARGET_IDENTITY_INVALID")
+        _unfreeze(
+            port, "unfreeze_line", token, "refs/heads/vmm", expected_vmm_head
+        )
+        token = None
+        freeze_state = "disabled"
         lease_to_release = lease
         lease = None
         _release_exclusion(port, lease_to_release)
-        _call(port, "unfreeze_line", token)
-        token = None
-        return TransactionResult("COMPLETE", evidence=evidence, phase="unfrozen")
+        return TransactionResult(
+            "COMPLETE", evidence=evidence, phase="unfrozen",
+            freeze_state=freeze_state,
+        )
     except TransactionError as error:
-        try:
-            if lease is not None:
+        carried_state = _carry_freeze_failure(error, evidence)
+        if carried_state is not None:
+            freeze_state = carried_state
+        if lease is not None and freeze_state == "disabled":
+            try:
                 _release_exclusion(port, lease)
-        except Exception:
-            pass
+            except Exception:
+                pass
         invalid = {"CLOSURE_IDENTITY_MISMATCH", "ANCHOR_IDENTITY_MISMATCH",
                    "NEXT_RESERVATION_MISMATCH", "ACTIVATION_IDENTITY_MISMATCH",
                    "REOPEN_IDENTITY_MISMATCH"}
         return TransactionResult("INVALID" if error.reason_code in invalid else "BLOCKED",
                                  error.reason_code, error.detail, evidence,
-                                 frozen=token is not None, phase=phase)
+                                 frozen=token is not None or freeze_state == "active", phase=phase,
+                                 freeze_state=freeze_state)
     except Exception as error:
-        try:
-            if lease is not None:
+        if lease is not None and freeze_state == "disabled":
+            try:
                 _release_exclusion(port, lease)
-        except Exception:
-            pass
+            except Exception:
+                pass
         evidence["error_type"] = type(error).__name__
         return TransactionResult("BLOCKED", "TRANSACTION_OUTCOME_UNCERTAIN",
-                                 str(error), evidence, frozen=token is not None,
-                                 phase=phase)
+                                 str(error), evidence,
+                                 frozen=token is not None or freeze_state == "active",
+                                 phase=phase, freeze_state=freeze_state)
 
 
 def _validate_certification(record: Any, candidate: dict[str, Any]) -> str:
@@ -836,6 +987,7 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
     evidence: dict[str, Any] = {}
     token: Any = None
     lease: Any = None
+    freeze_state = "not_started"
     tag_created = False
     released_created = False
     publication_evidence_persist_attempted = False
@@ -877,13 +1029,13 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         bound_view = _bound_view(port, intent)
         evidence["bound_view"] = bound_view
         _authorize(port, intent, "create-release-manifest", intent.candidate_ref)
+        candidate_protection = _candidate_protection(port, intent)
+        evidence["candidate_ref_protection"] = candidate_protection
 
-        if hasattr(port, "make_durable_candidate"):
-            candidate = _as_mapping(_call(port, "make_durable_candidate", intent), "CANDIDATE_DURABILITY_UNPROVEN")
-        elif hasattr(port, "create_candidate"):
-            candidate = _as_mapping(_call(port, "create_candidate", intent), "CANDIDATE_DURABILITY_UNPROVEN")
-        else:
-            raise TransactionError("CANDIDATE_PORT_UNSUPPORTED")
+        candidate = _as_mapping(
+            _make_candidate(port, intent, candidate_protection),
+            "CANDIDATE_DURABILITY_UNPROVEN",
+        )
         candidate_sha = candidate.get("sha", candidate.get("candidate_sha"))
         candidate_tree = candidate.get("tree", candidate.get("candidate_tree"))
         if (candidate.get("durable") is not True
@@ -938,13 +1090,52 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         evidence["candidate_certification"] = dict(certification)
         phase = "candidate_certified"
 
-        if not hasattr(port, "freeze_main"):
+        adapter = getattr(port, "github_protection_adapter", None)
+        if not isinstance(adapter, GitHubProtectionAdapter):
             raise TransactionError("MAIN_FREEZE_UNAVAILABLE")
-        freeze = _as_mapping(_call(port, "freeze_main", intent), "MAIN_FREEZE_UNAVAILABLE")
+        try:
+            freeze_value = adapter.freeze_main(intent)
+        except Exception as error:
+            reason_code = getattr(error, "reason_code", None)
+            raise TransactionError(
+                reason_code if isinstance(reason_code, str) else "MAIN_FREEZE_UNAVAILABLE",
+                evidence=getattr(error, "evidence", None),
+            ) from error
+        freeze = _as_mapping(freeze_value, "MAIN_FREEZE_UNAVAILABLE")
         token = freeze.get("token")
         if not token or not _sha(freeze.get("sha")):
             raise TransactionError("MAIN_FREEZE_UNAVAILABLE")
+        freeze_state = "active"
         evidence["main_freeze"] = freeze
+        try:
+            verified = adapter.verify_live_freeze_lease(
+                token,
+                ref="refs/heads/main",
+                expected_branch_sha=token.branch_sha,
+            )
+        except Exception as error:
+            details = {
+                "freeze_state": "active",
+                "observed_enforcement": "active",
+                "lease_id": getattr(token, "lease_id", None),
+                "target_ref": "refs/heads/main",
+                "branch_sha": getattr(token, "branch_sha", None),
+            }
+            details.update(getattr(error, "evidence", {}) or {})
+            raise TransactionError(
+                "MAIN_FREEZE_UNAVAILABLE", evidence=details
+            ) from error
+        if verified is not True or freeze.get("sha") != token.branch_sha:
+            raise TransactionError(
+                "MAIN_FREEZE_UNAVAILABLE",
+                evidence={
+                    "freeze_state": "active",
+                    "observed_enforcement": "active",
+                    "lease_id": getattr(token, "lease_id", None),
+                    "target_ref": "refs/heads/main",
+                    "branch_sha": getattr(token, "branch_sha", None),
+                },
+            )
         phase = "main_frozen"
         if not hasattr(port, "verify_principal_interval"):
             raise TransactionError("PRINCIPAL_ANCESTRY_UNPROVEN")
@@ -1020,9 +1211,26 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             final.get("evidence_refs"), "RELEASE_EVIDENCE_INVALID"
         )
 
-        if not hasattr(port, "verify_public_tag_ruleset"):
+        adapter = getattr(port, "github_protection_adapter", None)
+        if not isinstance(adapter, GitHubProtectionAdapter):
             raise TransactionError("PUBLIC_TAG_RULESET_UNAVAILABLE")
-        protection = _call(port, "verify_public_tag_ruleset", intent, f"refs/tags/{intent.public_tag}")
+        try:
+            protection = adapter.verify_public_tag(f"refs/tags/{intent.public_tag}")
+        except Exception as error:
+            reason_code = getattr(error, "reason_code", None)
+            raise TransactionError(
+                reason_code if isinstance(reason_code, str) else "PUBLIC_TAG_RULESET_UNAVAILABLE"
+            ) from error
+        try:
+            live = adapter.is_live_protection_evidence(
+                protection,
+                ref=f"refs/tags/{intent.public_tag}",
+                repository=intent.repository,
+            )
+        except Exception as error:
+            raise TransactionError("PUBLIC_TAG_PROTECTION_INVALID") from error
+        if live is not True:
+            raise TransactionError("PUBLIC_TAG_PROTECTION_INVALID")
         if protection is None or not hasattr(protection, "require_public_tag"):
             raise TransactionError("PUBLIC_TAG_RULESET_UNAVAILABLE")
         try:
@@ -1310,14 +1518,21 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         documentation_dispatch_proven = True
         phase = "documentation_dispatched"
 
+        _unfreeze(port, "unfreeze_main", token, "refs/heads/main", final_sha)
+        token = None
+        freeze_state = "disabled"
         lease_to_release = lease
         lease = None
         _release_exclusion(port, lease_to_release)
-        _call(port, "unfreeze_main", token)
-        token = None
-        return TransactionResult("COMPLETE", evidence=evidence, phase="unfrozen")
+        return TransactionResult(
+            "COMPLETE", evidence=evidence, phase="unfrozen",
+            freeze_state=freeze_state,
+        )
     except TransactionError as error:
-        if lease is not None and not (
+        carried_state = _carry_freeze_failure(error, evidence)
+        if carried_state is not None:
+            freeze_state = carried_state
+        if lease is not None and freeze_state == "disabled" and not (
             (documentation_dispatch_attempted and not documentation_dispatch_proven)
             or (
                 publication_evidence_persist_attempted
@@ -1328,7 +1543,9 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
                 _release_exclusion(port, lease)
             except Exception:
                 pass
-        if documentation_dispatch_attempted and not documentation_dispatch_proven:
+        if error.reason_code.startswith("FREEZE_WRITE_"):
+            status = "BLOCKED"
+        elif documentation_dispatch_attempted and not documentation_dispatch_proven:
             evidence["documentation_dispatch_reconciliation_required"] = True
             status = "publication_reconciliation_pending"
         elif (
@@ -1347,9 +1564,13 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             status = "tag_reconciliation_pending"
         else:
             status = "BLOCKED"
-        return TransactionResult(status, error.reason_code, error.detail, evidence, frozen=token is not None, phase=phase)
+        return TransactionResult(
+            status, error.reason_code, error.detail, evidence,
+            frozen=token is not None or freeze_state == "active",
+            phase=phase, freeze_state=freeze_state,
+        )
     except Exception as error:
-        if lease is not None and not (
+        if lease is not None and freeze_state == "disabled" and not (
             (documentation_dispatch_attempted and not documentation_dispatch_proven)
             or (
                 publication_evidence_persist_attempted
@@ -1373,7 +1594,11 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         else:
             status = ("publication_reconciliation_pending" if released_created else
                       "tag_reconciliation_pending" if tag_created else "BLOCKED")
-        return TransactionResult(status, "RELEASE_OUTCOME_UNCERTAIN", str(error), evidence, frozen=token is not None, phase=phase)
+        return TransactionResult(
+            status, "RELEASE_OUTCOME_UNCERTAIN", str(error), evidence,
+            frozen=token is not None or freeze_state == "active",
+            phase=phase, freeze_state=freeze_state,
+        )
 
 
 __all__ = [
