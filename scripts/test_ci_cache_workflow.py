@@ -116,6 +116,20 @@ class WorkflowWiring(unittest.TestCase):
         self.assertEqual(_section(fast, "steps").replace(runtest, GC_STEP + runtest, 1),
                          _section(producer, "steps"))
 
+    def _assert_no_gc_calls(self, block: str) -> None:
+        """A job that only restores a cache must not collect garbage."""
+        self.assertEqual(_gc_calls(block), [])
+
+    def test_restore_only_check_sees_every_spelling_but_not_comments(self) -> None:
+        # Hand-written blocks; the check must raise for a call and stay quiet otherwise.
+        for call in ("Pkg.gc(collect_delay=Dates.Day(0))", "import Pkg as P; P.gc()",
+                     "Pkg.gc()", "GC.gc()"):
+            with self.subTest(call=call):
+                with self.assertRaises(AssertionError):
+                    self._assert_no_gc_calls(f"    steps:\n      - run: julia -e '{call}'\n")
+        self._assert_no_gc_calls("    steps:\n      # Pkg.gc() runs only in the saving jobs\n"
+                                 "      - run: gcc --version\n")
+
     def test_every_job_that_saves_a_julia_cache_collects_garbage_before_its_tests(self) -> None:
         saving = []
         for job in _job_names(self.workflow):
@@ -125,7 +139,7 @@ class WorkflowWiring(unittest.TestCase):
             steps = _section(block, "steps")
             with self.subTest(job=job):
                 if "    cache-mode: read\n" in block:
-                    self.assertNotIn("Pkg.gc()", block)
+                    self._assert_no_gc_calls(block)
                 else:
                     saving.append(job)
                     # Exactly one call. The count is of the word gc in non-comment
