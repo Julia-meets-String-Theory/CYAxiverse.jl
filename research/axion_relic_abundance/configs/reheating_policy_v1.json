@@ -1,0 +1,17 @@
+{
+ "schema": "cyaxiverse_relic_reheating_policy/1",
+ "description": "Validity range of user reheating temperatures for methodology v1 (fixed cosmology, Fuzzy arXiv:2412.12012 scenario (2): w_R = 0). Hard constraints stop the run; warnings are recorded with the results and never change a number.",
+ "hard_constraints": {
+  "T_reh_above_T_eq": "T_reh > T_eq (the relic driver's own check; below T_eq the pre/post-reheating split of the v1 methodology does not apply)",
+  "T_reh_inside_gstar_table": "T_min(g* table) <= T_reh <= T_max(g* table): no extrapolation of g_rho, g_s (data/standardmodel2018.dat, arXiv:1803.01038)",
+  "H_R_below_H_I_max": "3 H_R < 3 H_I,max (the relic driver's own check; reheating after the end of inflation)",
+  "T_reh_below_search_ceiling": "T_reh < oscillation.T_search_max_GeV"
+ },
+ "warnings": {
+  "bbn_warning_below_GeV": 0.005,
+  "bbn_warning": "T_reh below 5 MeV: at or below the lower bounds of a few MeV on the reheating temperature quoted in the BBN / neutrino-decoupling literature; the computation is performed but the scenario is cosmologically disfavoured",
+  "bbn_edge_note_below_GeV": 0.01,
+  "bbn_edge_note": "T_reh below 10 MeV: within a factor of 2 of the BBN-motivated lower bounds; interpret with care"
+ },
+ "label_rule": "labels are used in file names: 1-32 characters from [A-Za-z0-9.+-], unique within a run"
+}

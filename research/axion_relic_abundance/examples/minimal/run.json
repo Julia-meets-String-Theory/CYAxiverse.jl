@@ -1,0 +1,10 @@
+{
+ "schema": "cyaxiverse_relic_run/1",
+ "description": "Minimal example run: the three reheating temperatures of the reference study. Every other number comes from configs/methodology_v1.json and configs/theta_methodology_v1.json.",
+ "scenarios": [
+  {"label": "5MeV", "T_reh_GeV": 0.005},
+  {"label": "1e4GeV", "T_reh_GeV": 1e4},
+  {"label": "1e10GeV", "T_reh_GeV": 1e10}
+ ],
+ "production_run_approved": false
+}

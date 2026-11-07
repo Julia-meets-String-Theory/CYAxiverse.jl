@@ -1,0 +1,56 @@
+{
+ "schema": "relic_abundance_final_analysis_config/1",
+ "created": "2026-10-01",
+ "stage": "FINAL small-angle relic-abundance analysis (theta post-processing of the relic run; no new physics)",
+ "inputs": {
+  "note": "resolved at run time by scripts/05_theta/common.jl from WORK/relic/run_config.json (relic tables, A1 table, relic-input manifest) and the repository (relic script, g* table)",
+  "frozen_reference": "@expectation"
+ },
+ "expected": "@expectation",
+ "dark_matter": {
+  "Omega_DM_h2": 0.12,
+  "Omega_DM_source": "thesis constant (legacy glimmers_stability_tools.jl:23; scan_dm_sensitivity.jl:8); unchanged",
+  "R": "Omega_geometry h^2 / 0.12",
+  "TIGHT_DM": [
+   0.9,
+   1.0
+  ],
+  "TIGHT_DM_rule": "0.9 <= R <= 1.0 (closed; thesis definition, not from the Fuzzy paper)",
+  "ALLOWED_UNDERABUNDANT_rule": "R < 0.9",
+  "OVERABUNDANT_rule": "R > 1.0 (never accepted)",
+  "strongly_underabundant_rule": "R < 0.1 (secondary descriptor only)",
+  "symmetric_0.9_1.1_window": "not used"
+ },
+ "theta": {
+  "theta_ref": 1.5707963267948966,
+  "theta_ref_meaning": "normalisation point of the production abundances only; never a physical, preferred or allowed angle",
+  "domain": "0 < theta <= 0.5",
+  "theta_max": 0.5,
+  "theta_max_meaning": "OUR conservative harmonic-analysis restriction (methodological choice; anharmonic deviation ~2-3% at 0.5)",
+  "theta_min": null,
+  "theta_min_meaning": "NO lower cutoff. The legacy 1e-5 was an inherited plotting range (theta_lower_domain_audit) and is removed",
+  "scaling": "Omega_g(theta) = Omega_g(theta_ref) (theta/theta_ref)^2 (exact within the approved harmonic treatment)",
+  "common_angle": "one theta for every mode of every geometry at a given analysis point",
+  "display_range_note": "figures may start the axis near 1e-9 for readability; this is a plotting choice, not a cutoff",
+  "not_applied": "no isocurvature, inflationary-fluctuation or H_I-dependent cut (deferred to future work)"
+ },
+ "optimisation": {
+  "N_TIGHT": "exact count of closed intervals [theta_90,g, theta_100,g] intersected with (0, 0.5]; sweep over endpoints",
+  "representative_theta": "geometric midpoint of the widest (in log) maximising interval; used only to report class counts",
+  "upper_boundary_rule": "BOUNDARY_LIMITED if the maximising set touches 0.5, or if N_TIGHT rises into 0.5 (positive slope on [0.25,0.5] and larger mean there than on [0.125,0.25]) while the diagnostic continuation of the harmonic formula to pi has a larger maximum above 0.5 (rule unchanged from the approved theta analysis)",
+  "robust_preferred_angle_rule": "methodological choice made here: an INTERIOR maximum is called a robust preferred angle only if (a) the location of the maximum of the smoothed count moves by <= 0.3 dex across smoothing half-widths 0.05/0.1/0.2 dex, (b) the bootstrap 16-84% range of the exact-maximum location is <= 0.5 dex, and (c) the region where the 0.1-dex smoothed count is >= 80% of its maximum is <= 1 dex wide; otherwise it is reported as a broad scale/plateau with its range",
+  "smoothing_half_widths_dex": [
+   0.05,
+   0.1,
+   0.2
+  ],
+  "plateau_fraction": 0.8,
+  "bootstrap_resamples": 1000,
+  "bootstrap_seed": 20261001,
+  "diagnostic_tight_lower_edges": [
+   0.8,
+   0.95
+  ]
+ },
+ "statistical_unit": "@expectation"
+}

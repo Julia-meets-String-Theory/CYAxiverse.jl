@@ -1,0 +1,19 @@
+{
+ "schema": "cyaxiverse_relic_spectra/1",
+ "description": "Minimal example: the two genuine non-Shoroq CYAxiverse vmm geometries shipped as test fixtures (paths relative to this file). Their theta = 0 vacuum was established by the producers' inertia scan when they were generated (tests/external_acceptance/data/provenance.json); use state VERIFY instead to re-run that scan (needs the CYAxiverse Julia 1.12 environment).",
+ "vacuum_policy": {"on_unusable": "refuse"},
+ "spectra": [
+  {"path": "../../tests/external_acceptance/data/h11_009/np_0000001/cy_0000001/cyax.h5",
+   "vacuum_validation": {"state": "DOCUMENTED_EXTERNAL",
+     "method": "theta = 0 inertia scan (producers/vacuum/00_theta0_inertia_scan.jl): no tachyonic direction with |m| >= H0",
+     "reference": "tests/external_acceptance/data/provenance.json",
+     "evidence": [{"path": "../../tests/external_acceptance/data/provenance.json",
+                   "sha256": "5f8d9eabfef1e0d818b9bd62c76fb3d80bd0fbe40d3f36332fb6c57070ba9b0d"}]}},
+  {"path": "../../tests/external_acceptance/data/h11_015/np_0000001/cy_0000001/cyax.h5",
+   "vacuum_validation": {"state": "DOCUMENTED_EXTERNAL",
+     "method": "theta = 0 inertia scan (producers/vacuum/00_theta0_inertia_scan.jl): no tachyonic direction with |m| >= H0",
+     "reference": "tests/external_acceptance/data/provenance.json",
+     "evidence": [{"path": "../../tests/external_acceptance/data/provenance.json",
+                   "sha256": "5f8d9eabfef1e0d818b9bd62c76fb3d80bd0fbe40d3f36332fb6c57070ba9b0d"}]}}
+ ]
+}
