@@ -195,7 +195,8 @@ class WorkflowWiring(unittest.TestCase):
         # qualification; the filter belongs to pull_request only.
         events = self.workflow[self.workflow.index("  push:\n"):
                                self.workflow.index("  pull_request:\n")]
-        self.assertNotIn("paths:", events)
+        # "paths" also covers paths-ignore, which would filter pushes as well.
+        self.assertNotIn("paths", events)
         # A PR to another base runs it only when the workflow runs, which the
         # pull_request paths filter decides; the comment must say so.
         qualification = _job_block(self.workflow, "qualification")
