@@ -53,6 +53,13 @@ def _job_block(workflow: str, job: str) -> str:
     return "".join(block)
 
 
+def _gc_calls(text: str) -> list[str]:
+    """Return every occurrence of the word gc in the non-comment lines of text."""
+    return [match
+            for line in text.splitlines() if not line.lstrip().startswith("#")
+            for match in re.findall(r"\bgc\b", line)]
+
+
 def _section(block: str, key: str) -> str:
     """Return the lines of a job-level key (e.g. 'steps', 'env') and its body."""
     lines = block.splitlines(keepends=True)
@@ -121,9 +128,11 @@ class WorkflowWiring(unittest.TestCase):
                     self.assertNotIn("Pkg.gc()", block)
                 else:
                     saving.append(job)
-                    # Exactly one call in any spelling; comment lines may mention it.
-                    calls = [line for line in steps.splitlines()
-                             if "Pkg.gc(" in line and not line.lstrip().startswith("#")]
+                    # Exactly one call. The count is of the word gc in non-comment
+                    # lines, so aliased, keyword and repeated calls count, and so does
+                    # GC.gc(); comment lines may mention it. A text search cannot see
+                    # a name built at run time.
+                    calls = _gc_calls(steps)
                     self.assertEqual(len(calls), 1, calls)
                     self.assertIn(GC_STEP + GC_FOLLOWED_BY[job], steps)
         self.assertEqual(sorted(saving), sorted(GC_FOLLOWED_BY))
@@ -185,6 +194,25 @@ class WorkflowWiring(unittest.TestCase):
             "!(github.event_name == 'push' && github.ref == 'refs/heads/vmm')) || "
             "github.base_ref == 'main' || "
             "contains(github.event.pull_request.labels.*.name, 'full-tests')\n", full)
+
+
+class GarbageCollectionCount(unittest.TestCase):
+    """The placement test counts the word gc in non-comment lines (CYAX-0222 R-005)."""
+
+    def test_counts_each_spelling_it_can_see_and_ignores_comments(self) -> None:
+        # Counts derived by hand from each text, not from the helper.
+        for text, expected in (
+            ("import Pkg as P; P.gc()", 1),
+            ("Pkg.gc(collect_delay=Dates.Day(0))", 1),
+            ("Pkg.gc(); Pkg.gc()", 2),
+            ("GC.gc()", 1),
+            ("# Pkg.gc()", 0),
+            ("        # Pkg.gc()", 0),
+            ("gcc --version", 0),
+            ("Collect unused depot entries", 0),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(len(_gc_calls(text)), expected)
 
 
 def _cache(cache_id: int, ref: str, job: str, created: str, run: int | None = None,
