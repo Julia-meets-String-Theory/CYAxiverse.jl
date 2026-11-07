@@ -200,6 +200,7 @@ class WorkflowWiring(unittest.TestCase):
         # A PR to another base runs it only when the workflow runs, which the
         # pull_request paths filter decides; the comment must say so.
         qualification = _job_block(self.workflow, "qualification")
+        self.assertIn("Pushes and manual runs always run", qualification)
         self.assertIn("pull_request paths filter", qualification)
         self.assertNotIn("Pushes and PRs to any other base", qualification)
 
