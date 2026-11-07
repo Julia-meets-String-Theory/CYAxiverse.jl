@@ -19,7 +19,8 @@ QUALIFICATION_PATH_PREFIXES = ("src/", "test/fixtures/scientific_certification/"
 # release pins check; LocalPreferences.toml can change what the job loads, because
 # Julia applies its sections for packages the root project lists; the job requires
 # a clean source tree, and the root .gitignore hides the root Manifest.toml that CI
-# resolves, so a change to it can make the tree dirty (a nested .gitignore cannot);
+# resolves, so a change to it can make the tree dirty (a nested .gitignore cannot
+# reach that file);
 # the gate script and CI.yml decide whether the job runs.
 QUALIFICATION_PATHS = frozenset({
     "Project.toml",
