@@ -125,7 +125,7 @@ Changes touching only the named file.
   starts the Full test suite. In the last 12 months, 7 of the 9 non-merge
   commits on `vmm` that changed `.gitignore` touched no path in the current
   filter, an upper limit of about seven extra runs a year at that rate. The
-  owner accepted this cost on #222.
+  owner accepted this cost (see *Review history and owner decisions*).
 - The `paths` filter is applied by GitHub, so tests can check only that the
   entries are present. CYAX-0222 G2 records the real behaviour.
 - R-005 is a text check: a name built at run time is not counted.
@@ -162,9 +162,10 @@ CI only. No package, API, schema, environment, scientific or version change.
 
 ## Review history and owner decisions
 
-- Owner decisions on #222: keep the `LocalPreferences.toml` item on the corrected
-  reason; accept the cost of the `.gitignore` entry; amend CYAX-0223 by the route
-  in R-004.
+- Owner decisions after the corrections in #222 comment 6700735948, made durable
+  by the CYAX-0222 G0 approval comment: keep the `LocalPreferences.toml` item on
+  the corrected reason; accept the cost of the `.gitignore` entry; amend
+  CYAX-0223 by the route in R-004.
 
 ## Open owner decisions
 
