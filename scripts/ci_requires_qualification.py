@@ -16,10 +16,13 @@ QUALIFICATION_PATH_PREFIXES = ("src/", "test/fixtures/scientific_certification/"
 # Single files the qualification job depends on. run_fixture.jl includes
 # test/coverage_support.jl and replays through scripts/verify_scientific_certificate.jl;
 # the root Project.toml and Manifest.toml select the packages whose versions the
-# release pins check; the gate script and CI.yml decide whether the job runs.
+# release pins check; LocalPreferences.toml can change what the job loads, because
+# Julia applies its sections for packages the root project lists; the gate script
+# and CI.yml decide whether the job runs.
 QUALIFICATION_PATHS = frozenset({
     "Project.toml",
     "Manifest.toml",
+    "LocalPreferences.toml",
     "scripts/verify_scientific_certificate.jl",
     "test/coverage_support.jl",
     "scripts/ci_requires_qualification.py",

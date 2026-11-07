@@ -22,6 +22,7 @@ on:
       - 'bin/**'
       - 'Project.toml'
       - 'Manifest.toml'
+      - 'LocalPreferences.toml'
       - 'iterations.toml'
       - 'requirements-test.txt'
       - '.github/workflows/CI.yml'

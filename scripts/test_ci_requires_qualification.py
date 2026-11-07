@@ -51,7 +51,7 @@ class ClassifyPaths(unittest.TestCase):
         # the gate script and CI.yml decide whether the job runs at all.
         for path in ("Project.toml", "Manifest.toml", "scripts/verify_scientific_certificate.jl",
                      "test/coverage_support.jl", "scripts/ci_requires_qualification.py",
-                     ".github/workflows/CI.yml"):
+                     ".github/workflows/CI.yml", "LocalPreferences.toml"):
             with self.subTest(path=path):
                 self.assertTrue(self.gate.requires_qualification([path]))
 
@@ -59,6 +59,7 @@ class ClassifyPaths(unittest.TestCase):
         for path in ("docs/src/api.md", "test/runtests.jl", "scripts/local_only.py",
                      "test/fixtures/other/data.h5", "srcs/x.jl", "test/fixtures/scientific",
                      "docs/Project.toml", "notebooks/Manifest.toml", "Project.toml.orig",
+                     "notebooks/LocalPreferences.toml", "LocalPreferences.toml.orig",
                      ".github/workflows/Documentation.yml"):
             with self.subTest(path=path):
                 self.assertFalse(self.gate.requires_qualification([path]))
@@ -104,6 +105,12 @@ class GitDiffFixture(unittest.TestCase):
 
     def test_source_change_sets_output_true(self) -> None:
         head = self._commit("src/Fixture.jl")
+        result, output = self._run(head)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, "qualification=true\n")
+
+    def test_local_preferences_change_sets_output_true(self) -> None:
+        head = self._commit("LocalPreferences.toml")
         result, output = self._run(head)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(output, "qualification=true\n")
@@ -154,6 +161,13 @@ class WorkflowWiring(unittest.TestCase):
         trigger = self.workflow[self.workflow.index("  pull_request:\n"):
                                 self.workflow.index("  workflow_dispatch:")]
         self.assertIn("      - 'requirements-test.txt'\n", trigger)
+
+    def test_local_preferences_trigger_pull_request_ci(self) -> None:
+        # Julia applies LocalPreferences.toml sections for packages the root
+        # project lists, so a PR changing only that file must run the workflow.
+        trigger = self.workflow[self.workflow.index("  pull_request:\n"):
+                                self.workflow.index("  workflow_dispatch:")]
+        self.assertIn("      - 'LocalPreferences.toml'\n", trigger)
 
 
 if __name__ == "__main__":
