@@ -10,7 +10,7 @@ depends_on: []
 created: 2026-11-03
 last_reviewed: 2026-11-06
 review_required: repository-owner approval
-approval_ref: "PR #224 comment 6667807506 — approves spec revision 5f01c9f"
+approval_ref: "PR #227 comment 6700824360 — approves spec revision 73c9f9b (amendment 88ea6e8); supersedes the approval of 5f01c9f, PR #224 comment 6667807506"
 version_impact: none (CI only)
 ---
 

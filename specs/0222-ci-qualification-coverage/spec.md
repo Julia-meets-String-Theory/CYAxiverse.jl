@@ -3,14 +3,14 @@ spec_id: CYAX-0222
 title: Qualification trigger coverage and CYAX-0223 follow-ups
 issue: 222
 class: S1
-status: draft
+status: approved
 workstream: CI workflow triggers, the qualification gate and their tests
 parent: null
 depends_on: []
 created: 2026-11-06
 last_reviewed: 2026-11-06
 review_required: repository-owner approval
-approval_ref: null
+approval_ref: "PR #227 comment 6700824360 — approves spec revision 73c9f9b"
 version_impact: none (CI only)
 ---
 
