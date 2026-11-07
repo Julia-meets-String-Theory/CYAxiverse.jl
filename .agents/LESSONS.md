@@ -487,3 +487,293 @@ this candidate.
 
 Superseded by: N/A
 Promotion status: not promoted
+
+## L-0012 — Reclassify when review finds a scientific acceptance change
+
+ID: L-0012
+Status: candidate
+Date: 2026-11-06
+Type: owner-redirection
+Scope / tags: SDD classification, S0/S2 boundary, scientific acceptance, review
+
+Observed failure: A pull request classified as PR-only S0 (a test-suite
+repair) also changed scientific acceptance criteria of the legacy minimizer
+and, in one commit, a batch default. The classification was not revisited when
+those changes appeared, so they were implemented and reviewed without a
+governing specification or owner approval.
+
+Correction: When a review or the implementation itself shows that a change
+alters a scientific acceptance criterion, counting unit, default that selects
+scientific results, or similar contract, stop and reclassify the work as S2,
+open or reuse a governing Issue, and draft a specification for owner approval
+before continuing that part of the work.
+
+Root cause: The class was fixed at intake from the stated goal ("repair the
+tests") and not re-checked against what the diff actually changed.
+
+Preventive rule / check: At every review round, compare the diff against the
+S2 triggers in the SDD skill (acceptance criteria, counting, persisted
+scientific schema, scientific defaults). Any hit reopens the classification;
+record the reclassification in the PR description.
+
+Applicability / exceptions: Applies to S0 and S1 work whose diff grows. Pure
+test or tooling changes that only observe scientific behaviour stay in their
+class.
+
+Evidence / durable reference: PR #215 and governing Issue #218;
+`specs/0215-minimizer-acceptance-contract/spec.md`, *Status of this record* and
+*Review and amendment history*.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0013 — Confirm the code path reaches a fix before claiming result impact
+
+ID: L-0013
+Status: candidate
+Date: 2026-11-06
+Type: scientific-error
+Scope / tags: persisted results, impact claims, reachability, provenance
+
+Observed failure: A draft specification and help text stated that stored
+legacy vacuum counts were stale because of a minimizer defect. The legacy
+pipeline never reached the minimizer: every such row failed earlier, by
+construction. The premise had to be withdrawn after review.
+
+Correction: Before claiming that a fix changes, invalidates or repairs
+persisted or published results, establish from the call graph and a concrete
+reproduction that the code path that produced those results actually executes
+the fixed code, and record that evidence.
+
+Root cause: The impact of a defect in a shared function was assumed to extend
+to every caller, without checking reachability from the pipeline that wrote
+the results.
+
+Preventive rule / check: For each impact claim, name the producing entry point,
+show it reaches the changed code on the relevant inputs (or show it cannot),
+and state the claim only at that strength.
+
+Applicability / exceptions: Applies to impact statements in specifications,
+help text, release notes and Issues. It does not require re-running historical
+populations.
+
+Evidence / durable reference: `specs/0215-minimizer-acceptance-contract/spec.md`,
+*Current baseline* and R-010; PR #215 review history (the withdrawn
+stale-results premise).
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0014 — Moving a check between CI jobs: compare what each pull request runs
+
+ID: L-0014
+Status: candidate
+Date: 2026-11-06
+Type: testing
+Scope / tags: CI, gate coverage, job restructuring, qualification
+
+Observed failure: A test-suite restructuring moved a process-isolated
+qualification run out of the job that ran on every pull request into a new
+job gated on a path list. The new gate missed several inputs of that run, and
+pull requests to other bases no longer ran it, so some pull requests stopped
+exercising a check they had run before. The independent review of the whole
+change found it; the per-commit reviews had not.
+
+Correction: When a check moves between CI jobs or behind a new condition, list
+for each kind of pull request (by base branch, changed paths, labels, event)
+whether it ran the check before and after, and close or explicitly accept every
+difference. Derive a path gate from what the moved job actually loads, not from
+the most obvious directories.
+
+Root cause: The change was reviewed as "the check still exists" rather than
+"every pull request that ran it still runs it".
+
+Preventive rule / check: Attach a before/after table of trigger conditions to
+any CI change that moves or gates a check, and test the gate against real
+commit ranges.
+
+Applicability / exceptions: Applies to CI workflow changes; not to adding new
+checks that did not run before.
+
+Evidence / durable reference: PR #215, G2 review record and commit `ec465e0`;
+`scripts/ci_requires_qualification.py` and its tests; Issue #222.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0015 — Verify which ref produces the cache that new pull requests restore
+
+ID: L-0015
+Status: candidate
+Date: 2026-11-06
+Type: tooling
+Scope / tags: GitHub Actions cache, CI performance, cache scope, quota
+
+Observed failure: Every new pull request to the development branch `vmm`
+precompiled the whole Julia test environment from scratch ("Cache not found";
+479 packages). In this repository's workflow, caches were saved only on pull
+request merge refs, which other pull requests did not restore, and CI did not
+run on pushes to `vmm`, so no cache existed on the base branch. The
+pull-request caches also filled most of the repository's 10 GB cache quota.
+
+Correction: Produce the shared cache on pushes to the base branch, let
+pull-request jobs restore it without saving large entries, and prune stale and
+closed-pull-request caches in a trusted push-only job.
+
+Root cause: Cross-pull-request cache reuse was assumed from the cache action's
+defaults instead of checked against which refs actually wrote caches and which
+refs a pull-request run can restore from.
+
+Preventive rule / check: Before relying on cross-pull-request cache reuse,
+identify the ref that creates the cache and verify, in the log of a fresh pull
+request's run, that it restores that entry ("Cache restored from key" with the
+expected key). Keep total cache size well under the quota.
+
+Applicability / exceptions: Applies to repositories whose development branch is
+not the default branch and to any workflow that relies on caches across pull
+requests. Restore rules depend on GitHub's cache scoping and the workflow's
+triggers; re-verify after changing either.
+
+Evidence / durable reference: Issue #223; PR #224;
+`specs/0223-ci-cache-lifecycle/spec.md`; CYAX-0223 G2 evidence comments on
+#223 (PR #225 runs restored the `vmm` entry and precompiled 7 packages instead
+of 479).
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0016 — Julia depot garbage collection, cache options and `Pkg.test` interact
+
+ID: L-0016
+Status: candidate
+Date: 2026-11-06
+Type: tooling
+Scope / tags: julia-actions/cache, Pkg.gc, Pkg.test, test-only dependencies
+
+Observed failure: A cache change set `delete-old-caches: 'false'` in
+`julia-actions/cache@v2` to keep test jobs read-only, assuming the option only
+controlled deletion. In the action's source (`action.yml` and
+`handle_caches.jl` at commit `d10a6fd8f31b`, the `v2` tag used by CI) that
+option skips the whole post step, which also runs `Pkg.gc()`, so the change
+would have stopped garbage collection of saved caches. A first replacement ran
+`Pkg.gc()` as the last step, after `Pkg.test`.
+
+What was observed and what was inferred:
+- Observed in source (above): the post step skipped by the option runs
+  `Pkg.gc()` before attempting deletions.
+- Observed in a throwaway depot (Julia 1.12.6): `Pkg.gc()` deletes a package
+  orphaned more than seven days earlier and keeps its first orphan date in
+  `orphaned.toml`, so a package reinstalled at the same path is deleted again
+  at the next collection.
+- Observed in Pkg 1.12 source: `Pkg.test` resolves test-only dependencies in a
+  temporary environment that is removed afterwards.
+- Inferred (not observed in CI): running `Pkg.gc()` after `Pkg.test` can mark
+  dependencies used only by the test environment as unused; once the
+  collection delay has passed, those packages may be removed from subsequently
+  saved caches. CI used Julia 1.12.7.
+
+Correction: When turning off the action's cache deletion, run `Pkg.gc()`
+explicitly, after the environments are set up and before the tests, so that
+anything it deletes and the tests need is reinstalled and saved. Make the step
+non-fatal, as upstream.
+
+Root cause: Upstream action behaviour and Pkg's orphan bookkeeping were assumed
+from option names instead of read from source.
+
+Preventive rule / check: Before changing a cache option, read the action's
+`action.yml` and helper scripts at the revision in use, and record that
+revision. Reason about which manifests exist when `Pkg.gc()` runs, and state
+which conclusions were observed and which were inferred.
+
+Applicability / exceptions: Applies to Julia CI using `julia-actions/cache` with
+`Pkg.test`, at the action and Pkg versions above; re-verify on upgrade. Jobs
+that save no cache need no garbage collection.
+
+Evidence / durable reference: PR #224; its review history in
+`specs/0223-ci-cache-lifecycle/spec.md` (*Review history and owner decisions*);
+commits `a87f4bf` and `ad73600`; `julia-actions/cache` commit `d10a6fd8f31b`.
+CI evidence of packages deleted by the pre-test `Pkg.gc()` and then reinstalled
+by the tests remains pending under CYAX-0223 G2 on #223.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0017 — Test skip semantics depend on the loader; named-file runners must fail closed
+
+ID: L-0017
+Status: candidate
+Date: 2026-11-06
+Type: testing
+Scope / tags: Python unittest, optional dependencies, test runners, fail-closed
+
+Observed failure: A test module was made to raise `unittest.SkipTest` at import
+when CYTools is absent. Test discovery reported that as a skip, but a runner
+that loaded the module by name (`python -m unittest <file>`) crashed, so the
+repository's verification wrapper failed. Two successive fixes then broke the
+runner's contract in other ways: `TestLoader.discover` also imported every
+package under the directory, and importing by stem could run a different file
+than the one listed and report a false pass.
+
+Correction: A named-file test runner must not report success unless every
+requested test file is correctly resolved and accounted for as executed tests
+or an explicit skip. Reject invalid names and missing files before import,
+verify the imported module's identity, turn an import-time `SkipTest` into an
+explicit skip, fail on unexpected import errors and on test modules without
+tests, and avoid unintentionally discovering additional test targets.
+Post-import identity checks prevent false passes but do not guarantee that a
+wrongly resolved module executed no code before rejection.
+
+Root cause: Skip semantics differ between unittest loaders, and each fix was
+first tested only on the default file list rather than against the runner's
+contract.
+
+Preventive rule / check: When adding an import-time skip, run every runner that
+loads that module (discovery, by-name, wrappers). When writing or changing a
+named-file runner, test that contract against shadowed names, packages beside
+test files and import errors, not only the default list.
+
+Applicability / exceptions: Applies to Python test tooling in this repository.
+Discovery-based runs (`unittest discover`) remain the CI entry point.
+
+Evidence / durable reference: PR #225 (commits `605bfb5`, `74ee31a`,
+`9af7ef0`) and its review rounds recorded in the PR description;
+`scripts/run_python_regression_tests.py`; commit `46f23b0`.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0018 — Row and column shapes in broadcast expressions
+
+ID: L-0018
+Status: candidate
+Date: 2026-11-06
+Type: scientific-error
+Scope / tags: Julia broadcasting, numerical kernels, objective and Hessian
+
+Observed failure: The legacy minimizer's objective and Hessian helper
+broadcast the 1×N row `cos.(x' * QV)` against an N×N matrix and an N-vector,
+so the optimizer received functions that were not V and its derivatives. The
+result had the right type and no error was raised.
+
+Correction: In numerical kernels, make the shape of every broadcast operand
+explicit (vector vs 1×N row vs matrix), and test the objective and its
+derivatives against a hand-derived value at a point where the terms do not
+coincide (for example mixed-sign instanton scales).
+
+Root cause: Broadcasting a row against a vector silently produces a matrix;
+tests with uniform parameters could not detect it.
+
+Preventive rule / check: For each objective, gradient and Hessian, add one test
+with non-uniform parameters and a closed-form expected value, and break-check
+it against the previous implementation.
+
+Applicability / exceptions: Applies to Julia numerical code; the general check
+(non-degenerate fixtures with independent expected values) applies to any
+numerical kernel.
+
+Evidence / durable reference: PR #215;
+`specs/0215-minimizer-acceptance-contract/spec.md`, R-001 and its
+verification row.
+
+Superseded by: N/A
+Promotion status: not promoted
