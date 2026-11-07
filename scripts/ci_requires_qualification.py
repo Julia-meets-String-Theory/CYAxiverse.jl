@@ -17,12 +17,15 @@ QUALIFICATION_PATH_PREFIXES = ("src/", "test/fixtures/scientific_certification/"
 # test/coverage_support.jl and replays through scripts/verify_scientific_certificate.jl;
 # the root Project.toml and Manifest.toml select the packages whose versions the
 # release pins check; LocalPreferences.toml can change what the job loads, because
-# Julia applies its sections for packages the root project lists; the gate script
-# and CI.yml decide whether the job runs.
+# Julia applies its sections for packages the root project lists; the job requires
+# a clean source tree, and the root .gitignore hides the root Manifest.toml that CI
+# resolves, so a change to it can make the tree dirty (a nested .gitignore cannot);
+# the gate script and CI.yml decide whether the job runs.
 QUALIFICATION_PATHS = frozenset({
     "Project.toml",
     "Manifest.toml",
     "LocalPreferences.toml",
+    ".gitignore",
     "scripts/verify_scientific_certificate.jl",
     "test/coverage_support.jl",
     "scripts/ci_requires_qualification.py",

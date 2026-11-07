@@ -51,7 +51,7 @@ class ClassifyPaths(unittest.TestCase):
         # the gate script and CI.yml decide whether the job runs at all.
         for path in ("Project.toml", "Manifest.toml", "scripts/verify_scientific_certificate.jl",
                      "test/coverage_support.jl", "scripts/ci_requires_qualification.py",
-                     ".github/workflows/CI.yml", "LocalPreferences.toml"):
+                     ".github/workflows/CI.yml", "LocalPreferences.toml", ".gitignore"):
             with self.subTest(path=path):
                 self.assertTrue(self.gate.requires_qualification([path]))
 
@@ -60,6 +60,7 @@ class ClassifyPaths(unittest.TestCase):
                      "test/fixtures/other/data.h5", "srcs/x.jl", "test/fixtures/scientific",
                      "docs/Project.toml", "notebooks/Manifest.toml", "Project.toml.orig",
                      "notebooks/LocalPreferences.toml", "LocalPreferences.toml.orig",
+                     "docs/.gitignore",
                      ".github/workflows/Documentation.yml"):
             with self.subTest(path=path):
                 self.assertFalse(self.gate.requires_qualification([path]))
@@ -115,6 +116,18 @@ class GitDiffFixture(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(output, "qualification=true\n")
 
+    def test_root_gitignore_change_sets_output_true(self) -> None:
+        head = self._commit(".gitignore")
+        result, output = self._run(head)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, "qualification=true\n")
+
+    def test_nested_gitignore_change_sets_output_false(self) -> None:
+        head = self._commit("docs/.gitignore")
+        result, output = self._run(head)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, "qualification=false\n")
+
     def test_documentation_change_sets_output_false(self) -> None:
         head = self._commit("docs/src/index.md")
         result, output = self._run(head)
@@ -168,6 +181,14 @@ class WorkflowWiring(unittest.TestCase):
         trigger = self.workflow[self.workflow.index("  pull_request:\n"):
                                 self.workflow.index("  workflow_dispatch:")]
         self.assertIn("      - 'LocalPreferences.toml'\n", trigger)
+
+    def test_root_gitignore_triggers_pull_request_ci(self) -> None:
+        # The qualification job requires a clean tree, and the root .gitignore
+        # hides the root Manifest.toml that CI resolves, so a PR changing only
+        # that file must run the workflow.
+        trigger = self.workflow[self.workflow.index("  pull_request:\n"):
+                                self.workflow.index("  workflow_dispatch:")]
+        self.assertIn("      - '.gitignore'\n", trigger)
 
     def test_job_comment_states_when_qualification_runs(self) -> None:
         # Pushes and manual runs have no paths filter, so they always run

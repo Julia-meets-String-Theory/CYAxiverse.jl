@@ -23,6 +23,7 @@ on:
       - 'Project.toml'
       - 'Manifest.toml'
       - 'LocalPreferences.toml'
+      - '.gitignore'
       - 'iterations.toml'
       - 'requirements-test.txt'
       - '.github/workflows/CI.yml'
