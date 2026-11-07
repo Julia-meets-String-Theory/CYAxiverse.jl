@@ -8,7 +8,7 @@ workstream: CI workflow triggers, Julia cache identities, permissions and cache 
 parent: null
 depends_on: []
 created: 2026-11-03
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-06
 review_required: repository-owner approval
 approval_ref: "PR #224 comment 6667807506 — approves spec revision 5f01c9f"
 version_impact: none (CI only)
@@ -179,8 +179,9 @@ and Full keep saving their own caches.
   tests runs, which restore the `vmm` cache and run no `Pkg.gc()`, are
   unaffected. The cost falls on `fast-cache` runs on pushes to `vmm` and on
   every Full test suite run: PRs to `main`, PRs with the `full-tests` label,
-  and pushes to `main` and tags. Pushes to `main` are a new cost, because
-  upstream ran no `Pkg.gc()` on the default branch. Upstream ran `Pkg.gc()`
+  pushes to `main` and tags, and manual runs (`workflow_dispatch`). Pushes to
+  `main` and manual runs on `main` are a new cost, because upstream ran no
+  `Pkg.gc()` on the default branch. Upstream ran `Pkg.gc()`
   after the tests on other branches, so its saved caches there lacked such
   packages permanently.
 - Maintenance runs only on pushes. Between pushes, lifecycle, qualification and
@@ -293,6 +294,10 @@ CI only. No package, API, schema, environment or version change.
   (pushes to `main` being a new cost); "whatever it deletes is reinstalled"
   overstated what the tests reinstall; a CYAX-0223 G2 row was mistimed; and the
   placement test missed a second `Pkg.gc()` step written with other quotes.
+- Amendment after closure (CYAX-0222 R-004, #222): the independent focused
+  review of `5f01c9f` noted that the limitation on test-only packages omitted
+  manual runs, which also run the Full test suite and its `Pkg.gc()` step (R-005
+  already listed them). The limitation now names them. No requirement changes.
 
 ## Open owner decisions
 
