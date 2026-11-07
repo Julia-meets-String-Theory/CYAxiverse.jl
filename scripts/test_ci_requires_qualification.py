@@ -169,6 +169,18 @@ class WorkflowWiring(unittest.TestCase):
                                 self.workflow.index("  workflow_dispatch:")]
         self.assertIn("      - 'LocalPreferences.toml'\n", trigger)
 
+    def test_job_comment_states_when_qualification_runs(self) -> None:
+        # Pushes and manual runs have no paths filter, so they always run
+        # qualification; the filter belongs to pull_request only.
+        events = self.workflow[self.workflow.index("  push:\n"):
+                               self.workflow.index("  pull_request:\n")]
+        self.assertNotIn("paths:", events)
+        # A PR to another base runs it only when the workflow runs, which the
+        # pull_request paths filter decides; the comment must say so.
+        qualification = _job_block(self.workflow, "qualification")
+        self.assertIn("pull_request paths filter", qualification)
+        self.assertNotIn("Pushes and PRs to any other base", qualification)
+
 
 if __name__ == "__main__":
     unittest.main()
