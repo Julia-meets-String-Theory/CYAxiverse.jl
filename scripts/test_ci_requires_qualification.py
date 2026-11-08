@@ -370,18 +370,27 @@ class WorkflowWiring(unittest.TestCase):
                 self.assertEqual([e for e in negating if _glob_matches(e, name)], [])
 
     def test_job_comment_states_when_qualification_runs(self) -> None:
-        # Pushes and manual runs have no paths filter, so every push run and every
-        # manual run runs qualification; the filter belongs to pull_request only.
+        # Pushes and manual runs have no paths filter, so every such run that starts
+        # its jobs runs qualification; the filter belongs to pull_request only.
         events = self.workflow[self.workflow.index("  push:\n"):
                                self.workflow.index("  pull_request:\n")]
         # "paths" also covers paths-ignore, which would filter pushes as well.
         self.assertNotIn("paths", events)
         # A PR to another base runs it only when the workflow runs, which the
-        # pull_request paths filter decides; the comment must say so.
+        # pull_request paths filter decides; the comment must say so. Only the comment
+        # lines are read, with line breaks folded, so the wording cannot be matched
+        # from the job condition and a phrase may wrap across lines.
         qualification = _job_block(self.workflow, "qualification")
-        self.assertIn("Pushes and manual runs always run", qualification)
-        self.assertIn("pull_request paths filter", qualification)
-        self.assertNotIn("Pushes and PRs to any other base", qualification)
+        comment = " ".join(
+            line.strip().lstrip("#").strip()
+            for line in qualification.splitlines() if line.strip().startswith("#"))
+        comment = re.sub(r"\s+", " ", comment)
+        self.assertIn("no paths filter", comment)
+        self.assertIn("whenever the workflow runs", comment)
+        self.assertIn("pull_request paths filter", comment)
+        # A pending run that the concurrency group replaces starts no job, so the
+        # comment must not promise a run for every push (R-002).
+        self.assertNotIn("always", comment.lower())
 
 
 if __name__ == "__main__":

@@ -166,8 +166,9 @@ jobs:
   qualification:
     name: Process-isolated scientific qualification
     needs: changes
-    # The path gate runs only for PRs to vmm. Pushes and manual runs always run
-    # qualification: neither trigger has a paths filter. A PR to any other base
+    # The path gate runs only for PRs to vmm. Pushes and manual runs have no paths
+    # filter, so every such run that starts its jobs runs qualification (a pending
+    # run that the concurrency group replaces starts none). A PR to any other base
     # (main, maintenance lines, stacked branches) runs it whenever the workflow
     # runs, which needs a change matching the pull_request paths filter above.
     # !cancelled() lets these run although the gate job is skipped. A failed gate
