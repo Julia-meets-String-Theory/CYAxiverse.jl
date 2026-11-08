@@ -212,9 +212,10 @@ class WorkflowWiring(unittest.TestCase):
         self.assertIn("contains(github.event.pull_request.labels.*.name, 'full-tests')",
                       qualification)
 
-    def test_pull_requests_to_bases_other_than_vmm_always_run_qualification(self) -> None:
+    def test_pull_requests_to_bases_other_than_vmm_run_qualification_when_the_workflow_runs(self) -> None:
         # The path gate runs only for PRs to vmm; a PR to main, a maintenance line
-        # or a stacked branch skips it, so it must run qualification directly.
+        # or a stacked branch skips it, so the job runs qualification directly
+        # whenever the workflow runs (the pull_request paths filter decides that).
         qualification = _job_block(self.workflow, "qualification")
         self.assertIn("github.base_ref != 'vmm'", qualification)
         self.assertNotIn("github.base_ref == 'main'", qualification)
@@ -261,8 +262,8 @@ class WorkflowWiring(unittest.TestCase):
         self.assertIn("      - '.gitignore'\n", trigger)
 
     def test_job_comment_states_when_qualification_runs(self) -> None:
-        # Pushes and manual runs have no paths filter, so they always run
-        # qualification; the filter belongs to pull_request only.
+        # Pushes and manual runs have no paths filter, so every push run and every
+        # manual run runs qualification; the filter belongs to pull_request only.
         events = self.workflow[self.workflow.index("  push:\n"):
                                self.workflow.index("  pull_request:\n")]
         # "paths" also covers paths-ignore, which would filter pushes as well.
