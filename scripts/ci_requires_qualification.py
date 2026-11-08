@@ -42,8 +42,12 @@ def requires_qualification(paths: Iterable[str]) -> bool:
 
 def changed_paths(base: str, head: str) -> list[str]:
     """Return the paths changed between the merge base of base and head, and head."""
+    # --no-renames: with rename detection Git prints only the new path, so moving an
+    # input (such as the root .gitignore or a file under src/) to a path that is not
+    # an input would give qualification=false. Without it a rename lists the old path
+    # as deleted and the new path as added (CYAX-0222 R-007).
     result = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}...{head}"],
+        ["git", "diff", "--no-renames", "--name-only", f"{base}...{head}"],
         check=False,
         capture_output=True,
         text=True,

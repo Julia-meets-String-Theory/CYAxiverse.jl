@@ -94,6 +94,28 @@ class GitDiffFixture(unittest.TestCase):
         self._git("commit", "-m", f"change {path}")
         return self._git("rev-parse", "HEAD").strip()
 
+    def _commit_to_base(self, path: str) -> None:
+        """Commit path in the base, so that a later move has a file to rename."""
+        target = self.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Distinct content per path, so Git's rename detection (when on) pairs them.
+        target.write_text(f"base content of {path}\n" * 5)
+        self._git("add", ".")
+        self._git("commit", "-m", f"base {path}")
+        self.base = self._git("rev-parse", "HEAD").strip()
+
+    def _move(self, old: str, new: str) -> str:
+        """Move old to new with git mv in one commit and return that commit."""
+        (self.root / new).parent.mkdir(parents=True, exist_ok=True)
+        self._git("mv", old, new)
+        self._git("commit", "-m", f"move {old} to {new}")
+        return self._git("rev-parse", "HEAD").strip()
+
+    def _assert_gate(self, head: str, expected: str) -> None:
+        result, output = self._run(head)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, f"qualification={expected}\n")
+
     def _run(self, head: str) -> tuple[subprocess.CompletedProcess, str]:
         output = self.root / "github_output"
         output.write_text("")
@@ -133,6 +155,19 @@ class GitDiffFixture(unittest.TestCase):
         result, output = self._run(head)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(output, "qualification=false\n")
+
+    # R-007: a rename lists the old path as deleted and the new path as added, so
+    # moving an input to a path that is not an input (or the reverse) still counts.
+    def test_moving_root_gitignore_away_sets_output_true(self) -> None:
+        self._commit_to_base(".gitignore")
+        self._assert_gate(self._move(".gitignore", "gitignore.old"), "true")
+
+    def test_moving_source_file_out_of_src_sets_output_true(self) -> None:
+        self._commit_to_base("src/Fixture.jl")
+        self._assert_gate(self._move("src/Fixture.jl", "attic/Fixture.jl"), "true")
+
+    def test_moving_a_file_onto_local_preferences_sets_output_true(self) -> None:
+        self._assert_gate(self._move("README.md", "LocalPreferences.toml"), "true")
 
     def test_unknown_revision_fails(self) -> None:
         result, output = self._run("0" * 40)
