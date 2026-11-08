@@ -10,7 +10,7 @@ depends_on: []
 created: 2026-11-06
 last_reviewed: 2026-11-08
 review_required: repository-owner approval
-approval_ref: "PR #227 comment 6700824360 — approves spec revision 73c9f9b"
+approval_ref: "PR #227 comment 6728054027 — approves spec revision 2e69616 (replaces comment 6700824360, which approved 73c9f9b)"
 version_impact: none (CI only)
 ---
 
@@ -226,8 +226,8 @@ CI only. No package, API, schema, environment, scientific or version change.
 
 ## Open owner decisions
 
-- Approve this amendment (R-007 to R-009 and the corrected baseline), with or
-  without R-009, in a comment that names its commit.
+None. The owner approved the amendment, including R-009, in PR #227 comment
+6728054027.
 
 ## Completion criterion
 
