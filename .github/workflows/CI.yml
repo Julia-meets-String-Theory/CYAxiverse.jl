@@ -23,6 +23,7 @@ on:
       - 'Project.toml'
       - 'Manifest.toml'
       - 'LocalPreferences.toml'
+      - 'JuliaLocalPreferences.toml'
       - '.gitignore'
       - 'iterations.toml'
       - 'requirements-test.txt'

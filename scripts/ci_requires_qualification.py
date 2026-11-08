@@ -20,12 +20,14 @@ QUALIFICATION_PATH_PREFIXES = ("src/", "test/fixtures/scientific_certification/"
 # Julia applies its sections for packages the root project lists; the job requires
 # a clean source tree, and the root .gitignore hides the root Manifest.toml that CI
 # resolves, so a change to it can make the tree dirty (a nested .gitignore cannot
-# reach that file);
+# reach that file); the root JuliaLocalPreferences.toml, when present, is read by
+# Julia in place of LocalPreferences.toml (Base.preferences_names, CYAX-0222 R-008);
 # the gate script and CI.yml decide whether the job runs.
 QUALIFICATION_PATHS = frozenset({
     "Project.toml",
     "Manifest.toml",
     "LocalPreferences.toml",
+    "JuliaLocalPreferences.toml",
     ".gitignore",
     "scripts/verify_scientific_certificate.jl",
     "test/coverage_support.jl",
