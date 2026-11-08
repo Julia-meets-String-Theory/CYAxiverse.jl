@@ -130,26 +130,47 @@ class WorkflowWiring(unittest.TestCase):
         self._assert_no_gc_calls("    steps:\n      # Pkg.gc() runs only in the saving jobs\n"
                                  "      - run: gcc --version\n")
 
-    def test_every_job_that_saves_a_julia_cache_collects_garbage_before_its_tests(self) -> None:
+    def _check_gc_placement(self, workflow: str) -> None:
+        """Raise AssertionError unless restore-only jobs never collect garbage and the
+        jobs that save a Julia cache do it once, right before their tests.
+
+        No subTest here: subTest records a failure instead of raising it, so a caller
+        that expects the failure (assertRaises) would not see it. The first failure
+        raises and names its job.
+        """
         saving = []
-        for job in _job_names(self.workflow):
-            block = _job_block(self.workflow, job)
+        for job in _job_names(workflow):
+            block = _job_block(workflow, job)
             if "uses: julia-actions/cache@" not in block:
                 continue
             steps = _section(block, "steps")
-            with self.subTest(job=job):
-                if "    cache-mode: read\n" in block:
-                    self._assert_no_gc_calls(block)
-                else:
-                    saving.append(job)
-                    # Exactly one call. The count is of the word gc in non-comment
-                    # lines, so aliased, keyword and repeated calls count, and so does
-                    # GC.gc(); comment lines may mention it. A text search cannot see
-                    # a name built at run time.
-                    calls = _gc_calls(steps)
-                    self.assertEqual(len(calls), 1, calls)
-                    self.assertIn(GC_STEP + GC_FOLLOWED_BY[job], steps)
+            if "    cache-mode: read\n" in block:
+                self.assertEqual(_gc_calls(block), [], f"job {job}: restore-only")
+            else:
+                saving.append(job)
+                # Exactly one call. The count is of the word gc in non-comment
+                # lines, so aliased, keyword and repeated calls count, and so does
+                # GC.gc(); comment lines may mention it. A text search cannot see
+                # a name built at run time.
+                calls = _gc_calls(steps)
+                self.assertEqual(len(calls), 1, f"job {job}: {calls}")
+                self.assertIn(GC_STEP + GC_FOLLOWED_BY[job], steps, f"job {job}")
         self.assertEqual(sorted(saving), sorted(GC_FOLLOWED_BY))
+
+    def test_every_job_that_saves_a_julia_cache_collects_garbage_before_its_tests(self) -> None:
+        self._check_gc_placement(self.workflow)
+
+    def test_placement_check_fails_for_an_aliased_call_in_the_restore_only_job(self) -> None:
+        # The check must see a call that the old assertNotIn("Pkg.gc()") missed.
+        runtest = "      - uses: julia-actions/julia-runtest@v1\n"
+        aliased = ("      - name: Collect garbage under an alias\n"
+                   "        run: julia --startup-file=no -e 'import Pkg as P; P.gc()'\n")
+        fast = _job_block(self.workflow, "fast")
+        self.assertEqual(fast.count(runtest), 1)
+        broken = self.workflow.replace(fast, fast.replace(runtest, aliased + runtest, 1), 1)
+        self.assertNotEqual(broken, self.workflow)
+        with self.assertRaises(AssertionError):
+            self._check_gc_placement(broken)
 
     def test_only_fast_and_its_producer_share_a_cache_name(self) -> None:
         named = {job: re.findall(r"cache-name: (.+)\n", _job_block(self.workflow, job))
