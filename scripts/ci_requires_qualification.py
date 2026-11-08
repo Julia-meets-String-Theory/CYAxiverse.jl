@@ -42,7 +42,10 @@ QUALIFICATION_PATHS = frozenset({
 })
 
 # Versioned root manifest names: Julia 1.12 lists Manifest-v<major>.<minor>.toml and
-# JuliaManifest-v<major>.<minor>.toml in Base.manifest_names (CYAX-0222 R-009). Digits
+# JuliaManifest-v<major>.<minor>.toml in Base.manifest_names (CYAX-0222 R-009). Julia
+# lists only the running version's versioned names (1.12.x reads the v1.12 ones), but
+# this pattern matches every version: a deliberate choice, because the Julia version
+# of the qualification job can change (CYAX-0222 R-009). Digits
 # only, and fullmatch on a root path (it contains no "/"), so nested files, a
 # missing minor version, and suffixes such as ".orig" do not match.
 VERSIONED_MANIFEST = re.compile(r"(?:Julia)?Manifest-v\d+\.\d+\.toml")
