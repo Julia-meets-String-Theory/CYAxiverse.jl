@@ -40,10 +40,9 @@ def _glob_matches(pattern: str, path: str) -> bool:
     Basis: the "Filter pattern cheat sheet" in GitHub's workflow syntax reference
     (docs.github.com, "Workflow syntax for GitHub Actions"). There "*" matches zero or
     more characters but not "/", and "**" matches zero or more of any character,
-    including "/". The cheat sheet defines "?" as zero or one of the preceding
-    character; no entry in CI.yml uses it, and this matcher takes it as one character
-    other than "/". It rejects "[" and "+", which it does not model, so a filter that
-    starts to use them fails loudly instead of being mis-matched.
+    including "/". It rejects "?", "[" and "+", which it does not model (the cheat
+    sheet defines "?" and "+" by the preceding character, not as wildcards), so a
+    filter that starts to use them fails loudly instead of being mis-matched.
     """
     expression = []
     index = 0
@@ -53,9 +52,9 @@ def _glob_matches(pattern: str, path: str) -> bool:
             expression.append(".*")
             index += 2
             continue
-        if character in "[+":
+        if character in "?[+":
             raise ValueError(f"filter pattern {pattern!r}: {character!r} is not modelled")
-        expression.append({"*": "[^/]*", "?": "[^/]"}.get(character, re.escape(character)))
+        expression.append({"*": "[^/]*"}.get(character, re.escape(character)))
         index += 1
     return re.fullmatch("".join(expression), path) is not None
 
@@ -99,15 +98,12 @@ class GlobMatcher(unittest.TestCase):
             ("Manifest-v*.toml", "Manifest-v1/2.toml", False),
             ("*.toml", "a.toml", True),
             ("*.toml", "dir/a.toml", False),
-            ("a?c", "abc", True),
-            ("a?c", "a/c", False),
-            ("a?c", "ac", False),
         ):
             with self.subTest(pattern=pattern, path=path):
                 self.assertEqual(_glob_matches(pattern, path), expected)
 
     def test_unmodelled_syntax_is_rejected(self) -> None:
-        for pattern in ("[ab].toml", "a+.toml"):
+        for pattern in ("[ab].toml", "a+.toml", "a?.toml"):
             with self.subTest(pattern=pattern):
                 with self.assertRaises(ValueError):
                     _glob_matches(pattern, "a.toml")
