@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Iterable
@@ -22,10 +23,15 @@ QUALIFICATION_PATH_PREFIXES = ("src/", "test/fixtures/scientific_certification/"
 # resolves, so a change to it can make the tree dirty (a nested .gitignore cannot
 # reach that file); the root JuliaLocalPreferences.toml, when present, is read by
 # Julia in place of LocalPreferences.toml (Base.preferences_names, CYAX-0222 R-008);
+# the root JuliaProject.toml and JuliaManifest.toml are read in place of Project.toml
+# and Manifest.toml when present (Base.project_names, Base.manifest_names in Julia
+# 1.12, CYAX-0222 R-009); the versioned root manifest names are matched below;
 # the gate script and CI.yml decide whether the job runs.
 QUALIFICATION_PATHS = frozenset({
     "Project.toml",
     "Manifest.toml",
+    "JuliaProject.toml",
+    "JuliaManifest.toml",
     "LocalPreferences.toml",
     "JuliaLocalPreferences.toml",
     ".gitignore",
@@ -35,10 +41,18 @@ QUALIFICATION_PATHS = frozenset({
     ".github/workflows/CI.yml",
 })
 
+# Versioned root manifest names: Julia 1.12 lists Manifest-v<major>.<minor>.toml and
+# JuliaManifest-v<major>.<minor>.toml in Base.manifest_names (CYAX-0222 R-009). Digits
+# only, and fullmatch on a root path (it contains no "/"), so nested files, a
+# missing minor version, and suffixes such as ".orig" do not match.
+VERSIONED_MANIFEST = re.compile(r"(?:Julia)?Manifest-v\d+\.\d+\.toml")
+
 
 def requires_qualification(paths: Iterable[str]) -> bool:
     """Return whether any changed repository path needs scientific qualification."""
-    return any(path in QUALIFICATION_PATHS or path.startswith(QUALIFICATION_PATH_PREFIXES)
+    return any(path in QUALIFICATION_PATHS
+               or path.startswith(QUALIFICATION_PATH_PREFIXES)
+               or VERSIONED_MANIFEST.fullmatch(path) is not None
                for path in paths)
 
 

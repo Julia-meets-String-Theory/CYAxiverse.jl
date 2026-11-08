@@ -52,7 +52,8 @@ class ClassifyPaths(unittest.TestCase):
         for path in ("Project.toml", "Manifest.toml", "scripts/verify_scientific_certificate.jl",
                      "test/coverage_support.jl", "scripts/ci_requires_qualification.py",
                      ".github/workflows/CI.yml", "LocalPreferences.toml", ".gitignore",
-                     "JuliaLocalPreferences.toml"):
+                     "JuliaLocalPreferences.toml", "JuliaProject.toml", "JuliaManifest.toml",
+                     "Manifest-v1.12.toml", "JuliaManifest-v1.13.toml"):
             with self.subTest(path=path):
                 self.assertTrue(self.gate.requires_qualification([path]))
 
@@ -62,6 +63,8 @@ class ClassifyPaths(unittest.TestCase):
                      "docs/Project.toml", "notebooks/Manifest.toml", "Project.toml.orig",
                      "notebooks/LocalPreferences.toml", "LocalPreferences.toml.orig",
                      "docs/.gitignore", "docs/JuliaLocalPreferences.toml",
+                     "docs/JuliaProject.toml", "docs/Manifest-v1.12.toml",
+                     "Manifest-v1.toml", "Manifest-vX.Y.toml", "Manifest-v1.12.toml.orig",
                      ".github/workflows/Documentation.yml"):
             with self.subTest(path=path):
                 self.assertFalse(self.gate.requires_qualification([path]))
@@ -141,6 +144,12 @@ class GitDiffFixture(unittest.TestCase):
 
     def test_julia_local_preferences_change_sets_output_true(self) -> None:
         head = self._commit("JuliaLocalPreferences.toml")
+        result, output = self._run(head)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, "qualification=true\n")
+
+    def test_versioned_manifest_change_sets_output_true(self) -> None:
+        head = self._commit("Manifest-v1.12.toml")
         result, output = self._run(head)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(output, "qualification=true\n")
@@ -231,6 +240,17 @@ class WorkflowWiring(unittest.TestCase):
         trigger = self.workflow[self.workflow.index("  pull_request:\n"):
                                 self.workflow.index("  workflow_dispatch:")]
         self.assertIn("      - 'JuliaLocalPreferences.toml'\n", trigger)
+
+    def test_alternative_project_and_manifest_names_trigger_pull_request_ci(self) -> None:
+        # Julia 1.12 reads these root files in place of Project.toml and
+        # Manifest.toml when present (Base.project_names, Base.manifest_names). In
+        # GitHub's filter * does not match /, so these entries are root only.
+        trigger = self.workflow[self.workflow.index("  pull_request:\n"):
+                                self.workflow.index("  workflow_dispatch:")]
+        for entry in ("JuliaProject.toml", "JuliaManifest.toml", "Manifest-v*.toml",
+                      "JuliaManifest-v*.toml"):
+            with self.subTest(entry=entry):
+                self.assertIn(f"      - '{entry}'\n", trigger)
 
     def test_root_gitignore_triggers_pull_request_ci(self) -> None:
         # The qualification job requires a clean tree, and the root .gitignore
