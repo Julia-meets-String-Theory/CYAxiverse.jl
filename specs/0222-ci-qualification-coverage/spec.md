@@ -21,7 +21,7 @@ version_impact: none (CI only)
 A pull request that changes only `LocalPreferences.toml`, the root
 `.gitignore`, or a root file that Julia reads in place of the project, manifest
 or preferences file runs CI and scientific qualification before merge. The gate
-also sees the old path of a renamed file. The `CI.yml` comment describes when
+also sees the old path of a renamed file and paths that Git would quote. The `CI.yml` comment describes when
 qualification runs correctly, and the three accepted follow-ups from CYAX-0223
 are closed.
 
@@ -31,8 +31,10 @@ Facts at `vmm` `34187c5`, recorded on #222 (comment 6700735948). That comment
 corrects the Issue body, and this specification follows the comment.
 
 - `paths` sits only under `pull_request` in `CI.yml`. Pushes and manual runs
-  have no filter and always run qualification. A PR to a base other than `vmm`
-  runs it whenever the workflow runs, which needs a change matching the filter.
+  have no filter, so every such run that starts its jobs runs qualification; a
+  pending run that the concurrency group replaces starts none. A PR to a base
+  other than `vmm` runs it whenever the workflow runs, which needs a change
+  matching the filter.
 - Julia applies a package's section of `LocalPreferences.toml` only if the
   project lists that package. The root `Project.toml` does not list
   `MPIPreferences`, so the tracked `[MPIPreferences]` section has no effect in
@@ -52,14 +54,27 @@ corrects the Issue body, and this specification follows the comment.
     prints only the new path. In a Git fixture, moving `.gitignore`,
     `LocalPreferences.toml` or a file under `src/` to a path that is not an
     input gave `qualification=false`; with `--no-renames` it gave `true`.
-  - Julia 1.12.6 reads the first name present in each of these lists
+  - Julia 1.12.6 lists these names in order of precedence
     (`Base.project_names`, `Base.manifest_names`, `Base.preferences_names`):
     `JuliaProject.toml`, `Project.toml`; `JuliaManifest-v1.12.toml`,
     `Manifest-v1.12.toml`, `JuliaManifest.toml`, `Manifest.toml`;
-    `JuliaLocalPreferences.toml`, `LocalPreferences.toml`. A root
-    `JuliaLocalPreferences.toml` replaced `LocalPreferences.toml` completely
-    (measured by the reviewer). None of these alternative names is tracked, and
-    none is in the filter or the gate.
+    `JuliaLocalPreferences.toml`, `LocalPreferences.toml`. The versioned
+    manifest names are those of the running Julia version only. A `manifest`
+    key in the project file, or a workspace manifest, takes precedence over the
+    manifest list. A root `JuliaLocalPreferences.toml` replaced
+    `LocalPreferences.toml` completely (measured by the reviewer). None of
+    these alternative names is tracked, and none is in the filter or the gate.
+- Added after the review of `f8dab70` (facts at that commit):
+  - Git quotes a path that contains a non-ASCII byte, a tab, a newline or a
+    double quote in `--name-only` output (`core.quotePath`). Committing
+    `src/café.jl` gave `qualification=false`, while GitHub's `src/**` filter
+    would start the workflow. No tracked path is quoted today.
+  - The filter tests checked only that each entry is present. A wider entry
+    such as `'**/.gitignore'`, or a later negation such as `'!.gitignore'`,
+    left them passing.
+  - The restore-only branch of the placement test checked only the current
+    workflow, whose read-only job has no garbage collection call. Reverting
+    that branch to the old assertion left every test passing.
 
 ## Scope
 
@@ -71,7 +86,10 @@ corrects the Issue body, and this specification follows the comment.
 ## Non-scope
 
 How GitHub's `paths` filter treats a renamed file (not documented; see
-*Accepted limitations*); preferences files outside the root; removing
+*Accepted limitations*); `deps/build.jl`, which `julia-buildpkg` runs (no
+`deps/` directory exists today); a manifest named by a `manifest` key in
+`Project.toml`; `ext/**`, which is in the filter but not the gate (these three
+go to a follow-up Issue); preferences files outside the root; removing
 `LocalPreferences.toml` or listing `MPIPreferences` in `Project.toml`;
 the `Manifest.toml` entries in the filter and the gate, although the root file
 is untracked; nested `.gitignore` files; the accepted policy that a PR to `vmm`
@@ -90,9 +108,10 @@ The gate's comment SHALL give the reason in the baseline above, not the
 ### R-002 — The `CI.yml` comment states when qualification runs
 
 The comment above the `qualification` job SHALL say that pushes and manual runs
-always run qualification, and that a PR to a base other than `vmm` runs it only
-when the workflow runs, which depends on the `pull_request` `paths` filter. The
-job condition SHALL NOT change.
+have no `paths` filter, so every such run that starts its jobs runs
+qualification, and that a PR to a base other than `vmm` runs it whenever the
+workflow runs, which depends on the `pull_request` `paths` filter. The comment
+SHALL NOT use the word "always". The job condition SHALL NOT change.
 
 ### R-003 — The root `.gitignore` is a qualification input
 
@@ -123,7 +142,9 @@ search cannot see a name built at run time.
 ### R-006 — The restore-only branch uses the same count
 
 The restore-only branch of the same test SHALL assert that this count is zero,
-in place of `assertNotIn("Pkg.gc()", block)`.
+in place of `assertNotIn("Pkg.gc()", block)`. A test SHALL apply the
+placement check to a copy of the workflow whose restore-only job contains an
+aliased call, and SHALL require it to fail.
 
 ### R-007 — The gate sees both paths of a renamed file
 
@@ -145,6 +166,21 @@ The `pull_request` `paths` filter and the gate SHALL include the root
 `Manifest-v<major>.<minor>.toml` or `JuliaManifest-v<major>.<minor>.toml`,
 because when present Julia reads them in place of `Project.toml` or
 `Manifest.toml`. The same names below the root SHALL NOT require qualification.
+The gate and the filter match every version, not only that of the Julia the job
+runs today, because that version can change; the gate comment SHALL say this is
+a choice.
+
+### R-010 — The gate compares paths as Git stores them
+
+`changed_paths` SHALL read the paths NUL-separated (`git diff -z`), so a path
+that Git would quote is compared unquoted. A change to `src/café.jl` SHALL give
+`qualification=true`.
+
+### R-011 — The filter tests reject wider and negating entries
+
+For each root input that R-001, R-003, R-008 and R-009 add, the filter tests
+SHALL fail if the `pull_request` `paths` list also holds a `**/` form of that
+entry or a `!` entry that matches it.
 
 ## Which PRs run what
 
@@ -159,6 +195,7 @@ Changes touching only the named file.
 | Nested `.gitignore` only | PR | no / no | no / no |
 | A root alternative name from R-008 or R-009 | PR to `vmm` | no / yes | no / yes |
 | Rename of an input to a path that is not an input | PR to `vmm` | not known / not known | no / yes, when the workflow runs |
+| A path under `src/` that Git quotes, such as `src/café.jl` | PR to `vmm` | yes / yes | no / yes |
 
 ## Accepted limitations
 
@@ -168,8 +205,9 @@ Changes touching only the named file.
   commits on `vmm` that changed `.gitignore` touched no path in the current
   filter, an upper limit of about seven extra runs a year at that rate. The
   owner accepted this cost (see *Review history and owner decisions*).
-- The `paths` filter is applied by GitHub, so tests can check only that the
-  entries are present. CYAX-0222 G2 records the real behaviour.
+- The `paths` filter is applied by GitHub. Tests check the entries in the
+  file (R-011), not GitHub's matching; CYAX-0222 G2 records the real
+  behaviour.
 - R-005 is a text check: a name built at run time is not counted.
 - GitHub does not document whether its `paths` filter matches the old path of
   a renamed file. A PR whose only change renames an input to a path outside the
@@ -188,11 +226,15 @@ commit SHA.
 - One commit per item, each with its test written first. Each test is shown to
   fail on the unfixed code, and to fail again when the fix is broken.
 - `scripts/test_ci_requires_qualification.py` covers R-001 to R-003 and R-007
-  to R-009: each file in the gate and the filter, through a real Git commit
-  range in its fixture, nested paths excluded, and renames made with `git mv`
-  in both directions.
-- No test name or comment says that qualification "always" runs for a case
-  where it depends on the workflow running.
+  to R-011: each file in the gate and the filter, through a real Git commit
+  range in its fixture, nested paths excluded, renames made with `git mv` in
+  both directions, a non-ASCII path under `src/`, and wider or negating filter
+  entries rejected.
+- No test name or comment, and not the `CI.yml` comment, says that
+  qualification "always" runs. The R-002 test checks the sentence about other
+  bases and the absence of "always" in the job comment.
+- The Git fixture runs Git without the user's and system configuration, so a
+  local setting such as `diff.renames=false` cannot change the result.
 - `scripts/test_ci_cache_workflow.py` covers R-005 and R-006 with each spelling
   above and with a comment line that must not count. The workflow's current
   steps still pass unchanged.
@@ -224,10 +266,18 @@ CI only. No package, API, schema, environment, scientific or version change.
   reads, found while drafting this amendment. Made durable by the approval
   comment for this revision.
 
+- Second amendment (2026-11-08) after the independent review of `f8dab70`,
+  which approved with non-blocking findings. The owner chose to fix them in this
+  PR: R-002 no longer prescribes "always"; R-006 gains a test against a broken
+  workflow; R-009 states that matching every version is a choice; R-010 (quoted
+  paths) and R-011 (wider and negating filter entries) are added; the Julia
+  file-name facts are stated exactly. `deps/build.jl`, a `manifest` key in
+  `Project.toml`, and `ext/**` (in the filter, not in the gate) go to a
+  follow-up Issue. Made durable by the approval comment for this revision.
+
 ## Open owner decisions
 
-None. The owner approved the amendment, including R-009, in PR #227 comment
-6728054027.
+- Approve the second amendment in a comment that names its commit.
 
 ## Completion criterion
 
