@@ -23,6 +23,16 @@ def _load_gate():
     return module
 
 
+def _git_environment() -> dict[str, str]:
+    """Return the environment for Git and the gate in a fixture, without user or system config.
+
+    GIT_CONFIG_GLOBAL and GIT_CONFIG_NOSYSTEM are documented in git-config(1) (Git 2.32
+    and later); without them a local setting such as diff.renames=false could change the
+    result (CYAX-0222 G1).
+    """
+    return dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+
+
 def _job_block(workflow: str, job: str) -> str:
     """Return the text of one job: its key line and the more-indented lines after it."""
     lines = workflow.splitlines(keepends=True)
@@ -85,7 +95,8 @@ class GitDiffFixture(unittest.TestCase):
         self.base = self._git("rev-parse", "HEAD").strip()
 
     def _git(self, *args: str) -> str:
-        result = subprocess.run(["git", *args], cwd=self.root, capture_output=True, text=True)
+        result = subprocess.run(["git", *args], cwd=self.root, capture_output=True, text=True,
+                                env=_git_environment())
         if result.returncode:
             raise AssertionError(result.stderr)
         return result.stdout
@@ -123,7 +134,7 @@ class GitDiffFixture(unittest.TestCase):
     def _run(self, head: str) -> tuple[subprocess.CompletedProcess, str]:
         output = self.root / "github_output"
         output.write_text("")
-        environment = dict(os.environ, GITHUB_OUTPUT=str(output))
+        environment = dict(_git_environment(), GITHUB_OUTPUT=str(output))
         result = subprocess.run(
             [sys.executable, str(GATE), "--base", self.base, "--head", head],
             cwd=self.root, capture_output=True, text=True, env=environment,
