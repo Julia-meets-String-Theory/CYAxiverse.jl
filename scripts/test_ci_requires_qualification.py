@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -33,6 +34,39 @@ def _git_environment() -> dict[str, str]:
     return dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
 
 
+def _glob_matches(pattern: str, path: str) -> bool:
+    """Return whether a GitHub Actions filter pattern matches path.
+
+    Basis: the "Filter pattern cheat sheet" in GitHub's workflow syntax reference
+    (docs.github.com, "Workflow syntax for GitHub Actions"). There "*" matches zero or
+    more characters but not "/", and "**" matches zero or more of any character,
+    including "/". The cheat sheet defines "?" as zero or one of the preceding
+    character; no entry in CI.yml uses it, and this matcher takes it as one character
+    other than "/". It rejects "[" and "+", which it does not model, so a filter that
+    starts to use them fails loudly instead of being mis-matched.
+    """
+    expression = []
+    index = 0
+    while index < len(pattern):
+        character = pattern[index]
+        if pattern.startswith("**", index):
+            expression.append(".*")
+            index += 2
+            continue
+        if character in "[+":
+            raise ValueError(f"filter pattern {pattern!r}: {character!r} is not modelled")
+        expression.append({"*": "[^/]*", "?": "[^/]"}.get(character, re.escape(character)))
+        index += 1
+    return re.fullmatch("".join(expression), path) is not None
+
+
+def _pull_request_paths(workflow: str) -> list[str]:
+    """Return the entries of the pull_request paths list, in order, "!" entries included."""
+    trigger = workflow[workflow.index("  pull_request:\n"):workflow.index("  workflow_dispatch:")]
+    paths = trigger[trigger.index("    paths:\n") + len("    paths:\n"):]
+    return re.findall(r"^      - '([^']+)'$", paths, flags=re.M)
+
+
 def _job_block(workflow: str, job: str) -> str:
     """Return the text of one job: its key line and the more-indented lines after it."""
     lines = workflow.splitlines(keepends=True)
@@ -43,6 +77,46 @@ def _job_block(workflow: str, job: str) -> str:
             break
         block.append(line)
     return "".join(block)
+
+
+class GlobMatcher(unittest.TestCase):
+    """The matcher that the filter tests use is itself tested, with hand-written cases."""
+
+    def test_matches_and_non_matches(self) -> None:
+        # (pattern, path, expected) from the cheat sheet's rules cited in _glob_matches.
+        for pattern, path, expected in (
+            ("src/**", "src/a.jl", True),
+            ("src/**", "src/deep/er/a.jl", True),
+            ("src/**", "docs/src/a.jl", False),
+            ("**/.gitignore", "nested/dir/.gitignore", True),
+            ("**/.gitignore", "nested/dir/gitignore", False),
+            ("**", "any/path/at.all", True),
+            (".gitignore", ".gitignore", True),
+            (".gitignore", "nested/.gitignore", False),
+            (".gitignore", "xgitignore", False),
+            ("Manifest-v*.toml", "Manifest-v1.12.toml", True),
+            ("Manifest-v*.toml", "nested/Manifest-v1.12.toml", False),
+            ("Manifest-v*.toml", "Manifest-v1/2.toml", False),
+            ("*.toml", "a.toml", True),
+            ("*.toml", "dir/a.toml", False),
+            ("a?c", "abc", True),
+            ("a?c", "a/c", False),
+            ("a?c", "ac", False),
+        ):
+            with self.subTest(pattern=pattern, path=path):
+                self.assertEqual(_glob_matches(pattern, path), expected)
+
+    def test_unmodelled_syntax_is_rejected(self) -> None:
+        for pattern in ("[ab].toml", "a+.toml"):
+            with self.subTest(pattern=pattern):
+                with self.assertRaises(ValueError):
+                    _glob_matches(pattern, "a.toml")
+
+    def test_pull_request_paths_reads_the_list_in_order(self) -> None:
+        workflow = ("on:\n  push:\n    branches:\n      - 'x'\n  pull_request:\n"
+                    "    types: [opened]\n    paths:\n      - 'a/**'\n      - '!a/b'\n"
+                    "  workflow_dispatch:\n")
+        self.assertEqual(_pull_request_paths(workflow), ["a/**", "!a/b"])
 
 
 class ClassifyPaths(unittest.TestCase):
@@ -277,6 +351,23 @@ class WorkflowWiring(unittest.TestCase):
         trigger = self.workflow[self.workflow.index("  pull_request:\n"):
                                 self.workflow.index("  workflow_dispatch:")]
         self.assertIn("      - '.gitignore'\n", trigger)
+
+    # R-011: the entry tests above show that each entry is present, not that no other
+    # entry widens it. A "**/" form would also start the workflow for a nested file, and
+    # a "!" entry (GitHub: it negates the positive patterns before it) could remove a
+    # root file; neither may match these root inputs. Order is not modelled: any "!"
+    # entry that matches the name fails the test.
+    def test_filter_has_no_wider_or_negating_entry_for_root_inputs(self) -> None:
+        entries = _pull_request_paths(self.workflow)
+        positive = [entry for entry in entries if not entry.startswith("!")]
+        negating = [entry[1:] for entry in entries if entry.startswith("!")]
+        self.assertTrue(positive)
+        for name in ("LocalPreferences.toml", ".gitignore", "JuliaLocalPreferences.toml",
+                     "JuliaProject.toml", "JuliaManifest.toml", "Manifest-v1.12.toml",
+                     "JuliaManifest-v1.12.toml"):
+            with self.subTest(name=name):
+                self.assertEqual([e for e in positive if _glob_matches(e, f"nested/dir/{name}")], [])
+                self.assertEqual([e for e in negating if _glob_matches(e, name)], [])
 
     def test_job_comment_states_when_qualification_runs(self) -> None:
         # Pushes and manual runs have no paths filter, so every push run and every
