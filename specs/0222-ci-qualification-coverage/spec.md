@@ -10,7 +10,7 @@ depends_on: []
 created: 2026-11-06
 last_reviewed: 2026-11-08
 review_required: repository-owner approval
-approval_ref: "PR #227 comment 6728054027 — approves spec revision 2e69616 (replaces comment 6700824360, which approved 73c9f9b)"
+approval_ref: "PR #227 comment 6728777158 — approves spec revision 969d762 (replaces comment 6728054027, which approved 2e69616)"
 version_impact: none (CI only)
 ---
 
@@ -89,7 +89,7 @@ How GitHub's `paths` filter treats a renamed file (not documented; see
 *Accepted limitations*); `deps/build.jl`, which `julia-buildpkg` runs (no
 `deps/` directory exists today); a manifest named by a `manifest` key in
 `Project.toml`; `ext/**`, which is in the filter but not the gate (these three
-go to a follow-up Issue); preferences files outside the root; removing
+go to #228); preferences files outside the root; removing
 `LocalPreferences.toml` or listing `MPIPreferences` in `Project.toml`;
 the `Manifest.toml` entries in the filter and the gate, although the root file
 is untracked; nested `.gitignore` files; the accepted policy that a PR to `vmm`
@@ -272,12 +272,11 @@ CI only. No package, API, schema, environment, scientific or version change.
   workflow; R-009 states that matching every version is a choice; R-010 (quoted
   paths) and R-011 (wider and negating filter entries) are added; the Julia
   file-name facts are stated exactly. `deps/build.jl`, a `manifest` key in
-  `Project.toml`, and `ext/**` (in the filter, not in the gate) go to a
-  follow-up Issue. Made durable by the approval comment for this revision.
+  `Project.toml`, and `ext/**` (in the filter, not in the gate) go to #228. Made durable by the approval comment for this revision.
 
 ## Open owner decisions
 
-- Approve the second amendment in a comment that names its commit.
+None. The owner approved the second amendment in PR #227 comment 6728777158.
 
 ## Completion criterion
 
