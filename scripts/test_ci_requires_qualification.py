@@ -185,6 +185,12 @@ class GitDiffFixture(unittest.TestCase):
     def test_moving_a_file_onto_local_preferences_sets_output_true(self) -> None:
         self._assert_gate(self._move("README.md", "LocalPreferences.toml"), "true")
 
+    # R-010: Git quotes a path with a non-ASCII byte in plain --name-only output
+    # (core.quotePath), so the gate reads NUL-separated paths. GitHub's src/** filter
+    # matches src/café.jl, so the gate must too.
+    def test_non_ascii_path_under_src_sets_output_true(self) -> None:
+        self._assert_gate(self._commit("src/café.jl"), "true")
+
     def test_unknown_revision_fails(self) -> None:
         result, output = self._run("0" * 40)
         self.assertNotEqual(result.returncode, 0)

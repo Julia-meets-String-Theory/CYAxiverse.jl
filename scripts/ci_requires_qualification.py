@@ -62,8 +62,13 @@ def changed_paths(base: str, head: str) -> list[str]:
     # input (such as the root .gitignore or a file under src/) to a path that is not
     # an input would give qualification=false. Without it a rename lists the old path
     # as deleted and the new path as added (CYAX-0222 R-007).
+    # -z: without it Git quotes a path that holds a non-ASCII byte, a tab, a newline
+    # or a double quote (core.quotePath), and the quoted text would match no
+    # qualification path, so src/café.jl would give qualification=false while
+    # GitHub's src/** filter starts the workflow. With -z the paths are separated
+    # by NUL and are not quoted (CYAX-0222 R-010).
     result = subprocess.run(
-        ["git", "diff", "--no-renames", "--name-only", f"{base}...{head}"],
+        ["git", "diff", "-z", "--no-renames", "--name-only", f"{base}...{head}"],
         check=False,
         capture_output=True,
         text=True,
@@ -71,7 +76,7 @@ def changed_paths(base: str, head: str) -> list[str]:
     if result.returncode != 0:
         sys.stderr.write(result.stderr)
         raise SystemExit(result.returncode)
-    return [line for line in result.stdout.splitlines() if line]
+    return [path for path in result.stdout.split("\0") if path]
 
 
 def main(argv: list[str] | None = None) -> int:
