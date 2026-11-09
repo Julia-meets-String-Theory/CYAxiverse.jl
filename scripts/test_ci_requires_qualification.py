@@ -103,6 +103,27 @@ def _job_block(workflow: str, job: str) -> str:
     return "".join(block)
 
 
+def _job_condition(block: str) -> str:
+    """Return the value of the job-level `if:` key, with its lines folded into one.
+
+    The value is the rest of the `    if:` line and the lines indented by more than
+    four spaces after it (a block scalar such as `>-`); comment lines inside the
+    value are dropped. Comments above the key are not part of it, so a phrase that
+    only the comment holds is not found in the condition.
+    """
+    lines = block.splitlines()
+    start = next(index for index, line in enumerate(lines) if line.startswith("    if:"))
+    value = [lines[start][len("    if:"):]]
+    for line in lines[start + 1:]:
+        if line.strip() and not line.startswith("     "):
+            break
+        if not line.lstrip().startswith("#"):
+            value.append(line)
+    folded = re.sub(r"\s+", " ", " ".join(value)).strip()
+    # Drop a YAML block scalar indicator (">-" folds, "|" keeps lines): not part of the text.
+    return re.sub(r"^[>|][-+]?\s*", "", folded)
+
+
 class GlobMatcher(unittest.TestCase):
     """The matcher that the filter tests use is itself tested, with hand-written cases."""
 
@@ -139,6 +160,14 @@ class GlobMatcher(unittest.TestCase):
         ):
             with self.subTest(pattern=pattern, path=path):
                 self.assertTrue(_glob_matches(pattern, path))
+
+    def test_job_condition_reads_the_if_value_and_not_the_comment(self) -> None:
+        block = ("  job:\n    needs: x\n    # !cancelled() is only in this comment\n"
+                 "    if: >-\n      ${{ always() && (\n        # not this either !cancelled()\n"
+                 "        a == 'b') }}\n    runs-on: y\n")
+        condition = _job_condition(block)
+        self.assertEqual(condition, "${{ always() && ( a == 'b') }}")
+        self.assertNotIn("!cancelled()", condition)
 
     def test_unmodelled_syntax_is_rejected(self) -> None:
         for pattern in ("[ab].toml", "a+.toml", "a?.toml"):
@@ -343,19 +372,22 @@ class WorkflowWiring(unittest.TestCase):
     def test_qualification_runs_on_scientific_changes_without_the_label(self) -> None:
         qualification = _job_block(self.workflow, "qualification")
         self.assertIn("needs: changes", qualification)
-        self.assertIn("needs.changes.outputs.qualification == 'true'", qualification)
+        # The conditions are read from the job's `if:` value, not from the comment
+        # above it, which mentions !cancelled() and the failed gate in words.
+        condition = _job_condition(qualification)
+        self.assertIn("needs.changes.outputs.qualification == 'true'", condition)
         # A failed gate must not silently skip qualification.
-        self.assertIn("needs.changes.result == 'failure'", qualification)
-        self.assertIn("!cancelled()", qualification)
+        self.assertIn("needs.changes.result == 'failure'", condition)
+        self.assertIn("!cancelled()", condition)
         self.assertIn("contains(github.event.pull_request.labels.*.name, 'full-tests')",
-                      qualification)
+                      condition)
 
     def test_pull_requests_to_bases_other_than_vmm_run_qualification_when_the_workflow_runs(self) -> None:
         # The path gate runs only for PRs to vmm; a PR to main, a maintenance line
         # or a stacked branch skips it, so the job runs qualification directly
         # whenever the workflow runs (the pull_request paths filter decides that).
         qualification = _job_block(self.workflow, "qualification")
-        self.assertIn("github.base_ref != 'vmm'", qualification)
+        self.assertIn("github.base_ref != 'vmm'", _job_condition(qualification))
         self.assertNotIn("github.base_ref == 'main'", qualification)
 
     def test_python_test_requirements_trigger_pull_request_ci(self) -> None:
