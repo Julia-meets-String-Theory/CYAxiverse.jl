@@ -40,7 +40,8 @@ def _glob_matches(pattern: str, path: str) -> bool:
     Basis: the "Filter pattern cheat sheet" in GitHub's workflow syntax reference
     (docs.github.com, "Workflow syntax for GitHub Actions"). There "*" matches zero or
     more characters but not "/", and "**" matches zero or more of any character,
-    including "/". It rejects "?", "[" and "+", which it does not model (the cheat
+    including "/"; "**/" before a name also matches that name in the root, as its
+    rows "**/README.md" and "docs/**/*.md" show. It rejects "?", "[" and "+", which it does not model (the cheat
     sheet defines "?" and "+" by the preceding character, not as wildcards), so a
     filter that starts to use them fails loudly instead of being mis-matched.
     """
@@ -48,6 +49,12 @@ def _glob_matches(pattern: str, path: str) -> bool:
     index = 0
     while index < len(pattern):
         character = pattern[index]
+        if pattern.startswith("**/", index):
+            # The cheat sheet's "**/README.md" matches README.md in the root, so "**/"
+            # is zero or more directories, each with its trailing "/".
+            expression.append("(?:.*/)?")
+            index += 3
+            continue
         if pattern.startswith("**", index):
             expression.append(".*")
             index += 2
@@ -101,6 +108,19 @@ class GlobMatcher(unittest.TestCase):
         ):
             with self.subTest(pattern=pattern, path=path):
                 self.assertEqual(_glob_matches(pattern, path), expected)
+
+    def test_double_star_slash_also_matches_when_the_directory_is_absent(self) -> None:
+        # Each row is copied from the "Filter pattern cheat sheet" in GitHub's
+        # workflow syntax reference (docs.github.com, "Workflow syntax for GitHub
+        # Actions"), where "**/X" also matches a file X in the root.
+        for pattern, path in (
+            ("**/README.md", "README.md"),
+            ("docs/**/*.md", "docs/README.md"),
+            ("**/docs/**", "docs/hello.md"),
+            ("**/*-post.md", "my-post.md"),
+        ):
+            with self.subTest(pattern=pattern, path=path):
+                self.assertTrue(_glob_matches(pattern, path))
 
     def test_unmodelled_syntax_is_rejected(self) -> None:
         for pattern in ("[ab].toml", "a+.toml", "a?.toml"):
