@@ -86,11 +86,13 @@ def _glob_matches(pattern: str, path: str) -> bool:
 def _pull_request_paths(workflow: str) -> list[str]:
     """Return the entries of the pull_request paths list, in order, "!" entries included.
 
-    Every non-blank line of the list must be exactly `      - '<entry>'` (CYAX-0222
-    R-011): a double-quoted entry or one with a trailing comment would otherwise be
-    skipped and could hide a "**/" or "!" entry from the filter tests. The list ends
-    at the first non-blank line indented by fewer than six spaces (YAML block
-    sequences under a key at four spaces).
+    Every non-blank line from `paths:` to `workflow_dispatch:` must be exactly
+    `      - '<entry>'` (CYAX-0222 R-011). A double-quoted entry, an entry with a
+    trailing comment, or a comment line would otherwise be skipped, or would end the
+    list early, and could hide a "**/" or "!" entry from the filter tests: YAML allows
+    a comment line at any indentation inside a block sequence, with entries after
+    it. So `paths` must stay the last key under `pull_request`; a later key makes
+    this reader fail rather than guess where the list ends.
     """
     trigger = workflow[workflow.index("  pull_request:\n"):workflow.index("  workflow_dispatch:")]
     paths = trigger[trigger.index("    paths:\n") + len("    paths:\n"):]
@@ -98,8 +100,6 @@ def _pull_request_paths(workflow: str) -> list[str]:
     for line in paths.splitlines():
         if not line.strip():
             continue
-        if not line.startswith("      "):
-            break
         match = re.fullmatch(r"      - '([^']+)'", line)
         if match is None:
             raise ValueError(f"pull_request paths line {line!r} is not exactly: "
@@ -217,7 +217,14 @@ class GlobMatcher(unittest.TestCase):
         for line in ('      - "!LocalPreferences.toml"\n',
                      "      - '!.gitignore'  # x\n",
                      "      - !.gitignore\n",
-                     "      # note\n"):
+                     "      # note\n",
+                     # YAML lets a comment sit at any indentation inside the list, and an
+                     # entry may follow it; a reader that stopped at a less-indented
+                     # comment would miss the "!" entry after it.
+                     "# note\n      - '!.gitignore'\n",
+                     "  # note\n      - '!.gitignore'\n",
+                     "    # note\n      - '!.gitignore'\n",
+                     "#      - 'JuliaProject.toml'\n"):
             with self.subTest(line=line):
                 with self.assertRaises(ValueError):
                     _pull_request_paths(head + line + "  workflow_dispatch:\n")
@@ -435,43 +442,38 @@ class WorkflowWiring(unittest.TestCase):
     def test_python_test_requirements_trigger_pull_request_ci(self) -> None:
         # The lifecycle job installs requirements-test.txt, so a PR changing only
         # that file must still run the workflow.
-        trigger = self.workflow[self.workflow.index("  pull_request:\n"):
-                                self.workflow.index("  workflow_dispatch:")]
-        self.assertIn("      - 'requirements-test.txt'\n", trigger)
+        entries = _pull_request_paths(self.workflow)
+        self.assertIn("requirements-test.txt", entries)
 
     def test_local_preferences_trigger_pull_request_ci(self) -> None:
         # Julia applies LocalPreferences.toml sections for packages the root
         # project lists, so a PR changing only that file must run the workflow.
-        trigger = self.workflow[self.workflow.index("  pull_request:\n"):
-                                self.workflow.index("  workflow_dispatch:")]
-        self.assertIn("      - 'LocalPreferences.toml'\n", trigger)
+        entries = _pull_request_paths(self.workflow)
+        self.assertIn("LocalPreferences.toml", entries)
 
     def test_julia_local_preferences_trigger_pull_request_ci(self) -> None:
         # When present, Julia reads the root JuliaLocalPreferences.toml in place of
         # LocalPreferences.toml (Base.preferences_names), so a PR changing only that
         # file must run the workflow.
-        trigger = self.workflow[self.workflow.index("  pull_request:\n"):
-                                self.workflow.index("  workflow_dispatch:")]
-        self.assertIn("      - 'JuliaLocalPreferences.toml'\n", trigger)
+        entries = _pull_request_paths(self.workflow)
+        self.assertIn("JuliaLocalPreferences.toml", entries)
 
     def test_alternative_project_and_manifest_names_trigger_pull_request_ci(self) -> None:
         # Julia 1.12 reads these root files in place of Project.toml and
         # Manifest.toml when present (Base.project_names, Base.manifest_names). In
         # GitHub's filter * does not match /, so these entries are root only.
-        trigger = self.workflow[self.workflow.index("  pull_request:\n"):
-                                self.workflow.index("  workflow_dispatch:")]
+        entries = _pull_request_paths(self.workflow)
         for entry in ("JuliaProject.toml", "JuliaManifest.toml", "Manifest-v*.toml",
                       "JuliaManifest-v*.toml"):
             with self.subTest(entry=entry):
-                self.assertIn(f"      - '{entry}'\n", trigger)
+                self.assertIn(entry, entries)
 
     def test_root_gitignore_triggers_pull_request_ci(self) -> None:
         # The qualification job requires a clean tree, and the root .gitignore
         # hides the root Manifest.toml that CI resolves, so a PR changing only
         # that file must run the workflow.
-        trigger = self.workflow[self.workflow.index("  pull_request:\n"):
-                                self.workflow.index("  workflow_dispatch:")]
-        self.assertIn("      - '.gitignore'\n", trigger)
+        entries = _pull_request_paths(self.workflow)
+        self.assertIn(".gitignore", entries)
 
     # R-011: the entry tests above show that each entry is present, not that no other
     # entry widens it. A "**/" form would also start the workflow for a nested file, and
