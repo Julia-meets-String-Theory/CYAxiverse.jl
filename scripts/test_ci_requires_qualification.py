@@ -374,6 +374,14 @@ class GitDiffFixture(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(output, "qualification=true\n")
 
+    def test_other_alternative_project_and_manifest_names_set_output_true(self) -> None:
+        # R-009 names, through a real commit range like their siblings above. The base
+        # moves to the previous commit each time, so each range holds one file only.
+        for path in ("JuliaProject.toml", "JuliaManifest.toml", "JuliaManifest-v1.13.toml"):
+            with self.subTest(path=path):
+                self.base = self._git("rev-parse", "HEAD").strip()
+                self._assert_gate(self._commit(path), "true")
+
     def test_root_gitignore_change_sets_output_true(self) -> None:
         head = self._commit(".gitignore")
         result, output = self._run(head)
