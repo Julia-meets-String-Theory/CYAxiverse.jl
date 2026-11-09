@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 
@@ -24,14 +25,30 @@ def _load_gate():
     return module
 
 
+# Variables that Git reads for configuration or for the repository to use, so that an
+# inherited value could change a fixture's result. GIT_CONFIG_GLOBAL and
+# GIT_CONFIG_NOSYSTEM are replaced below; the others are removed. Basis: git-config(1)
+# "ENVIRONMENT" (GIT_CONFIG_COUNT, GIT_CONFIG_KEY_<n>, GIT_CONFIG_VALUE_<n>,
+# GIT_CONFIG_PARAMETERS, which Git sets for "git -c") and git(1) "ENVIRONMENT VARIABLES"
+# (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE).
+_GIT_INHERITED_NAMES = ("GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_DIR",
+                        "GIT_WORK_TREE", "GIT_INDEX_FILE")
+_GIT_INHERITED_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
+
+
 def _git_environment() -> dict[str, str]:
     """Return the environment for Git and the gate in a fixture, without user or system config.
 
     GIT_CONFIG_GLOBAL and GIT_CONFIG_NOSYSTEM are documented in git-config(1) (Git 2.32
     and later); without them a local setting such as diff.renames=false could change the
-    result (CYAX-0222 G1).
+    result (CYAX-0222 G1). Configuration passed in the environment (GIT_CONFIG_COUNT and
+    its KEY and VALUE variables, GIT_CONFIG_PARAMETERS) and the variables that pick the
+    repository (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE) are removed for the same reason.
     """
-    return dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    environment = {name: value for name, value in os.environ.items()
+                   if name not in _GIT_INHERITED_NAMES
+                   and not name.startswith(_GIT_INHERITED_PREFIXES)}
+    return dict(environment, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
 
 
 def _glob_matches(pattern: str, path: str) -> bool:
@@ -122,6 +139,23 @@ def _job_condition(block: str) -> str:
     folded = re.sub(r"\s+", " ", " ".join(value)).strip()
     # Drop a YAML block scalar indicator (">-" folds, "|" keeps lines): not part of the text.
     return re.sub(r"^[>|][-+]?\s*", "", folded)
+
+
+class GitEnvironment(unittest.TestCase):
+    def test_inherited_git_configuration_and_repository_variables_are_removed(self) -> None:
+        inherited = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "diff.renames",
+                     "GIT_CONFIG_VALUE_0": "false", "GIT_CONFIG_KEY_7": "a.b",
+                     "GIT_CONFIG_VALUE_7": "c", "GIT_CONFIG_PARAMETERS": "'diff.renames=false'",
+                     "GIT_DIR": "/nonexistent", "GIT_WORK_TREE": "/nonexistent",
+                     "GIT_INDEX_FILE": "/nonexistent", "UNRELATED_VARIABLE": "kept"}
+        with unittest.mock.patch.dict(os.environ, inherited):
+            environment = _git_environment()
+        self.assertEqual(environment["UNRELATED_VARIABLE"], "kept")
+        for name in inherited:
+            if name != "UNRELATED_VARIABLE":
+                self.assertNotIn(name, environment)
+        self.assertEqual(environment["GIT_CONFIG_GLOBAL"], os.devnull)
+        self.assertEqual(environment["GIT_CONFIG_NOSYSTEM"], "1")
 
 
 class GlobMatcher(unittest.TestCase):
