@@ -67,10 +67,28 @@ def _glob_matches(pattern: str, path: str) -> bool:
 
 
 def _pull_request_paths(workflow: str) -> list[str]:
-    """Return the entries of the pull_request paths list, in order, "!" entries included."""
+    """Return the entries of the pull_request paths list, in order, "!" entries included.
+
+    Every non-blank line of the list must be exactly `      - '<entry>'` (CYAX-0222
+    R-011): a double-quoted entry or one with a trailing comment would otherwise be
+    skipped and could hide a "**/" or "!" entry from the filter tests. The list ends
+    at the first non-blank line indented by fewer than six spaces (YAML block
+    sequences under a key at four spaces).
+    """
     trigger = workflow[workflow.index("  pull_request:\n"):workflow.index("  workflow_dispatch:")]
     paths = trigger[trigger.index("    paths:\n") + len("    paths:\n"):]
-    return re.findall(r"^      - '([^']+)'$", paths, flags=re.M)
+    entries = []
+    for line in paths.splitlines():
+        if not line.strip():
+            continue
+        if not line.startswith("      "):
+            break
+        match = re.fullmatch(r"      - '([^']+)'", line)
+        if match is None:
+            raise ValueError(f"pull_request paths line {line!r} is not exactly: "
+                             "      - '<entry>'")
+        entries.append(match.group(1))
+    return entries
 
 
 def _job_block(workflow: str, job: str) -> str:
@@ -127,6 +145,19 @@ class GlobMatcher(unittest.TestCase):
             with self.subTest(pattern=pattern):
                 with self.assertRaises(ValueError):
                     _glob_matches(pattern, "a.toml")
+
+    def test_pull_request_paths_rejects_a_line_it_cannot_read_exactly(self) -> None:
+        # A double-quoted entry and an entry with a trailing comment are valid YAML
+        # but not the form `      - '<entry>'`; skipping them silently could hide a
+        # "!" entry from the R-011 test, so the reader must refuse them.
+        head = "on:\n  pull_request:\n    paths:\n      - 'a/**'\n"
+        for line in ('      - "!LocalPreferences.toml"\n',
+                     "      - '!.gitignore'  # x\n",
+                     "      - !.gitignore\n",
+                     "      # note\n"):
+            with self.subTest(line=line):
+                with self.assertRaises(ValueError):
+                    _pull_request_paths(head + line + "  workflow_dispatch:\n")
 
     def test_pull_request_paths_reads_the_list_in_order(self) -> None:
         workflow = ("on:\n  push:\n    branches:\n      - 'x'\n  pull_request:\n"
