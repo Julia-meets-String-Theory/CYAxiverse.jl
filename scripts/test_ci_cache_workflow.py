@@ -116,9 +116,9 @@ class WorkflowWiring(unittest.TestCase):
         self.assertEqual(_section(fast, "steps").replace(runtest, GC_STEP + runtest, 1),
                          _section(producer, "steps"))
 
-    def _assert_no_gc_calls(self, block: str) -> None:
-        """A job that only restores a cache must not collect garbage."""
-        self.assertEqual(_gc_calls(block), [])
+    def _assert_no_gc_calls(self, block: str, job: str = "") -> None:
+        """A job that only restores a cache must not collect garbage (CYAX-0222 R-006)."""
+        self.assertEqual(_gc_calls(block), [], f"job {job}: restore-only" if job else None)
 
     def test_restore_only_check_sees_every_spelling_but_not_comments(self) -> None:
         # Hand-written blocks; the check must raise for a call and stay quiet otherwise.
@@ -145,7 +145,7 @@ class WorkflowWiring(unittest.TestCase):
                 continue
             steps = _section(block, "steps")
             if "    cache-mode: read\n" in block:
-                self.assertEqual(_gc_calls(block), [], f"job {job}: restore-only")
+                self._assert_no_gc_calls(block, job)
             else:
                 saving.append(job)
                 # Exactly one call. The count is of the word gc in non-comment
@@ -168,6 +168,17 @@ class WorkflowWiring(unittest.TestCase):
         fast = _job_block(self.workflow, "fast")
         self.assertEqual(fast.count(runtest), 1)
         broken = self.workflow.replace(fast, fast.replace(runtest, aliased + runtest, 1), 1)
+        self.assertNotEqual(broken, self.workflow)
+        with self.assertRaises(AssertionError):
+            self._check_gc_placement(broken)
+
+    def test_placement_check_fails_for_a_second_call_in_a_saving_job(self) -> None:
+        # R-005: a saving job collects exactly once. A second step directly after the
+        # first still has the tests right behind a gc step, so only the count can
+        # catch it.
+        producer = _job_block(self.workflow, "fast-cache")
+        self.assertEqual(producer.count(GC_STEP), 1)
+        broken = self.workflow.replace(producer, producer.replace(GC_STEP, GC_STEP + GC_STEP, 1), 1)
         self.assertNotEqual(broken, self.workflow)
         with self.assertRaises(AssertionError):
             self._check_gc_placement(broken)
