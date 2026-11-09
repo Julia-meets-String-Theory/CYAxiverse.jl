@@ -53,6 +53,13 @@ def _job_block(workflow: str, job: str) -> str:
     return "".join(block)
 
 
+def _gc_calls(text: str) -> list[str]:
+    """Return every occurrence of the word gc in the non-comment lines of text."""
+    return [match
+            for line in text.splitlines() if not line.lstrip().startswith("#")
+            for match in re.findall(r"\bgc\b", line)]
+
+
 def _section(block: str, key: str) -> str:
     """Return the lines of a job-level key (e.g. 'steps', 'env') and its body."""
     lines = block.splitlines(keepends=True)
@@ -109,24 +116,72 @@ class WorkflowWiring(unittest.TestCase):
         self.assertEqual(_section(fast, "steps").replace(runtest, GC_STEP + runtest, 1),
                          _section(producer, "steps"))
 
-    def test_every_job_that_saves_a_julia_cache_collects_garbage_before_its_tests(self) -> None:
+    def _assert_no_gc_calls(self, block: str, job: str = "") -> None:
+        """A job that only restores a cache must not collect garbage (CYAX-0222 R-006)."""
+        self.assertEqual(_gc_calls(block), [], f"job {job}: restore-only" if job else None)
+
+    def test_restore_only_check_sees_every_spelling_but_not_comments(self) -> None:
+        # Hand-written blocks; the check must raise for a call and stay quiet otherwise.
+        for call in ("Pkg.gc(collect_delay=Dates.Day(0))", "import Pkg as P; P.gc()",
+                     "Pkg.gc()", "GC.gc()"):
+            with self.subTest(call=call):
+                with self.assertRaises(AssertionError):
+                    self._assert_no_gc_calls(f"    steps:\n      - run: julia -e '{call}'\n")
+        self._assert_no_gc_calls("    steps:\n      # Pkg.gc() runs only in the saving jobs\n"
+                                 "      - run: gcc --version\n")
+
+    def _check_gc_placement(self, workflow: str) -> None:
+        """Raise AssertionError unless restore-only jobs never collect garbage and the
+        jobs that save a Julia cache do it once, right before their tests.
+
+        No subTest here: subTest records a failure instead of raising it, so a caller
+        that expects the failure (assertRaises) would not see it. The first failure
+        raises and names its job.
+        """
         saving = []
-        for job in _job_names(self.workflow):
-            block = _job_block(self.workflow, job)
+        for job in _job_names(workflow):
+            block = _job_block(workflow, job)
             if "uses: julia-actions/cache@" not in block:
                 continue
             steps = _section(block, "steps")
-            with self.subTest(job=job):
-                if "    cache-mode: read\n" in block:
-                    self.assertNotIn("Pkg.gc()", block)
-                else:
-                    saving.append(job)
-                    # Exactly one call in any spelling; comment lines may mention it.
-                    calls = [line for line in steps.splitlines()
-                             if "Pkg.gc(" in line and not line.lstrip().startswith("#")]
-                    self.assertEqual(len(calls), 1, calls)
-                    self.assertIn(GC_STEP + GC_FOLLOWED_BY[job], steps)
+            if "    cache-mode: read\n" in block:
+                self._assert_no_gc_calls(block, job)
+            else:
+                saving.append(job)
+                # Exactly one call. The count is of the word gc in non-comment
+                # lines, so aliased, keyword and repeated calls count, and so does
+                # GC.gc(); comment lines may mention it. A text search cannot see
+                # a name built at run time.
+                calls = _gc_calls(steps)
+                self.assertEqual(len(calls), 1, f"job {job}: {calls}")
+                self.assertIn(GC_STEP + GC_FOLLOWED_BY[job], steps, f"job {job}")
         self.assertEqual(sorted(saving), sorted(GC_FOLLOWED_BY))
+
+    def test_every_job_that_saves_a_julia_cache_collects_garbage_before_its_tests(self) -> None:
+        self._check_gc_placement(self.workflow)
+
+    def test_placement_check_fails_for_an_aliased_call_in_the_restore_only_job(self) -> None:
+        # The check must see a call that the old assertNotIn("Pkg.gc()") missed.
+        runtest = "      - uses: julia-actions/julia-runtest@v1\n"
+        aliased = ("      - name: Collect garbage under an alias\n"
+                   "        run: julia --startup-file=no -e 'import Pkg as P; P.gc()'\n")
+        fast = _job_block(self.workflow, "fast")
+        self.assertEqual(fast.count(runtest), 1)
+        broken = self.workflow.replace(fast, fast.replace(runtest, aliased + runtest, 1), 1)
+        self.assertNotEqual(broken, self.workflow)
+        with self.assertRaises(AssertionError):
+            self._check_gc_placement(broken)
+
+    def test_placement_check_fails_for_a_second_call_in_a_saving_job(self) -> None:
+        # R-005: a saving job collects exactly once. A second step directly after the
+        # first still has the tests right behind a gc step, so only the count can
+        # catch it.
+        producer = _job_block(self.workflow, "fast-cache")
+        self.assertEqual(producer.count(GC_STEP), 1)
+        broken = self.workflow.replace(producer, producer.replace(GC_STEP, GC_STEP + GC_STEP, 1), 1)
+        self.assertNotEqual(broken, self.workflow)
+        with self.assertRaises(AssertionError):
+            self._check_gc_placement(broken)
 
     def test_only_fast_and_its_producer_share_a_cache_name(self) -> None:
         named = {job: re.findall(r"cache-name: (.+)\n", _job_block(self.workflow, job))
@@ -185,6 +240,25 @@ class WorkflowWiring(unittest.TestCase):
             "!(github.event_name == 'push' && github.ref == 'refs/heads/vmm')) || "
             "github.base_ref == 'main' || "
             "contains(github.event.pull_request.labels.*.name, 'full-tests')\n", full)
+
+
+class GarbageCollectionCount(unittest.TestCase):
+    """The placement test counts the word gc in non-comment lines (CYAX-0222 R-005)."""
+
+    def test_counts_each_spelling_it_can_see_and_ignores_comments(self) -> None:
+        # Counts derived by hand from each text, not from the helper.
+        for text, expected in (
+            ("import Pkg as P; P.gc()", 1),
+            ("Pkg.gc(collect_delay=Dates.Day(0))", 1),
+            ("Pkg.gc(); Pkg.gc()", 2),
+            ("GC.gc()", 1),
+            ("# Pkg.gc()", 0),
+            ("        # Pkg.gc()", 0),
+            ("gcc --version", 0),
+            ("Collect unused depot entries", 0),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(len(_gc_calls(text)), expected)
 
 
 def _cache(cache_id: int, ref: str, job: str, created: str, run: int | None = None,

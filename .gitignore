@@ -5,7 +5,7 @@ src/clipboard.jl
 jlm_python/multi_solver_phase_fraction.py
 jlm_python/one_dim_phase_fraction.py
 .DS_Store
-/scripts/__pycache__/
+__pycache__/
 
 # Local AI tooling and personal agent state. The five tracked CYAxiverse skills
 # and their Claude/Codex symlinks are explicit exceptions below.
