@@ -489,7 +489,11 @@ class WorkflowWiring(unittest.TestCase):
                      "JuliaProject.toml", "JuliaManifest.toml", "Manifest-v1.12.toml",
                      "JuliaManifest-v1.12.toml"):
             with self.subTest(name=name):
-                self.assertEqual([e for e in positive if _glob_matches(e, f"nested/dir/{name}")], [])
+                # One and two levels down: "*/<name>" matches only the first, "**/<name>"
+                # both (GitHub cheat sheet: "*" does not match "/", "**" does).
+                for nested in (f"nested/{name}", f"nested/dir/{name}"):
+                    self.assertEqual([e for e in positive if _glob_matches(e, nested)], [],
+                                     nested)
                 self.assertEqual([e for e in negating if _glob_matches(e, name)], [])
 
     def test_job_comment_states_when_qualification_runs(self) -> None:
