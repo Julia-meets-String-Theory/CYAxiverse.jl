@@ -45,10 +45,12 @@ QUALIFICATION_PATHS = frozenset({
 # JuliaManifest-v<major>.<minor>.toml in Base.manifest_names (CYAX-0222 R-009). Julia
 # lists only the running version's versioned names (1.12.x reads the v1.12 ones), but
 # this pattern matches every version: a deliberate choice, because the Julia version
-# of the qualification job can change (CYAX-0222 R-009). Digits
-# only, and fullmatch on a root path (it contains no "/"), so nested files, a
-# missing minor version, and suffixes such as ".orig" do not match.
-VERSIONED_MANIFEST = re.compile(r"(?:Julia)?Manifest-v\d+\.\d+\.toml")
+# of the qualification job can change (CYAX-0222 R-009). ASCII digits only: re.ASCII
+# limits \d to [0-9], where a Python 3 str pattern would also match other Unicode
+# decimal digits such as Arabic-Indic ones (re module, "re.ASCII"). Used with fullmatch
+# on a root path (it contains no "/"), so nested files, a missing minor version, and
+# suffixes such as ".orig" do not match.
+VERSIONED_MANIFEST = re.compile(r"(?:Julia)?Manifest-v\d+\.\d+\.toml", re.ASCII)
 
 
 def requires_qualification(paths: Iterable[str]) -> bool:
@@ -65,11 +67,13 @@ def changed_paths(base: str, head: str) -> list[str]:
     # input (such as the root .gitignore or a file under src/) to a path that is not
     # an input would give qualification=false. Without it a rename lists the old path
     # as deleted and the new path as added (CYAX-0222 R-007).
-    # -z: without it Git quotes a path that holds a non-ASCII byte, a tab, a newline
-    # or a double quote (core.quotePath), and the quoted text would match no
-    # qualification path, so src/café.jl would give qualification=false while
-    # GitHub's src/** filter starts the workflow. With -z the paths are separated
-    # by NUL and are not quoted (CYAX-0222 R-010).
+    # -z: without it Git quotes a path that holds a byte of 0x80 or above when
+    # core.quotePath is true (the default), and always quotes a double quote, a
+    # backslash and control characters such as tab and newline (git-config,
+    # core.quotePath). The quoted text would match no qualification path, so
+    # src/café.jl would give qualification=false while GitHub's src/** filter starts
+    # the workflow. With -z the paths are separated by NUL and none is quoted
+    # (CYAX-0222 R-010).
     result = subprocess.run(
         ["git", "diff", "-z", "--no-renames", "--name-only", f"{base}...{head}"],
         check=False,

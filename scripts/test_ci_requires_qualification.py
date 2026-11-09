@@ -251,6 +251,14 @@ class ClassifyPaths(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(self.gate.requires_qualification([path]))
 
+    def test_versioned_manifest_names_use_ascii_digits_only(self) -> None:
+        # Julia's names are Manifest-v<major>.<minor>.toml with the digits of the
+        # version, which are ASCII; U+0661 and U+0662 are Arabic-Indic digits one and
+        # two (Unicode category Nd), which a bare \d matches in Python 3 str patterns.
+        for name in ("Manifest-v\u0661.\u0661\u0662.toml", "JuliaManifest-v1.\u0662.toml"):
+            with self.subTest(name=name):
+                self.assertFalse(self.gate.requires_qualification([name]))
+
     def test_other_paths_do_not(self) -> None:
         for path in ("docs/src/api.md", "test/runtests.jl", "scripts/local_only.py",
                      "test/fixtures/other/data.h5", "srcs/x.jl", "test/fixtures/scientific",
