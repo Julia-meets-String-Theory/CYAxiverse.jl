@@ -777,3 +777,68 @@ verification row.
 
 Superseded by: N/A
 Promotion status: not promoted
+
+## L-0019 — Review every file in delegated commits before pushing
+
+ID: L-0019
+Status: candidate
+Date: 2026-11-09
+Type: privacy
+Scope / tags: delegation, commit review, build output, publication boundary
+
+Observed failure: A pushed commit included Python bytecode files from a
+`__pycache__` folder that `.gitignore` did not cover. Bytecode can embed
+absolute source paths. The files were found after the push, before merge.
+
+Correction: The branch history was rewritten to remove the files. The root
+`.gitignore` now ignores every `__pycache__/` folder, not one directory only.
+
+Root cause: Only one bytecode folder was ignored, and the pushed range was not
+checked against the files that the task named.
+
+Preventive rule / check: Before pushing commits made by another agent, read the
+unfiltered `git diff --stat` for the whole range and `git show --stat` for each
+commit, and reject any file that the task did not name, especially binary or
+generated files. Tell delegated agents to stage named paths only.
+
+Applicability / exceptions: Applies to every push of commits that the pushing
+agent did not write itself. L-0006 covers paths in text that agents write; this
+lesson covers files committed by accident. Removing a pushed file from the
+branch does not remove the old commits from the hosting service.
+
+Evidence / durable reference: PR #227 (the history rewrite is noted in its
+description); commit `ff40cda` (`.gitignore`); `.agents/LESSONS.md` L-0006.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0020 — Test failure messages must not print the environment
+
+ID: L-0020
+Status: candidate
+Date: 2026-11-09
+Type: privacy
+Scope / tags: tests, CI logs, environment variables, secrets
+
+Observed failure: A test checked with `assertNotIn(name, environment)` that a
+fixture removed Git variables. If it failed, the message would print the whole
+environment dictionary, which can include access tokens, into the CI job log.
+The risk was found and fixed before merge.
+
+Correction: The test compares variable names only, and a comment states why.
+
+Root cause: Default assertion messages print the full container or values. The
+test passed the whole environment where a list of names was enough.
+
+Preventive rule / check: When a test reads the process environment or another
+store that can hold secrets, compare only the keys or the specific values that
+the test controls, and check what the assertion prints on failure.
+
+Applicability / exceptions: Applies to tests in any language that run in CI.
+Values that the test itself sets may be compared.
+
+Evidence / durable reference: PR #227; commit `861d9dc`
+(`scripts/test_ci_requires_qualification.py`).
+
+Superseded by: N/A
+Promotion status: not promoted
