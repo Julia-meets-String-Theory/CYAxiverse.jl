@@ -28,11 +28,15 @@ def _load_gate():
 # Variables that Git reads for configuration or for the repository to use, so that an
 # inherited value could change a fixture's result. GIT_CONFIG_GLOBAL and
 # GIT_CONFIG_NOSYSTEM are replaced below; the others are removed. Basis: git-config(1)
-# "ENVIRONMENT" (GIT_CONFIG_COUNT, GIT_CONFIG_KEY_<n>, GIT_CONFIG_VALUE_<n>,
-# GIT_CONFIG_PARAMETERS, which Git sets for "git -c") and git(1) "ENVIRONMENT VARIABLES"
-# (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE).
-_GIT_INHERITED_NAMES = ("GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_DIR",
-                        "GIT_WORK_TREE", "GIT_INDEX_FILE")
+# "ENVIRONMENT" (GIT_CONFIG, GIT_CONFIG_COUNT, GIT_CONFIG_KEY_<n>, GIT_CONFIG_VALUE_<n>)
+# and git(1) "ENVIRONMENT VARIABLES" (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE,
+# GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_NAMESPACE, GIT_COMMON_DIR).
+# GIT_CONFIG_PARAMETERS is not documented; Git sets it for "git -c" and passes it to
+# child processes (observed with Git 2.54).
+_GIT_INHERITED_NAMES = ("GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
+                        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
+                        "GIT_COMMON_DIR")
 _GIT_INHERITED_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
 
 
@@ -41,9 +45,10 @@ def _git_environment() -> dict[str, str]:
 
     GIT_CONFIG_GLOBAL and GIT_CONFIG_NOSYSTEM are documented in git-config(1) (Git 2.32
     and later); without them a local setting such as diff.renames=false could change the
-    result (CYAX-0222 G1). Configuration passed in the environment (GIT_CONFIG_COUNT and
-    its KEY and VALUE variables, GIT_CONFIG_PARAMETERS) and the variables that pick the
-    repository (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE) are removed for the same reason.
+    result (CYAX-0222 G1). Configuration passed in the environment (GIT_CONFIG, and
+    GIT_CONFIG_COUNT with its KEY and VALUE variables, GIT_CONFIG_PARAMETERS) and the
+    variables that pick the repository or its object store are removed for the same
+    reason.
     """
     environment = {name: value for name, value in os.environ.items()
                    if name not in _GIT_INHERITED_NAMES
@@ -147,15 +152,20 @@ class GitEnvironment(unittest.TestCase):
                      "GIT_CONFIG_VALUE_0": "false", "GIT_CONFIG_KEY_7": "a.b",
                      "GIT_CONFIG_VALUE_7": "c", "GIT_CONFIG_PARAMETERS": "'diff.renames=false'",
                      "GIT_DIR": "/nonexistent", "GIT_WORK_TREE": "/nonexistent",
-                     "GIT_INDEX_FILE": "/nonexistent", "UNRELATED_VARIABLE": "kept"}
+                     "GIT_INDEX_FILE": "/nonexistent", "GIT_CONFIG": "/nonexistent",
+                     "GIT_OBJECT_DIRECTORY": "/nonexistent", "GIT_COMMON_DIR": "/nonexistent",
+                     "GIT_ALTERNATE_OBJECT_DIRECTORIES": "/nonexistent",
+                     "GIT_NAMESPACE": "x", "UNRELATED_VARIABLE": "kept"}
         with unittest.mock.patch.dict(os.environ, inherited):
             environment = _git_environment()
-        self.assertEqual(environment["UNRELATED_VARIABLE"], "kept")
-        for name in inherited:
-            if name != "UNRELATED_VARIABLE":
-                self.assertNotIn(name, environment)
-        self.assertEqual(environment["GIT_CONFIG_GLOBAL"], os.devnull)
-        self.assertEqual(environment["GIT_CONFIG_NOSYSTEM"], "1")
+        # Compare names only: a failure message must not print the environment, whose
+        # values can include tokens, into a CI log.
+        self.assertEqual(environment.get("UNRELATED_VARIABLE"), "kept")
+        kept = sorted(name for name in inherited
+                      if name != "UNRELATED_VARIABLE" and name in environment)
+        self.assertEqual(kept, [])
+        self.assertEqual(environment.get("GIT_CONFIG_GLOBAL"), os.devnull)
+        self.assertEqual(environment.get("GIT_CONFIG_NOSYSTEM"), "1")
 
 
 class GlobMatcher(unittest.TestCase):
