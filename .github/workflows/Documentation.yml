@@ -49,6 +49,24 @@ jobs:
         with:
           version: '1.12'
       - uses: julia-actions/cache@v2
+      - name: Report CPU and restored package images
+        # CYAX-0230 R-001: records the runner CPU and the restored package
+        # images this Julia rejects. Diagnostic only: it must not fail the job.
+        # It loads no package; the last line counts depot entries changed while
+        # it ran (expected 0).
+        continue-on-error: true
+        run: |
+          marker="$(mktemp)"
+          status=0
+          julia --startup-file=no scripts/ci_report_package_images.jl || status=$?
+          depot="${JULIA_DEPOT_PATH%%:*}"
+          depot="${depot:-$HOME/.julia}"
+          if [ -d "$depot" ]; then
+            echo "Depot entries changed while this step ran: $(find "$depot" -newer "$marker" | wc -l) (expected 0)"
+          else
+            echo "No depot found: nothing was restored"
+          fi
+          exit "$status"
       - name: Fetch immutable lifecycle authority
         if: github.event_name == 'workflow_dispatch'
         env:

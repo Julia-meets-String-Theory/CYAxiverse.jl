@@ -1,4 +1,7 @@
-"""CI cache lifecycle (CYAX-0223): workflow wiring and cache-maintenance selection."""
+"""CI cache lifecycle (CYAX-0223): workflow wiring and cache-maintenance selection.
+
+Also the CPU and package-image report after every Julia cache step (CYAX-0230 R-003).
+"""
 
 from __future__ import annotations
 
@@ -28,6 +31,18 @@ GC_FOLLOWED_BY = {
     "qualification": "      - name: Watchdog self-test, then fast and public qualification",
     "full": "      - name: Run package tests\n",
 }
+# CYAX-0230 R-001: the step directly after every julia-actions/cache step.
+REPORT_NAME = "Report CPU and restored package images"
+REPORT_SCRIPT = "scripts/ci_report_package_images.jl"
+WORKFLOWS = {
+    "CI": WORKFLOW,
+    "Documentation": ROOT / ".github" / "workflows" / "Documentation.yml",
+}
+# The six jobs that restore a Julia depot cache (CYAX-0230 baseline).
+CACHED_JOBS = [
+    ("CI", "lifecycle"), ("CI", "fast"), ("CI", "fast-cache"), ("CI", "qualification"),
+    ("CI", "full"), ("Documentation", "build"),
+]
 BEGIN = "# BEGIN cache-maintenance"
 END = "# END cache-maintenance"
 
@@ -70,6 +85,17 @@ def _section(block: str, key: str) -> str:
             break
         out.append(line)
     return "".join(out)
+
+
+def _steps(block: str) -> list[str]:
+    """Return the steps of a job, each as its text without trailing blank lines."""
+    steps: list[str] = []
+    for line in _section(block, "steps").splitlines(keepends=True)[1:]:
+        if line.startswith("      - "):
+            steps.append(line)
+        elif steps:
+            steps[-1] += line
+    return [step.rstrip() + "\n" for step in steps]
 
 
 def _maintenance_namespace() -> dict:
@@ -240,6 +266,106 @@ class WorkflowWiring(unittest.TestCase):
             "!(github.event_name == 'push' && github.ref == 'refs/heads/vmm')) || "
             "github.base_ref == 'main' || "
             "contains(github.event.pull_request.labels.*.name, 'full-tests')\n", full)
+
+
+class PackageImageReport(unittest.TestCase):
+    """CYAX-0230 R-003: the R-001 report step in every job that restores a Julia cache."""
+
+    def setUp(self) -> None:
+        self.workflows = {name: path.read_text(encoding="utf-8")
+                          for name, path in WORKFLOWS.items()}
+
+    def _check_report_steps(self, workflows: dict[str, str]) -> None:
+        """Raise AssertionError unless every job with a julia-actions/cache step has
+        the report step directly after it, non-fatal, with one text in all jobs.
+
+        No subTest, so that a caller expecting the failure sees it (see
+        _check_gc_placement).
+        """
+        reports = {}
+        for name, workflow in workflows.items():
+            for job in _job_names(workflow):
+                steps = _steps(_job_block(workflow, job))
+                caches = [i for i, step in enumerate(steps)
+                          if step.startswith("      - uses: julia-actions/cache@")]
+                if not caches:
+                    continue
+                self.assertEqual(len(caches), 1, f"{name} job {job}")
+                after = caches[0] + 1
+                self.assertLess(after, len(steps), f"{name} job {job}: no step after the cache")
+                report = steps[after]
+                self.assertTrue(report.startswith(f"      - name: {REPORT_NAME}\n"),
+                                f"{name} job {job}: step after the cache is {report.splitlines()[0]!r}")
+                # A step key (eight spaces), not text inside the run block.
+                self.assertRegex(report, r"(?m)^        continue-on-error: true$",
+                                 f"{name} job {job}")
+                # R-001: no word gc anywhere in the step, comments included (the
+                # CYAX-0223 placement test counts it in non-comment lines).
+                self.assertNotRegex(report, r"\bgc\b", f"{name} job {job}")
+                reports[(name, job)] = report
+        self.assertEqual(sorted(reports), sorted(CACHED_JOBS))
+        texts = set(reports.values())
+        self.assertEqual(len(texts), 1, f"report step texts differ: {sorted(texts)}")
+
+    def test_every_cached_job_reports_cpu_and_package_images_after_the_cache(self) -> None:
+        self._check_report_steps(self.workflows)
+
+    def test_the_report_runs_a_script_that_exists(self) -> None:
+        fast = _job_block(self.workflows["CI"], "fast")
+        report = next(step for step in _steps(fast) if REPORT_NAME in step)
+        self.assertIn(f"julia --startup-file=no {REPORT_SCRIPT}", report)
+        self.assertTrue((ROOT / REPORT_SCRIPT).is_file())
+
+    def test_report_check_fails_when_a_job_lacks_the_step(self) -> None:
+        build = _steps(_job_block(self.workflows["Documentation"], "build"))
+        report = next((step for step in build if REPORT_NAME in step), None)
+        self.assertIsNotNone(report)
+        broken = dict(self.workflows)
+        broken["Documentation"] = self.workflows["Documentation"].replace(report, "", 1)
+        self.assertNotEqual(broken["Documentation"], self.workflows["Documentation"])
+        with self.assertRaises(AssertionError):
+            self._check_report_steps(broken)
+
+    def test_report_check_fails_when_one_job_has_a_different_text(self) -> None:
+        full = _job_block(self.workflows["CI"], "full")
+        report = next((step for step in _steps(full) if REPORT_NAME in step), None)
+        self.assertIsNotNone(report)
+        changed = report.replace("continue-on-error: true\n",
+                                 "continue-on-error: true\n        timeout-minutes: 5\n", 1)
+        self.assertNotEqual(changed, report)
+        broken = dict(self.workflows)
+        broken["CI"] = self.workflows["CI"].replace(full, full.replace(report, changed, 1), 1)
+        self.assertNotEqual(broken["CI"], self.workflows["CI"])
+        with self.assertRaises(AssertionError):
+            self._check_report_steps(broken)
+
+    def test_report_check_fails_when_continue_on_error_is_only_in_the_script(self) -> None:
+        # The key must be a step key, not text inside the run block.
+        key = "        continue-on-error: true\n        run: |\n"
+        moved = "        run: |\n          continue-on-error: true\n"
+        broken = {name: text.replace(key, moved) for name, text in self.workflows.items()}
+        self.assertNotEqual(broken["CI"], self.workflows["CI"])
+        self.assertNotEqual(broken["Documentation"], self.workflows["Documentation"])
+        with self.assertRaises(AssertionError):
+            self._check_report_steps(broken)
+
+    def test_report_check_fails_when_the_step_mentions_gc_in_a_comment(self) -> None:
+        key = "        continue-on-error: true\n        run: |\n"
+        commented = "        # Pkg.gc() is not run here.\n" + key
+        broken = {name: text.replace(key, commented) for name, text in self.workflows.items()}
+        self.assertNotEqual(broken["CI"], self.workflows["CI"])
+        with self.assertRaises(AssertionError):
+            self._check_report_steps(broken)
+
+    def test_report_check_fails_when_the_step_is_fatal(self) -> None:
+        lifecycle = _job_block(self.workflows["CI"], "lifecycle")
+        report = next((step for step in _steps(lifecycle) if REPORT_NAME in step), None)
+        self.assertIsNotNone(report)
+        fatal = report.replace("        continue-on-error: true\n", "", 1)
+        self.assertNotEqual(fatal, report)
+        broken = {name: text.replace(report, fatal) for name, text in self.workflows.items()}
+        with self.assertRaises(AssertionError):
+            self._check_report_steps(broken)
 
 
 class GarbageCollectionCount(unittest.TestCase):

@@ -53,6 +53,24 @@ jobs:
       - uses: julia-actions/cache@v2
         with:
           delete-old-caches: 'false'
+      - name: Report CPU and restored package images
+        # CYAX-0230 R-001: records the runner CPU and the restored package
+        # images this Julia rejects. Diagnostic only: it must not fail the job.
+        # It loads no package; the last line counts depot entries changed while
+        # it ran (expected 0).
+        continue-on-error: true
+        run: |
+          marker="$(mktemp)"
+          status=0
+          julia --startup-file=no scripts/ci_report_package_images.jl || status=$?
+          depot="${JULIA_DEPOT_PATH%%:*}"
+          depot="${depot:-$HOME/.julia}"
+          if [ -d "$depot" ]; then
+            echo "Depot entries changed while this step ran: $(find "$depot" -newer "$marker" | wc -l) (expected 0)"
+          else
+            echo "No depot found: nothing was restored"
+          fi
+          exit "$status"
       - name: Install documentation routing test dependencies
         run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
       - name: Collect unused depot entries before the tests
@@ -95,6 +113,24 @@ jobs:
         with:
           cache-name: julia-cache;workflow=CI;job=fast
           delete-old-caches: 'false'
+      - name: Report CPU and restored package images
+        # CYAX-0230 R-001: records the runner CPU and the restored package
+        # images this Julia rejects. Diagnostic only: it must not fail the job.
+        # It loads no package; the last line counts depot entries changed while
+        # it ran (expected 0).
+        continue-on-error: true
+        run: |
+          marker="$(mktemp)"
+          status=0
+          julia --startup-file=no scripts/ci_report_package_images.jl || status=$?
+          depot="${JULIA_DEPOT_PATH%%:*}"
+          depot="${depot:-$HOME/.julia}"
+          if [ -d "$depot" ]; then
+            echo "Depot entries changed while this step ran: $(find "$depot" -newer "$marker" | wc -l) (expected 0)"
+          else
+            echo "No depot found: nothing was restored"
+          fi
+          exit "$status"
       - uses: julia-actions/julia-buildpkg@v1
       - name: Instantiate notebook environment
         env:
@@ -130,6 +166,24 @@ jobs:
         with:
           cache-name: julia-cache;workflow=CI;job=fast
           delete-old-caches: 'false'
+      - name: Report CPU and restored package images
+        # CYAX-0230 R-001: records the runner CPU and the restored package
+        # images this Julia rejects. Diagnostic only: it must not fail the job.
+        # It loads no package; the last line counts depot entries changed while
+        # it ran (expected 0).
+        continue-on-error: true
+        run: |
+          marker="$(mktemp)"
+          status=0
+          julia --startup-file=no scripts/ci_report_package_images.jl || status=$?
+          depot="${JULIA_DEPOT_PATH%%:*}"
+          depot="${depot:-$HOME/.julia}"
+          if [ -d "$depot" ]; then
+            echo "Depot entries changed while this step ran: $(find "$depot" -newer "$marker" | wc -l) (expected 0)"
+          else
+            echo "No depot found: nothing was restored"
+          fi
+          exit "$status"
       - uses: julia-actions/julia-buildpkg@v1
       - name: Instantiate notebook environment
         env:
@@ -195,6 +249,24 @@ jobs:
       - uses: julia-actions/cache@v2
         with:
           delete-old-caches: 'false'
+      - name: Report CPU and restored package images
+        # CYAX-0230 R-001: records the runner CPU and the restored package
+        # images this Julia rejects. Diagnostic only: it must not fail the job.
+        # It loads no package; the last line counts depot entries changed while
+        # it ran (expected 0).
+        continue-on-error: true
+        run: |
+          marker="$(mktemp)"
+          status=0
+          julia --startup-file=no scripts/ci_report_package_images.jl || status=$?
+          depot="${JULIA_DEPOT_PATH%%:*}"
+          depot="${depot:-$HOME/.julia}"
+          if [ -d "$depot" ]; then
+            echo "Depot entries changed while this step ran: $(find "$depot" -newer "$marker" | wc -l) (expected 0)"
+          else
+            echo "No depot found: nothing was restored"
+          fi
+          exit "$status"
       - uses: julia-actions/julia-buildpkg@v1
       - name: Collect unused depot entries before the tests
         # julia-actions/cache runs Pkg.gc() only in the post step that
@@ -233,6 +305,24 @@ jobs:
       - uses: julia-actions/cache@v2
         with:
           delete-old-caches: 'false'
+      - name: Report CPU and restored package images
+        # CYAX-0230 R-001: records the runner CPU and the restored package
+        # images this Julia rejects. Diagnostic only: it must not fail the job.
+        # It loads no package; the last line counts depot entries changed while
+        # it ran (expected 0).
+        continue-on-error: true
+        run: |
+          marker="$(mktemp)"
+          status=0
+          julia --startup-file=no scripts/ci_report_package_images.jl || status=$?
+          depot="${JULIA_DEPOT_PATH%%:*}"
+          depot="${depot:-$HOME/.julia}"
+          if [ -d "$depot" ]; then
+            echo "Depot entries changed while this step ran: $(find "$depot" -newer "$marker" | wc -l) (expected 0)"
+          else
+            echo "No depot found: nothing was restored"
+          fi
+          exit "$status"
       - uses: julia-actions/julia-buildpkg@v1
       - name: Instantiate notebook environment
         env:
