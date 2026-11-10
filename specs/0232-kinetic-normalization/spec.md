@@ -18,124 +18,207 @@ approval_ref: N/A while draft
 ## Objective
 
 Make every **physical** axion kinetic path in CYAxiverse use the kinetic matrix
-$K_{\rm kin} = 2\,\partial_T\partial_{\bar T}\mathcal{K} = 2\,$`Kinv`$^{-1}$ in
-$\mathcal{L}_{\rm kin} = -\tfrac12 M_{\rm pl}^2 K_{\rm kin}\,\partial\vartheta\,\partial\vartheta$,
-with period-one $\vartheta$. This is the literal $\mathcal{N}=1$ supergravity
-normalization, $c = 1$.
 
-The named arXiv:2608.14780 **reproduction paths** are excluded. They keep
-$c = \tfrac12$ under the approved P96/A96 contracts and carry their own
-labels (R-008).
+$$K_{\rm kin} = 2\,\partial_T\partial_{\bar T}\mathcal{K} = 2\,\mathtt{Kinv}^{-1}$$
 
-Every persisted output is labelled with its normalization, readers fail closed
-on ambiguous labels, and the convention is documented. The potential, the
+in $\mathcal{L}_{\rm kin} = -\tfrac12 M_{\rm pl}^2 K_{\rm kin}\,\partial\vartheta\,\partial\vartheta$,
+where $\vartheta$ has period one. This is the literal $\mathcal{N}=1$
+supergravity normalization, $c = 1$.
+
+"Physical" includes the spectrum, axion–photon, Fuzzy-axion model-stage and
+generic inflation-scan paths.
+
+The named **reproduction paths** for arXiv:2608.14780 (Issue #148, spec 0148)
+are excluded. They keep their approved contracts: P96 at $c = \tfrac12$, and
+A96 as the author's raw-radian matrix (R-008).
+
+Every persisted output is labelled with its normalization, and readers fail
+closed on ambiguous labels. The convention is documented. The potential, the
 stored `Kinv`, and the vacuum locations and counts do not change.
 
 ## Motivation
 
 Issue #232 shows that the physical kinetic paths in `vmm` use $c = \tfrac12$.
+Three sources define the axion kinetic term completely and consistently with
+period-one axions, and all three display $c = 1$:
 
-- **Sources that define the term completely with period-one axions** all
-  display $c = 1$: arXiv:2412.12012, arXiv:2309.13145, arXiv:2512.00144
-  (Eq. C.18) and arXiv:2608.14780 (Eq. 23). arXiv:2412.12012 also uses
-  $c = 1$ in its published numbers.
-- **arXiv:2103.06812** displays $c = 2$, with period-2π axions. It is a
-  documented exception, not part of the consensus.
+- arXiv:2412.12012 (Eqs. 3.1, 3.11);
+- arXiv:2309.13145 (Eqs. 3.6, 3.7, 3.9);
+- arXiv:2608.14780 (Eqs. 22–23).
 
-Compared with the $c = 1$ sources, `vmm` decay constants are low by √2,
-masses high by √2, quartics high by 4, cubics high by $2^{3/2}$ and
-$g_{a\gamma\gamma}$ high by √2. PR #219 consumes these spectra and waits on
-this specification.
+arXiv:2412.12012 also uses $c = 1$ in its published numbers.
+
+The other sources are not part of the consensus:
+
+- **arXiv:2103.06812** has two possible readings (see the source-facts table).
+- **arXiv:2512.00144** is internally inconsistent.
+- **arXiv:2112.04503 and arXiv:1808.01282** are undetermined.
+
+Compared with the consensus sources, `vmm` currently gives:
+
+| Quantity | Current `vmm` relative to $c = 1$ |
+|---|---|
+| decay constants | low by √2 |
+| masses | high by √2 |
+| quartics | high by 4 |
+| canonical-basis cubics | high by $2^{3/2}$ |
+| $g_{a\gamma\gamma}$ | high by √2 |
+| slow-roll ε and η | high by 2 |
+
+PR #219 consumes these spectra and waits on this specification.
 
 ## Current baseline
 
 ### Source facts
 
-Common measure: $\mathcal{L}_{\rm kin} = -c\,M_{\rm pl}^2 g\,\dot\vartheta\dot\vartheta$,
-where $g = \partial_T\partial_{\bar T}\mathcal{K}$, $\mathcal{K} = -2\log\mathcal{V}$,
-$\vartheta$ has period one and $\tau_i = \tfrac12\kappa_{ijk}t^jt^k$.
+The common measure is
+$\mathcal{L}_{\rm kin} = -c\,M_{\rm pl}^2 g\,\dot\vartheta\dot\vartheta$, with
+$g = \partial_T\partial_{\bar T}\mathcal{K}$, $\mathcal{K} = -2\log\mathcal{V}$,
+$\vartheta$ of period one, and $\tau_i = \tfrac12\kappa_{ijk}t^jt^k$.
 
-| Source | Displayed $c$ | Basis |
+| Source | Displayed normalization | $c$ |
 |---|---|---|
-| arXiv:2412.12012 | 1 | Eqs. 3.1, 3.11 |
-| arXiv:2309.13145 | 1 | Eqs. 3.6, 3.9; its inverse kinetic matrix is $2(\tau\tau^T - \mathcal{V}\kappa t)$ (Eq. 3.7) |
-| arXiv:2512.00144 | 1 | Eq. C.18 |
-| arXiv:2608.14780 | 1 | Eqs. 22–23 |
-| arXiv:2103.06812 | 2 | Eqs. 1.1, 2.4; period-2π axions |
-| arXiv:2112.04503, arXiv:1808.01282 | undetermined | $K$ not defined precisely |
+| arXiv:2412.12012 | Eq. 3.1: $-\tfrac12M^2K$. Eq. 3.11: $K = 2\partial_T\partial_{\bar T}\mathcal{K}$. Eq. 3.13 gives the F-term inverse metric | 1 |
+| arXiv:2309.13145 | Eq. 3.6: $-\tfrac{M^2}{2}\mathcal{K}_{ab}$. Eq. 3.9: $\mathcal{K}_{ab} = 2\partial_T\partial_{\bar T}\mathcal{K}$. Eq. 3.7: inverse $= 2(\tau\tau^T - \mathcal{V}\kappa t)$. Eq. 2.2: $\cos 2\pi\mathcal{Q}\theta$ | 1 |
+| arXiv:2608.14780 | Eq. 22: $\tfrac12K$. Eq. 23: $K = \tfrac12\partial_\tau\partial_\tau\mathcal{K}$. Period one is stated | 1 |
+| arXiv:2103.06812 | Eq. 1.1: $-\tfrac{1}{8\pi^2}M^2K$ with $\cos(\mathcal{Q}\theta+\delta)$, which implies period 2π. Eq. 2.4: $K = \partial_\tau\partial_\tau\mathcal{K}$. Eq. 2.5: $W \supset e^{-2\pi q\cdot T}$, which implies period one | 2 under period 2π; $1/(2\pi^2)$ under period one |
+| arXiv:2512.00144 | Eq. C.18: $[K^{-1}] = 2(\tau\tau^T - \mathcal{V}\kappa t)$, which implies $c = 1$. Eqs. II.4 and A.3 give $K_{ij} = \partial_T\partial_{\bar T}\mathcal{K}$ with no ½; Eq. A.6 uses $\cos(q\phi)$. These are inconsistent with each other | inconsistent |
+| arXiv:2112.04503 | Eq. A1: $-\tfrac12K_{AB}$; $K$ is not defined precisely | undetermined |
+| arXiv:1808.01282 | Eq. 4.3: $-\tfrac{M^2}{2}K$; $K$ is not defined precisely | undetermined |
+| arXiv:2309.01831 | No kinetic term. Eq. 9 writes the pair term as $\pi q^TK^{-1}q'$ | n/a |
 
-In arXiv:2309.01831 Eq. 9, the potential uses $K^{a\bar b} = g^{-1}$.
+The arXiv:2512.00144 entries II.4, A.3 and A.6 follow the CYAX-0232 G0
+review's reading of the paper. The author verified C.18 directly.
+
+### Open inference
+
+These conclusions are derived, not stated by the sources:
+
+- **arXiv:2608.14780 numerics.** The published numbers use $c = \tfrac12$.
+  Basis: its Eq. 96 eigenvalues equal eig($g$), within 0.07%, on the
+  reconstructed N = 8 geometry.
+- **arXiv:2309.01831 Eq. 9.** The $K^{-1}$ there is $g^{-1}$, which is the
+  CYTools `Kinv`. Basis: the F-term cross term derived with
+  $K^{a\bar b}\mathcal{K}_{\bar b} = -2\tau^a$ reproduces Eq. 9 only with this
+  identification.
+- **arXiv:2412.12012 numerics.** These use $c = 1$. Basis: R-003's evidence.
 
 ### Implementation facts (`vmm` `10aa3dc`)
 
-Every cited path is unchanged between `34187c5`, where these facts were
+Every path cited here is unchanged between `34187c5`, where the facts were
 first verified, and `10aa3dc`.
 
-**CYTools and storage.** CYTools `compute_inverse_kahler_metric` returns
-$g^{-1} = 4(\tau\tau^T - \mathcal{V}\kappa t)$, and every generator stores it
-as `Kinv`.
+**CYTools and storage.**
+- CYTools `compute_inverse_kahler_metric` returns
+  $g^{-1} = 4(\tau\tau^T - \mathcal{V}\kappa t)$, and every generator stores
+  it as `Kinv`.
 
-**Physical kinetic paths at $c = \tfrac12$:**
+**Where $c = \tfrac12$ enters.** Exactly two Kinv→kinetic conversions do this:
+- `src/read.jl` `potential_factored`, which forms `C = chol(Kinv).L`;
+- `src/read.jl` `_kinetic_matrix`, which forms `K = inv(Hermitian(Kinv))`.
+  Its docstring calls this "`K = (1/2) g`" without defining $g$.
 
-| Path | What it does |
-|---|---|
-| `src/read.jl` `potential_factored` | `C = chol(Kinv)` |
-| `src/read.jl` `_kinetic_matrix` and `_validate_kinetic_matrix` | `K = inv(Kinv)`; the docstring calls it "`K = (1/2) g`" with $g$ undefined |
-| `src/generate.jl` `_canonical_factor_from_K` and its callers | the `hp_spectrum`, `pq_*`, `pq_hybrid_physical_spectrum` and leading-Hessian families, and `scripts/batch_physical_spectrum.jl` |
-| `src/axion_photon.jl` `_canonical_frame` and the QED kinetic norm | `chol(Kinv)` |
-| `src/paper_benchmarks/fuzzy_axions_model_stage.jl` | `chol(Kinv)` |
+**Paths that factor `Kinv` directly** for kinetic purposes:
+- `src/axion_photon.jl` `_canonical_frame`, which uses `chol(Kinv)`;
+- `src/axion_photon.jl` QED kinetic norm, $q^T$`Kinv`$q$ (line 1152);
+- `src/paper_benchmarks/fuzzy_axions_model_stage.jl`, which uses `chol(Kinv)`;
+- `scripts/reproduce_fuzzy_axions_h11_4.py`, the optimizer mass evaluator,
+  which uses `cholesky(inverse_metric)`;
+- `scripts/benchmark_hybrid_scaling.jl`, which forms `inv(Kinv)`.
 
-**Reproduction paths at $c = \tfrac12$ by contract:**
-`src/paper_benchmarks/n8_g3_control.jl` (P96),
-`src/paper_benchmarks/poly102_inflation.jl` (A96 author reproduction) and
-`src/paper_benchmarks/reduced_models.jl` (the arXiv:2608.14780 N = 5 and
-N = 8 models).
+**Paths that take K as an argument.**
+- `_canonical_factor_from_K(K)` returns $C$ with $CC^T = K^{-1}$. It treats
+  its argument as the matrix in $-\tfrac12M^2K\,\partial\vartheta\partial\vartheta$,
+  so it is convention-neutral.
+- The callers that take K are `hp_spectrum(K,…)`, `pq_spectrum(K,…)`,
+  `pq_physical_spectrum(K,…)`, `pq_hybrid_physical_spectrum(K,…)`, and the
+  leading-Hessian, `mass_basis_accuracy` and `instanton_hierarchy_diagnostics`
+  families.
+- They inherit their convention from whoever supplies K. In the geometry
+  routes, that is `_kinetic_matrix` through `read.potential` and
+  `read.oriented_potential`.
+
+**Inflation consumers of `read.potential` / `read.oriented_potential` K.**
+- `src/inflation_points.jl`: `prepare_geometry_context` →
+  `prepare_context(Q,L,K)`, which computes ε and η.
+- `scripts/inflation_scan_common.jl`
+- `scripts/inflation_scan_contract.jl`
+- `scripts/inflation_candidate_refinement.jl`
+- `scripts/inflation_scale_continuation.jl`. Its reciprocity check requires
+  `K*Kinv ≈ I`.
+- `scripts/analyze_inflation_candidates.jl`
+- `scripts/compare_reduction_inflation_scan.jl`
+
+Their persisted CSV schemas:
+
+| Constant | Value | File |
+|---|---|---|
+| `INFLATION_DIAGNOSTIC_SCHEMA_VERSION` | "1" | `inflation_diagnostics_common.jl` |
+| `REFINEMENT_SCHEMA_VERSION` | "3" | `inflation_candidate_refinement.jl` |
+| `FLOW_SCHEMA_VERSION` | "1" | `inflation_candidate_refinement.jl` |
+| `PILOT_SCHEMA_VERSION` | "6" | `inflation_scale_continuation.jl` |
+| `INFLATION_SHARD_SCHEMA_VERSION` | "2" | `inflation_scan_shards_common.jl` |
+
+**Reproduction paths** (Issue #148 / spec 0148 contracts, and the
+arXiv:2608.14780 N = 5 and N = 8 source metrics):
+- `src/paper_benchmarks/{n8_g3_control, n8_continuation, poly102_inflation, reduced_models, compatibility, catastrophe_diagnostics}.jl`
+- `scripts/audit_issue_148_*.jl`
+- `scripts/issue_148_*.jl`
+
+**Validation-only factorizations.** These Cholesky-factor `Kinv` only to check
+that it is positive definite, as in `load_geometry_inputs`.
 
 **Vacuum search.** It uses only $Q$ and $L$: `vacua_id`, `vacua_estimate`
-and the `vacua_pipeline` searches. `scripts/vacua_pipeline.jl` reads $K$ only
-to check its shape and finiteness.
+and `scripts/vacua_pipeline.jl`. The pipeline checks K only for shape and
+finiteness.
 
 **Persisted layouts:**
-- `spectrum/physical/metadata/*` scalar datasets, with
-  `schema_version = "cyaxiverse-physical-spectrum-3"`;
-- unversioned `hp_spectrum_save` groups `spectrum/{masses,decay,quartdiag,quart31,quart22,cubic}`;
-- `spectrum/axion_photon` with identity group `identity`, whose
-  `schema_version` is the integer 1;
-- an axion–photon CSV summary.
-
-### Empirical evidence (Issue #232)
-
-- arXiv:2412.12012 Sec. 4.2.1: Eq. 4.3 is reproduced to two figures only with
-  $c = 1$. The inverse metric was rebuilt independently in CYTools.
-- arXiv:2608.14780: the Eq. 96 eigenvalues equal eig($g$) within 0.07% on the
-  reconstructed N = 8 geometry. The published numbers therefore use
-  $c = \tfrac12$.
-- The F-term cross term with $K^{a\bar b} = g^{-1}$ reproduces
-  arXiv:2309.01831 Eq. 9 analytically.
+- F1: `spectrum/physical/metadata/*` scalar datasets.
+  - `schema_version = "cyaxiverse-physical-spectrum-3"` since `239a3a7`.
+  - Earlier and migrated outputs (`scripts/migrate_legacy_spectra.jl`) have no
+    `schema_version`.
+- F1 batch summary CSV: `SUMMARY_HEADER` in `scripts/batch_physical_spectrum.jl`.
+- F2: unversioned `spectrum/{masses,decay,quartdiag,quart31,quart22,cubic}`
+  groups, written by two functions:
+  - `hp_spectrum_save`: cubic in the ϑ/charge basis;
+  - `pq_spectrum_save`: cubic in the canonical mass basis.
+  - `scripts/migrate_quartic_index_ordering.jl` rewrites existing F2 groups.
+- F3: `spectrum/axion_photon`, identity group `identity` with integer
+  `schema_version = 1`, plus a CSV summary. `run_batch_axion_photon` skips
+  geometries that already hold a matching result.
 
 ### Owner-approved conventions
 
-- P96 (Issue #148, 2026-09-10).
-- The owner decisions of 2026-11-10 recorded on Issue #232:
-  1. adopt $c = 1$ and document it;
-  2. new schema plus a label, no regeneration;
-  3. retain P96;
-  4. version impact `minor`.
+- P96 and A96 (Issue #148, 2026-09-10; spec 0148).
+- Owner decisions of 2026-11-10, recorded on Issue #232 and its comments:
+  1. adopt $c = 1$ for physical paths and document it;
+  2. new schema plus label, no regeneration;
+  3. keep the reproduction contracts;
+  4. version impact `minor`;
+  5. generic inflation scans are physical and adopt $c = 1$;
+  6. unversioned legacy physical spectra are read as $c = \tfrac12$, by
+     inference;
+  7. the label is stored as a scalar string dataset, which is the deliberate
+     realization of "attribute".
 
 ## Scope
 
-- One shared kinetic-factor function (R-001), used by every physical kinetic
-  path listed above.
-- Labelled persisted schemas for the three output families (R-006).
-- Fail-closed readers (R-007) and a rule for combining outputs (R-007).
+- One shared factor (`kinetic_factor`) and one shared kinetic matrix
+  (`kinetic_matrix`), both built from `Kinv`. Every physical Kinv→kinetic
+  conversion uses them (R-001).
+- A normative contract for APIs that take K as an argument (R-001).
+- Labelled persisted outputs for F1, F2, F3 and the inflation CSV families
+  (R-006).
+- Fail-closed readers and writers, and a rule for combining outputs (R-007).
 - Labels on the reproduction paths (R-008).
+- Updates to the physical Python path and the benchmark script.
 - Tests, docstrings, a conventions documentation page, and a README note.
 
 ## Non-scope
 
-- Regenerating persisted spectra or axion–photon scans.
+- Regenerating persisted spectra, axion–photon scans or inflation scans.
 - Changing the potential, `Kinv` storage, charges, phases or vacuum algorithms.
-- Changing the P96/A96 numerics or any Issue #148 gate.
+- Changing the numerics of any reproduction path, or any Issue #148 gate.
 - Conversion utilities between normalizations.
 - Determining the arXiv:2103.06812 numerics.
 - Re-interpreting published results.
@@ -146,46 +229,80 @@ to check its shape and finiteness.
 
 ### This specification may establish
 
-- That the CYAxiverse physical kinetic outputs follow the displayed convention
-  of arXiv:2412.12012, arXiv:2309.13145, arXiv:2512.00144 and
-  arXiv:2608.14780 Eq. 23.
-- That those outputs reproduce arXiv:2412.12012 Eq. 4.3.
+- That the CYAxiverse physical kinetic outputs follow the convention displayed
+  by arXiv:2412.12012, arXiv:2309.13145 and arXiv:2608.14780 (Eqs. 22–23).
+- That those outputs reproduce arXiv:2412.12012 Eq. 4.3 within the R-003
+  tolerance, while the $c = \tfrac12$ evaluation does not.
 
 ### This specification must not establish
 
 - Population-level or physical claims from legacy outputs that are relabelled
   but not recomputed.
-- That any past paper's results are wrong.
-- Any statement about the arXiv:2103.06812 numerics.
+- Any claim that past papers or past CYAxiverse results are wrong.
+- Any statement about the arXiv:2103.06812 or arXiv:2512.00144 numerics.
+- Any statement that changed inflation-candidate or Fuzzy-axion model counts
+  are physical results. Changed counts are reported as consequences of the
+  convention only.
 
 ## Fixed conventions and invariants
 
-- **Physical kinetic matrix:** $K_{\rm kin} = 2\,$`Kinv`$^{-1}$, with the ½
-  prefactor and period-one $\vartheta$.
-- **Canonical factor:** $B$ is lower triangular with positive diagonal and
-  $BB^T = $`Kinv`$/2 = K_{\rm kin}^{-1}$.
-- **Coordinate map:** $\vartheta = B\psi$, with
-  $\mathcal{L}_{\rm kin} = -\tfrac12 M_{\rm pl}^2\dot\psi^T\dot\psi$.
-- **Transformation rules:** a charge column $q$ maps to $\hat q = B^Tq$, and a
-  ϑ-Hessian $H$ maps to $B^THB$.
-- **Potential:** uses $K^{a\bar b} = $`Kinv` unchanged.
-- **Reproduction contracts:** P96/A96 keep $c = \tfrac12$.
+- **Physical kinetic matrix.** $K_{\rm kin} = 2\,\mathtt{Kinv}^{-1}$, with the
+  ½ prefactor and period-one $\vartheta$.
+- **Canonical factor.** $B$ is lower triangular with positive diagonal and
+  $BB^T = \mathtt{Kinv}/2 = K_{\rm kin}^{-1}$.
+- **Coordinate map.** $\vartheta = B\psi$, with
+  $\mathcal{L}_{\rm kin} = -\tfrac12M_{\rm pl}^2\dot\psi^T\dot\psi$.
+- **Transformation rules.**
+  - A charge column $q$ maps to $\hat q = B^Tq$.
+  - A ϑ-Hessian $H$ maps to $B^THB$.
+  - A kinetic norm is $q^T(\mathtt{Kinv}/2)q$.
+- **K-argument contract.** Wherever a public or internal API takes a matrix
+  argument named K (or documented as the kinetic matrix), that argument is the
+  matrix in $-\tfrac12M_{\rm pl}^2K\,\partial\vartheta\partial\vartheta$.
+  These APIs never rescale it.
+- **Potential.** The potential uses $K^{a\bar b} = \mathtt{Kinv}$, unchanged.
+- **Reproduction contracts.**
+  - P96 is $K_\theta = M_{96}/k^2$ with period-one θ, which is $c = \tfrac12$
+    because $M_{96} \approx g$.
+  - A96 is the author's raw-radian $M_{96}/k^2$. In period-one coordinates
+    this is $K_\theta = (2\pi)^2M_{96}/k^2$, about $c = 2\pi^2$ in the common
+    measure.
 
 ## Requirements
 
-### R-001 — Single physical kinetic convention
+### R-001 — Single physical kinetic convention and the K-argument contract
 
-Every physical kinetic path SHALL obtain its kinetic factor from one shared
-function, `kinetic_factor(Kinv)`. That function SHALL return
-$B = $ `cholesky(Symmetric(Kinv ./ 2)).L`, satisfying the *Fixed conventions*.
+**(a) Shared functions.** The package SHALL provide two functions:
+- `kinetic_factor(Kinv)` returns $B = $ `cholesky(Symmetric(Kinv ./ 2)).L`;
+- `kinetic_matrix(Kinv)` returns $2\,$`inv(Hermitian(Kinv))`.
 
-Every physical path that forms $K_{\rm kin}$ explicitly SHALL use
-$2\,$`inv(Hermitian(Kinv))`, which includes `_kinetic_matrix`.
+Every physical path that converts a stored or supplied `Kinv` into kinetic
+data SHALL use one of these two functions or the norm
+$q^T(\mathtt{Kinv}/2)q$.
 
-The three reproduction paths named in *Current baseline* are exempt. They are
-governed by R-008.
+These paths include:
+- `potential_factored`;
+- `_kinetic_matrix`, and therefore `read.potential` and
+  `read.oriented_potential`;
+- `_canonical_frame`;
+- the QED kinetic norm;
+- `fuzzy_axions_model_stage.jl`;
+- `scripts/benchmark_hybrid_scaling.jl`.
 
-No other physical path SHALL factor or invert `Kinv` for kinetic purposes.
+The Python path in `scripts/reproduce_fuzzy_axions_h11_4.py` SHALL implement
+the same contract and have an equivalent test.
+
+**(b) APIs that take K.** APIs that take K SHALL follow the K-argument
+contract and SHALL NOT call `kinetic_factor` on their argument.
+`_canonical_factor_from_K` is unchanged. Docstrings of every K-taking public
+API SHALL state the contract.
+
+**(c) Exemptions.** These are exempt from (a):
+- the reproduction paths, which are governed by R-008;
+- validation-only factorizations that are not used to compute outputs.
+
+**(d) No other conversions.** No other physical path SHALL invert or factor
+`Kinv` for kinetic purposes.
 
 ### R-002 — Invariance of potential and vacua
 
@@ -201,150 +318,247 @@ basis, as returned by `vacua_id` and `vacua_estimate` and as stored in the
 
 (c) the vacuum counts;
 
-(d) the Hessian inertia in $\vartheta$ (by Sylvester's law of inertia).
+(d) the Hessian inertia in $\vartheta$.
 
 **Bitwise comparison.** These are compared bitwise against baseline artifacts
-generated at `vmm` `10aa3dc`. The baseline is pinned by its sha256 in
-`plan.md`, and the comparison uses the same Julia 1.12 patch release, OS image
-and BLAS as the CI job that runs the fixtures.
+generated at the `vmm` commit the implementation branch is based on. That is
+`10aa3dc` at drafting; `plan.md` records the commit actually used. The
+baseline is pinned by its sha256 in `plan.md`. It is regenerated if the
+implementation base changes. It uses the same Julia 1.12 patch release, OS
+image and BLAS as the CI job that runs the fixtures.
 
 **Tolerance comparison.** A tolerance comparison is allowed only where the PR
 lists a changed floating-point schedule in a K-independent path. It uses the
 periodic torus distance at most $\max(10^{-12},$ `merge_tolerance`$)$.
 
-**Quantities that are not invariant.** Canonical-coordinate quantities and
-mass-threshold counts (for example, modes with $m \ge H_0$) do not fall under
-this requirement. They change by R-005, and the changes SHALL be reported.
+**Quantities that are not invariant.** These change by R-005 and SHALL be
+reported:
+- canonical-coordinate quantities;
+- mass-threshold counts (for example, modes with $m \ge H_0$);
+- slow-roll classifications;
+- Fuzzy-axion model counts.
 
-### R-003 — Source reproduction
+### R-003 — Named source reproduction
 
-WHEN the arXiv:2412.12012 Sec. 4.2.1 inputs are evaluated, CYAxiverse SHALL
-reproduce Eq. 4.3 to two significant figures:
+**Fixture.** The literal inputs of the `test/runtests.jl` testset "Fuzzy-axion
+h11=2 source-corrected role validation":
+- `Q`, `tau`, `cy_volume` and `inverse_metric`;
+- $g_s = 0.5029733$ and $W_0 = 1$;
+- instanton scales from Eq. 3.18, as built by
+  `fuzzy_axions_model_stage.leading_axion_reference_data`;
+- $M_{\rm pl} = $ `constants()["MPlanck"]`.
+
+**Evaluation.** The leading directions are taken in the order QCD first
+(divisor D6) then fuzzy (D2), through `_canonical_frame` with
+`Q_reduced = [q_{D6} q_{D2}]`. Then:
+- $f_i = M_{\rm pl}/(2\pi\hat q_{ii})$;
+- $m_{\rm fuzzy} = \Lambda_{\rm fuzzy}^2/f_{\rm fuzzy}$;
+- $m_{\rm QCD}$ from Eq. 2.6 of the source. This is not a kinetic-path output.
+
+**Acceptance.** Each of $f_{\rm QCD}$, $f_{\rm fuzzy}$, $m_{\rm QCD}$ and
+$m_{\rm fuzzy}$ SHALL lie within **5% relative** of Eq. 4.3:
 - $f_a = (3.2\cdot10^{15}, 1.2\cdot10^{16})$ GeV;
 - $m_a = (1.8\cdot10^{-9}, 5.0\cdot10^{-20})$ eV.
 
+**Discrimination.** The same evaluation with $c = \tfrac12$ (using `Kinv` in
+place of `Kinv/2`) SHALL miss each $f_a$ by more than 20%. This shows the test
+can tell the two conventions apart.
+
+The stringy-only selector `leading_axion_reference_data` is not this gate. Its
+scaling is covered by R-005.
+
 ### R-004 — Factor contract and orientation
 
-`kinetic_factor` SHALL satisfy:
-- $\lVert BB^T - $`Kinv`$/2\rVert \le 10^{-14}\lVert$`Kinv`$\rVert$;
+**Factor identities.** On the R-004 fixtures, `kinetic_factor` SHALL satisfy:
+- $\lVert BB^T - \mathtt{Kinv}/2\rVert \le 10^{-14}\lVert\mathtt{Kinv}\rVert$;
 - $B^TK_{\rm kin}B = I$ to $10^{-12}$;
 - $B$ is lower triangular with positive diagonal.
 
-**Non-diagonal fixture.** One non-diagonal positive-definite fixture SHALL be
-tested, for example `Kinv` $= \begin{pmatrix}3&1\\1&2\end{pmatrix}$ with
-hierarchical charges $q_1 = (1,0)^T$ and $q_2 = (1,1)^T$. The test SHALL
-assert, to $10^{-10}$ relative:
-- $f_1 = M_{\rm pl}/(2\pi\sqrt{G_{11}})$;
-- $f_2 = M_{\rm pl}/(2\pi\sqrt{\det G/G_{11}})$, where $G = Q^T($`Kinv`$/2)Q$;
-- $m_i^2 = \Lambda_i^4/f_i^2$.
+For general geometries, the bounds scale with $n\,\kappa(\mathtt{Kinv})\,\epsilon$.
 
-**Validity guard.** The test SHALL also assert that substituting $B^T$ for
-$B$, or reversing the order of multiplication, changes at least one asserted
-value by more than $10^{-3}$ relative. This guard shows the fixture can detect
-orientation errors.
+**Non-diagonal fixture.**
+- Inputs: `Kinv` $= \begin{pmatrix}3&1\\1&2\end{pmatrix}$, charges
+  $q_1 = (1,0)^T$ and $q_2 = (1,1)^T$, and a hierarchy
+  $\Lambda_2^4/\Lambda_1^4 \le 10^{-20}$.
+- API: `axion_photon.leading_hierarchy` and the Julia model stage.
+- Assertions, to $10^{-10}$ relative:
+  - $f_1 = M_{\rm pl}/(2\pi\sqrt{G_{11}})$;
+  - $f_2 = M_{\rm pl}/(2\pi\sqrt{\det G/G_{11}})$, where $G = Q^T(\mathtt{Kinv}/2)Q$;
+  - $m_i^2 = \Lambda_i^4/f_i^2$.
 
-**Scalar fixture.** The one-axion scalar fixture
-$f = M_{\rm pl}\sqrt{2/(q^2k)}/(2\pi)$ is retained.
+**Orientation guard.** The test SHALL assert that using $BQ$ in place of
+$B^TQ$ changes at least one asserted value by more than $10^{-3}$ relative.
+
+**Scalar fixture.** The one-axion fixture
+$f = M_{\rm pl}\sqrt{2/(q^2k)}/(2\pi)$ is retained. It is evaluated through
+both `kinetic_factor` and `kinetic_matrix`.
 
 ### R-005 — Scaling contract
 
 On the R-004 non-diagonal fixture and on one stored geometry fixture, every
-physical output compared with an evaluation at $c = \tfrac12$ of the same
-inputs SHALL equal the factor below to $10^{-10}$ relative.
+listed output, compared with a $c = \tfrac12$ evaluation of the same inputs,
+SHALL equal the factor below to $10^{-10}$ relative. The exception is counts,
+which SHALL be reported.
+
+**Spectrum (F1, F2, in memory):**
 
 | Output | Factor |
 |---|---|
-| $f_K$, $f_{\rm pert}$ | $\sqrt2$ |
-| masses | $1/\sqrt2$ |
-| $\lambda_{\rm self}$, $\lambda_{31}$, $\lambda_{22}$ | $1/4$ |
-| cubic couplings | $2^{-3/2}$ |
-| axion–photon $f$ | $\sqrt2$ |
-| $g_{a\gamma\gamma}$ | $1/\sqrt2$ |
-| QED threshold mass | $1/\sqrt2$ |
+| $f_K$, $f_{\rm pert}$ | √2 |
+| masses | 1/√2 |
+| $\lambda_{\rm self}$, $\lambda_{31}$, $\lambda_{22}$ | 1/4 |
+| cubic tensor, `pq_spectrum_save` (canonical mass basis) | $2^{-3/2}$ |
+| cubic tensor, `hp_spectrum_save` (ϑ/charge basis) | 1 |
+
+**Axion–photon (F3):**
+
+| Output | Factor |
+|---|---|
+| $f$ | √2 |
+| mixing Θ | 1 |
+| $g_{a\gamma\gamma}$, `log10_g_effective` under `:divisor_instanton` | 1/√2 |
+| `log10_g_effective` for light modes under `:electron_proxy` | $2^{-3/2}$ |
+| QED threshold mass | 1/√2 |
+| photon width, heavy modes | $2^{-5/2}$ |
+| photon width, light modes under `:electron_proxy` | $2^{-9/2}$ |
+| quartic width | $2^{-9/2}$ |
+| `light_mode_count` under `:divisor_instanton` | unchanged |
+| `light_mode_count` under `:electron_proxy` | may change; reported |
 
 The axion–photon decay constants SHALL equal arXiv:2309.13145 Eq. 2.15, with
 the Gram–Schmidt step taken in the Eq. 3.7 inverse metric.
 
+**Inflation (in memory and CSV):**
+
+| Output | Factor |
+|---|---|
+| ε, η, every eigenvalue of $K^{-1}H$ | 1/2 |
+| e-fold counts along a fixed trajectory | 2, in the slow-roll approximation; reported |
+| candidate classifications | may change; reported |
+
+**Fuzzy-axion model stage:** masses 1/√2; model counts may change and are
+reported.
+
 ### R-006 — Persisted labelling contract
 
-**Label.** The label is a scalar UTF-8 string HDF5 dataset named
-`kinetic_normalization` (and a CSV column of the same name). It has exactly
-these allowed values:
+**Label.** The label is `kinetic_normalization`, stored as a scalar UTF-8
+string HDF5 dataset, or as a CSV column of the same name on every row. This
+form is owner-approved decision 7. Allowed values:
 
 | Value | Meaning | Written by |
 |---|---|---|
-| `"sugra_c1"` | $K_{\rm kin} = 2\,$`Kinv`$^{-1}$ | every physical writer |
-| `"p96_reproduction_c_half"` | the P96 reproduction contract | P96 reproduction writers only |
-| `"a96_reproduction_raw_radian"` | the A96 author reproduction | A96 reproduction writers only |
+| `"sugra_c1"` | $K_{\rm kin} = 2\,\mathtt{Kinv}^{-1}$ | every physical writer |
+| `"p96_reproduction_c_half"` | the P96 contract | P96 reproduction writers only |
+| `"a96_reproduction_raw_radian"` | the A96 contract | A96 reproduction writers only |
 
 `"legacy_c_half"` is never written. Readers produce it only by inference
 (R-007).
 
 **Output families:**
 
-| Family | Location | Version |
+| Family | Label location | Version change |
 |---|---|---|
-| F1 physical spectrum | `spectrum/physical/metadata/kinetic_normalization` | `spectrum/physical/metadata/schema_version = "cyaxiverse-physical-spectrum-4"` |
-| F2 `hp_spectrum_save` | `spectrum/metadata/kinetic_normalization` | new `spectrum/metadata/schema_version = "cyaxiverse-hp-spectrum-1"` |
-| F3 axion–photon | `spectrum/axion_photon/identity/kinetic_normalization` | identity `schema_version = 2` |
-| F3 CSV summary | column `kinetic_normalization` on every row | — |
+| F1 | `spectrum/physical/metadata/kinetic_normalization` | `schema_version = "cyaxiverse-physical-spectrum-4"` |
+| F1 summary CSV | `kinetic_normalization` column | — |
+| F2 (`hp_spectrum_save`, `pq_spectrum_save`) | `spectrum/metadata/kinetic_normalization` | new `spectrum/metadata/schema_version = "cyaxiverse-hp-spectrum-1"`, plus `spectrum/metadata/cubic_basis` ∈ {`"charge_basis"`, `"canonical_mass_basis"`} |
+| F3 | `spectrum/axion_photon/identity/kinetic_normalization` | identity `schema_version = 2` |
+| F3 CSV summary | `kinetic_normalization` column | — |
+| Inflation CSV families (the five schema constants above) | `kinetic_normalization` column | each schema version incremented by one |
 
-**In memory.** Every result type or `NamedTuple` returned by a physical
-kinetic path SHALL expose `kinetic_normalization::Symbol`, equal to
-`:sugra_c1` for computed results. Readers SHALL return the stored or inferred
-value as a `Symbol`.
+**In memory.**
+- The package SHALL export the constant
+  `CYAxiverse.KINETIC_NORMALIZATION == :sugra_c1`, which describes every
+  physical result it computes from `Kinv`.
+- Reproduction results carry their reproduction label through the
+  `kinetic_normalization` field of their own result types (R-008).
+- Readers SHALL return the stored or inferred label as a `Symbol`, as an
+  explicit field of their return value.
+- Exported struct field layouts and positional constructors SHALL NOT change.
+  In particular, `AxionPotential.K` is $K_{\rm kin}$ and carries no field.
+- Results computed from a caller-supplied K are not labelled by the package.
 
-### R-007 — Readers and combination (fail closed)
+### R-007 — Readers, writers and combination (fail closed)
 
 **Inference is limited to recognized legacy layouts:**
 - F1 with `schema_version == "cyaxiverse-physical-spectrum-3"` and no label;
+- F1 with no `schema_version` but the established `spectrum/physical` layout
+  (masses, `fpert_log10`, `metadata/h11`), including migrated data;
 - F2 with `spectrum/masses/log10` present and no `spectrum/metadata` group;
-- F3 with identity `schema_version == 1` and no label.
+- F3 with identity `schema_version == 1` and no label;
+- the F1 and F3 summary CSVs, and the inflation CSV families at their current
+  versions, with no `kinetic_normalization` column.
 
 These SHALL be read as `:legacy_c_half`, and the result SHALL record that the
 value was inferred.
 
 **Readers SHALL throw an `ArgumentError`** naming the file and family for:
-- a `-4`, `hp-spectrum-1` or identity-2 output whose label is missing;
-- a label with a value outside R-006;
+- a current-version output (F1 `-4`, F2 `hp-spectrum-1`, F3 identity 2, or an
+  incremented inflation schema) whose label is missing;
+- a label value outside R-006;
 - a legacy version that carries a label;
-- a physical schema (F1 `-4`, F2 `hp-spectrum-1`, F3 identity-2) whose label
-  is not `"sugra_c1"`;
-- an unknown schema version or layout.
+- a physical family whose label is not `"sugra_c1"`;
+- an F2 `cubic_basis` that is missing or unknown;
+- an unknown version or layout.
 
-**Combination.** Any CYAxiverse function or script that combines outputs from
-more than one file or call SHALL reject inputs whose `kinetic_normalization`
-values differ, with an `ArgumentError` naming both values. No implicit
-conversion is provided.
+**Writers and migration.**
+- F2 writers SHALL refuse to write into an existing `spectrum` group whose
+  layout is legacy or unlabelled, unless the caller passes an explicit replace
+  option. That option removes the whole legacy group first.
+- `scripts/migrate_quartic_index_ordering.jl` SHALL preserve an existing label,
+  and SHALL NOT add a label to a legacy group.
+
+**Batch resume.** A physical batch run, whether `batch_physical_spectrum` or
+`run_batch_axion_photon`, SHALL NOT treat an output labelled or inferred as
+anything other than `:sugra_c1` as complete.
+
+**Combination.** Any CYAxiverse function or script that combines outputs
+across files, calls or CSV rows SHALL reject inputs whose labels differ, with
+an `ArgumentError` naming both values. No implicit conversion is provided.
 
 ### R-008 — Reproduction paths retained and distinguishable
 
-The three named reproduction paths and their tests SHALL be numerically
-unchanged. Their results SHALL carry `kinetic_normalization` =
-`:p96_reproduction_c_half` or `:a96_reproduction_raw_radian`, and any
-persisted output SHALL carry the matching R-006 string.
+The reproduction paths named under *Implementation facts* SHALL be numerically
+unchanged, and so SHALL their tests. Their results SHALL carry
+`kinetic_normalization` = `:p96_reproduction_c_half` or
+`:a96_reproduction_raw_radian`, according to their contract. Any persisted
+reproduction output SHALL carry the matching R-006 string.
 
-Physical readers (F1–F3) SHALL reject reproduction labels, as R-007 requires.
+Physical readers SHALL reject reproduction labels, as R-007 requires.
+
+A new path counts as a reproduction path only if it consumes $M_{96}$,
+`N5_K_RAW`, `N8_K_RAW` or the `reduced_models` source kinetic matrices, or if
+it implements a spec 0148 contract.
 
 ### R-009 — Documentation
 
 A documentation page on conventions SHALL state:
-- the definition, units and factor contract;
-- the cross-paper table with equation references;
-- the P96/A96 exception;
-- the arXiv:2608.14780 Eq. 23 / Eq. 96 and arXiv:2103.06812 discrepancies;
-- the R-005 scaling table;
-- the schema and label history.
+- the definition, units, factor contract and K-argument contract;
+- the source-facts table, including the arXiv:2103.06812 readings and the
+  arXiv:2512.00144 inconsistency;
+- the open inferences;
+- the reproduction contracts: P96 at $c = \tfrac12$, and A96 as raw-radian;
+- the full R-005 scaling tables;
+- the label and schema history, and the inference rules.
 
-The affected docstrings SHALL point to it, including the `_kinetic_matrix`
-"`K = (1/2) g`" text, which is to be replaced. So SHALL the README.
+These SHALL point to it:
+- the affected docstrings, including a replacement for the `_kinetic_matrix`
+  "`K = (1/2) g`" text and for `_validate_kinetic_matrix`;
+- the README;
+- the axion–photon documentation page.
 
 ### R-010 — Certification boundary
 
 IF a quantity in `test/fixtures/scientific_certification` is built from
 `Kinv` through a path covered by R-001, the work SHALL stop for owner
 approval before that fixture is re-certified. Fixtures that supply $K$
-directly are out of scope and SHALL be shown to be unchanged.
+directly follow the K-argument contract. They SHALL be shown to be unchanged.
+
+### R-011 — Inflation reciprocity
+
+Every reciprocity check between a kinetic matrix and `Kinv` SHALL use the
+R-001 relation $K_{\rm kin}\cdot\mathtt{Kinv} = 2I$ (as in
+`inflation_scale_continuation.jl`). A test SHALL show that a physical-mode
+geometry passes the check.
 
 ## Acceptance gates
 
@@ -360,13 +574,14 @@ revision.
 
 ### CYAX-0232 G1 — Implementation candidate
 
-**Objective:** R-001 to R-010 implemented.
+**Objective:** R-001 to R-011 implemented.
 
 **Acceptance:**
 - the fast and full suites, the Python regressions, the docs build and
   `agent_verify.py` all pass at the exact SHA;
 - every changed test is listed with its reason;
-- the R-002 baseline hashes are recorded.
+- the R-002 baseline hashes are recorded;
+- the changed counts required by R-005 are reported.
 
 **Stop condition:** R-002 fails, or R-010 requires re-certification.
 
@@ -384,24 +599,31 @@ PR at the exact SHA, plus CI green.
 | Evidence | Requirement |
 |---|---|
 | Factor identity, orientation guard and analytic fixtures | R-004 |
-| Named source fixture | R-003 |
-| Scaling table | R-005 |
+| Named source fixture and discrimination check | R-003 |
+| Scaling tables, including inflation and the policy-dependent axion–photon outputs | R-005 |
 | Pinned bitwise baseline | R-002 |
-| Round-trip per family; legacy inference; each rejection case; mixed-label combination | R-006, R-007 |
+| Round-trip per family; each inference and rejection case; writer refusal; resume behaviour; mixed-label combination | R-006, R-007 |
 | Reproduction paths unchanged and labelled | R-008 |
 | Docs build | R-009 |
 | Certification audit | R-010 |
+| Reciprocity test | R-011 |
+| Equivalent test for the Python path | R-001 |
 
 ## Interfaces and compatibility
 
-**Public API.** Signatures are unchanged, and the result fields gain
-`kinetic_normalization`. The physical outputs change by the R-005 factors.
+**Public API.**
+- Signatures and exported struct layouts are unchanged.
+- New exports: `KINETIC_NORMALIZATION`, `kinetic_factor` and `kinetic_matrix`.
+- APIs that take K keep their meaning under the K-argument contract.
+- Physical outputs computed from `Kinv` change by the R-005 factors.
 
 **Persisted schemas.**
 - F1 moves to `-4`.
 - F2 gains `hp-spectrum-1` metadata.
 - F3 identity moves to version 2.
-- Legacy outputs stay readable as `:legacy_c_half`.
+- The inflation CSV schema versions are each incremented by one.
+- Legacy outputs, including unversioned F1, remain readable as
+  `:legacy_c_half`.
 
 **Downstream.** PR #219's readers, which accept `-3` only, need their own
 update.
@@ -415,10 +637,11 @@ branch.
 
 ## Open owner decisions
 
-None at drafting. The durable `approval_ref` will be the owner comment on
-Issue #232.
+None at drafting. Decisions 1–7 are recorded on Issue #232. The durable
+`approval_ref` will be the owner comment on Issue #232 that approves the
+reviewed revision.
 
 ## Completion criterion
 
-R-001 to R-010 pass at an approved, reviewed candidate merged into `vmm` by the
+R-001 to R-011 pass at an approved, reviewed candidate merged into `vmm` by the
 owner.
