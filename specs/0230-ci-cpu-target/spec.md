@@ -3,14 +3,14 @@ spec_id: CYAX-0230
 title: CPU-dependent package images in the CI depot caches
 issue: 230
 class: S1
-status: draft
+status: approved
 workstream: CI workflows, their depot caches and their tests
 parent: null
 depends_on: []
 created: 2026-11-09
-last_reviewed: 2026-11-09
+last_reviewed: 2026-11-10
 review_required: repository-owner approval
-approval_ref: null
+approval_ref: "PR #231 comment 6781024991 — approves spec revision 47a32b1, with owner decisions D1 (2 re-runs) and D2 (3 PR runs)"
 version_impact: none (CI only)
 ---
 
