@@ -599,7 +599,8 @@ R-007 checks to its inputs, SHALL reject inputs whose labels differ (R-007
 combination), and SHALL write the common input label. When that label was
 inferred it SHALL also write `kinetic_normalization_inferred = true` (a CSV
 column or scalar dataset next to the label). A derived writer SHALL NOT write
-`"sugra_c1"` for inputs labelled or inferred otherwise.
+`"sugra_c1"` for inputs labelled or inferred otherwise, and SHALL NOT write
+into the F1–F6 HDF5 families (R-007, primary HDF5 writers).
 
 **General rule.** A *K-dependent output* is any persisted value computed from
 a kinetic matrix or factor derived from `Kinv`: through `kinetic_factor`,
@@ -668,9 +669,14 @@ their rows carry `"sugra_c1"`.
 - **F3 in memory.** `AxionPhotonIdentity.schema_version` SHALL hold the
   *stored* identity version; `_read_axion_photon_identity` currently replaces
   it with the current constant (`axion_photon.jl:1566`), and that SHALL
-  change. Version 2 means `:sugra_c1` (only physical writers write F3);
-  version 1 means `:legacy_c_half`, inferred. `write_scan_csv` and every other
-  consumer of `AxionPhotonResult` SHALL derive the label from this field.
+  change. Version 2 means `:sugra_c1`; version 1 means `:legacy_c_half`,
+  inferred. `write_scan_csv` and every other consumer of `AxionPhotonResult`
+  SHALL derive the label from this field. This mapping is sound because a
+  version-2 F3 group can only hold `"sugra_c1"`: `write_axion_photon_result`
+  SHALL keep refusing any result whose `identity.schema_version` is not the
+  current version (the existing `_assert_result_identity_matches!` check,
+  `axion_photon.jl:1737`), and F3 readers reject a stored `"legacy_c_half"`
+  (R-007).
 - Python readers expose the same pair as a `(label, inferred)` tuple or as
   dict keys of the same names.
 - Field layouts and positional constructors of public structs (exported from
@@ -696,8 +702,13 @@ their rows carry `"sugra_c1"`.
 - any other output covered by the R-006 general rule that is written by a
   *physical* function (R-008 classification), at its pre-change version (or
   with no version), with no label, as recorded in `plan.md`'s inventory;
-- the F1 and F3 summary CSVs, and the inflation CSV families at their current
-  versions, with no `kinetic_normalization` column.
+- the F1 and F3 summary CSVs, and the inflation CSV families at their
+  pre-change versions, with no `kinetic_normalization` column.
+
+A legacy F2 layout records neither its writer (`hp_spectrum_save` or
+`pq_spectrum_save`) nor its cubic basis. Its readers SHALL report the cubic
+basis as `:unknown`; any consumer that needs the basis (for example to compare
+or rescale cubic tensors) SHALL throw for a legacy F2 cubic tensor.
 
 These SHALL be read as `:legacy_c_half`, and the result SHALL record that the
 value was inferred.
@@ -724,23 +735,38 @@ readers unless its writer is recorded in `plan.md` as purely physical.
 - a legacy version that carries a label;
 - a stored `"legacy_c_half"` without `kinetic_normalization_inferred = true`
   next to it;
-- a physical family whose label is not `"sugra_c1"` or a stored
-  `"legacy_c_half"` (derived outputs), except the per-row
-  reproduction-labelled rows of per-row-labelled families; a physical reader
-  of such a family SHALL return each row's label, and a physical aggregate
-  SHALL filter out reproduction rows *before* applying the combination check
-  to the remaining rows;
-
-A *physical family* is any R-006 output family whose primary writers are
-physical functions under the R-008 classification: F1–F6, the F1 and F3
-summary CSVs, the inflation CSV families and the other outputs the general
-rule covers. A current-version output carrying a stored `"legacy_c_half"`
-with `kinetic_normalization_inferred = true` is a derived legacy output. Its
-readers SHALL return `(:legacy_c_half, true)`, exactly as for an inferred
-legacy layout. It is never treated as complete by a batch run (batch resume
-below) and is combined only with inputs of the same label.
-- an F2 `cubic_basis` that is missing or unknown;
+- a stored `"legacy_c_half"` in an F1–F6 HDF5 output (these primary families
+  never hold derived values);
+- a physical family whose label is not `"sugra_c1"`, or, in a derived output,
+  a stored `"legacy_c_half"`, except the per-row reproduction-labelled rows of
+  per-row-labelled families. A physical reader of such a family SHALL return
+  each row's label, and a physical aggregate SHALL filter out reproduction
+  rows *before* applying the combination check to the remaining rows;
+- a current-version F2 (`spectrum-groups-1`) whose `cubic_basis` is missing or
+  unknown;
 - an unknown version or layout.
+
+**Definitions.** A *physical family* is any R-006 output family whose primary
+writers are physical functions under the R-008 classification: F1–F6, the F1
+and F3 summary CSVs, the inflation CSV families and the other outputs the
+general rule covers. A *derived output* is a CSV or other file written by a
+derived writer (R-006), for example `appendix_b_quantiles.csv` or an F3 CSV
+written by `write_scan_csv` from read-back results; F1–F6 HDF5 outputs are
+never derived outputs. A current-version derived output carrying a stored
+`"legacy_c_half"` with `kinetic_normalization_inferred = true` is a *derived
+legacy output*. Its readers SHALL return `(:legacy_c_half, true)`, exactly as
+for an inferred legacy layout. It is never treated as complete by a batch run
+(batch resume below) and is combined only with inputs of the same label.
+
+**Primary HDF5 writers.** The F1–F6 HDF5 writers SHALL write only values they
+compute from `Kinv` at the current convention, and SHALL refuse results or
+inputs read back from a legacy or derived output.
+
+**Errors are not skipped.** A reader, aggregator or combiner SHALL NOT catch
+and suppress an R-007 rejection or a combination error. Existing catch-all
+handlers, such as the `try … @warn` skip in
+`scripts/reproduce_appendix_b_spectra.jl:83–101`, SHALL let these errors
+propagate.
 
 **Writers and migration.**
 - F2 writers SHALL refuse to write into a `spectrum` group that holds legacy
@@ -763,8 +789,10 @@ below) and is combined only with inputs of the same label.
   recomputing them. They are layout migrations, not derived writers, and the
   R-006 labelling duty does not apply to them. Each SHALL preserve any
   existing label and `schema_version` it copies, and SHALL NOT add a label or
-  a `schema_version`. The output of `migrate_legacy_spectra.jl` is therefore
-  the unversioned F1 layout, read by inference as `:legacy_c_half`.
+  a `schema_version`. When its source is unversioned, the output of
+  `migrate_legacy_spectra.jl` is therefore the unversioned F1 layout, read by
+  inference as `:legacy_c_half`; a versioned source keeps its version and is
+  read under that version's rule.
 
 **Batch resume.** A physical batch or resumable run SHALL NOT treat an output
 labelled or inferred as anything other than `:sugra_c1` (including a stored
@@ -776,9 +804,13 @@ replaced only under the runner's explicit overwrite option: `force=true` for
 `run_batch_axion_photon` and `build_orientifold_vacua_inflation.jl`, and
 `--force` for `batch_physical_spectrum`. Otherwise it is reported as
 `:failed`, with a message naming the stored label, as
-`run_batch_axion_photon` already does for a configuration mismatch. This
-replaces the current silent recompute in `batch_physical_spectrum` when the
-configuration digest differs only because of the schema version.
+`run_batch_axion_photon` already does for a configuration mismatch. For
+`batch_physical_spectrum` this replaces the current behaviour, in which any
+configuration-digest mismatch (the digest hashes `schema_version` and the
+git `source_revision`, `batch_physical_spectrum.jl:176–183`) triggers a
+silent recompute. `inflation_scan_prep.jl` has no overwrite option: with
+`--append-summary` the R-007 append rule refuses a legacy summary, and the
+remedy is a new summary path.
 
 **Reader and combiner inventory.** `plan.md` SHALL list every reader and every
 cross-file combiner of the R-006 families in `src/`, `ext/`, `scripts/` and
@@ -819,7 +851,8 @@ hold both physical and reproduction functions, as
 
 **Search record.** `plan.md` SHALL record a search at the implementation base
 for `M96`, `N5_K_RAW`, `N8_K_RAW`, `K_RAW`, `reduced_models`,
-`n8_kinetic_matrix`, `poly102_inflation`, `N8_BEST_X` and
+`n8_kinetic_matrix`, `n5_kinetic_matrix`, `n5_potential`, `n8_geometry`,
+`author_inflation`, `poly102_inflation`, `N8_BEST_X` and
 `EXPECTED_K_EIGENVALUES` over `src/`, `ext/`, `scripts/`, `bin/`, `test/`, `specs/`,
 `docs/` and `validation/`, and SHALL classify every hit.
 - Hits in `test/`, `docs/`, `validation/` and `specs/` are classified without
