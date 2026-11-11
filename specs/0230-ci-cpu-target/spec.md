@@ -282,7 +282,7 @@ Documentation build).
 
 Nothing removes stale image files from a depot: `Pkg.gc` does not touch
 `compiled/`, and Julia removes a package's oldest file only when it has 10.
-The R-002 Fast tests entry (1159 MiB) held 479 `graniterapids` and 543
+The R-002 Fast tests entry (1159 MiB) held 479 `graniterapids` and 549
 `znver3` files. If the native entries stayed, every new entry would hold the
 native images plus the `haswell` ones, about 3.9 GB per generation
 (1159 + 710, 416 + 265, 354 + 355 and 351 + 365 MiB), about 7.8 GB on `vmm`
@@ -316,7 +316,7 @@ old entries.
 
 `CI.yml` and `Documentation.yml` each set, at workflow level,
 `env: JULIA_CPU_TARGET: 'haswell'`, with a comment that cites this
-specification. No job or step in them sets `JULIA_CPU_TARGET`. `WikiRefresh.yml`
+specification and does not contain the text `JULIA_CPU_TARGET`. No job or step in them sets `JULIA_CPU_TARGET`. `WikiRefresh.yml`
 keeps no cache and is not changed.
 
 ### R-006 — HostCPUFeatures
@@ -338,7 +338,8 @@ last bits. None of this code is on the tested or qualified paths.
 ### R-007 — Package images built before the fix
 
 R-005 does not change any `cache-name`, so CYAX-0223 R-004 is unchanged.
-Every existing Julia depot entry holds native images. If they stayed, the
+CYAX-0223 R-007 is unchanged too: its item 7 binds only the cache maintenance
+job, and the deletion below is a single manual step outside it. Every existing Julia depot entry holds native images. If they stayed, the
 test process would still load them where the runner accepts them, but every
 precompile process would reject them (*Facts*) and compile those dependencies
 again, uncounted, while the native files stayed beside the new `haswell` ones
@@ -346,11 +347,28 @@ for good, past the 10 GB limit (*Facts*, cache use).
 
 So every cache entry whose key starts with `julia-cache;`, on every ref
 (`vmm`, `main` and pull-request refs), is deleted once, by cache ID, after
-the owner approves the merge and immediately before it. The owner's
-approval of this amendment approves the deletion; the merge approval sets its
-time. The merge push then builds every entry from empty, as in run
-42950743815. Open PRs build theirs from empty on their next run. The PR records
-the deleted cache IDs, refs and keys.
+the owner approves the merge and immediately before it. The owner's approval
+comment for this amendment names this deletion; the merge approval sets its
+time. The deletion is done with the GitHub API by an identity with
+`actions: write` on the repository (the owner, or the agent with the owner's
+credentials). The steps, each recorded on the PR:
+
+1. Before the deletion, `gh run list` shows no CI or Documentation run in
+   progress or queued, and the owner agrees to push nothing else to `vmm` and
+   to merge nothing else until the merge push has saved its entries.
+2. The deletion, with the deleted cache IDs, refs and keys, and a listing
+   right after it that shows no `julia-cache;` entry.
+3. The merge.
+4. After every job of the merge push (CI and Documentation) has finished, a
+   new listing. Every `julia-cache;` entry created between the deletion and
+   the merge push's saves, other than the merge push's own entries, is
+   deleted. If the merge push restored any entry, its saved entries are
+   deleted as well and its workflows are re-run, so that they build from
+   empty.
+
+The merge push then builds every entry from empty, as in run 42950743815.
+PR runs before the merge push has saved its entries start cold; later PR runs
+restore the new `vmm` entries.
 
 ### R-008 — Tests
 
@@ -401,6 +419,9 @@ is not reclassified under L-0012.
   no run has shown it.
 - Amendment 1: `HostCPUFeatures` reports no AVX, AVX2, BMI2 or FMA, and warns
   4 times when it is precompiled (R-006).
+- Amendment 1: PR runs between the R-007 deletion and the merge push's saves
+  have no `vmm` base and build cold: about 26.6 min for Fast tests and 34 min
+  for qualification (run 42950743815).
 
 ## Acceptance gates
 
@@ -423,17 +444,18 @@ comment.
   an empty table is not a failure.
 - If confirmed: the approved R-004 amendment, its implementation and tests,
   and a passing PR CI run. For amendment 1, also:
-  - the owner's approval comment that names the amendment's commit SHA;
+  - the owner's approval comment that names the amendment's commit SHA and
+    the R-007 deletion;
   - R-005 and the R-008 changes in one commit, with the R-008 tests failing
     against the parent commit, and the before-and-after script output, in the
     PR;
   - on the PR's CI run, in every cached job that runs on the PR (lifecycle,
-    fast, qualification, Documentation build), the R-001 step prints the
-    line `JULIA_CPU_TARGET: haswell` at the start of a line, followed by its
-    target table, and the tests and qualification pass. That run restores
+    fast, qualification, Documentation build), the R-001 step's own output
+    has the line `JULIA_CPU_TARGET: haswell` after its `Sys.CPU_NAME:` line,
+    followed by its target table, and the tests and qualification pass. That run restores
     native entries, so its precompile counts are not evidence (R-007);
-  - the R-007 deletion is recorded on the PR, with the deleted cache IDs,
-    refs and keys, before the merge.
+  - R-007 steps 1 and 2 are recorded on the PR before the merge, and steps 3
+    and 4 after it.
 - All Python tests pass.
 - An independent review of the exact candidate SHA, reported separately from
   CI.
@@ -444,7 +466,7 @@ comment.
 | --- | --- |
 | First push to `vmm` after merge | Per cached job: CPU model, target table, precompile count, job time, entry size |
 | Later PR runs, until two different CPU models have been seen or the number of runs set by owner decision D2 is reached | Per cached job: CPU model, target table and precompile count |
-| Amendment 1: first push to `vmm` after the merge | Per cached job: no entry restored; precompile count, job time and entry size |
+| Amendment 1: first push to `vmm` after the merge | Per cached job: no entry restored (else R-007 step 4 deletes and rebuilds); precompile count, job time and entry size |
 | Amendment 1: the first run that restores each entry of that push, and the later PR runs above whose restored entry was saved after the merge | Per cached job: only `haswell` images restored, none rejected by target; packages compiled again only for new releases (`Installed` lines) |
 
 ## Interfaces and compatibility
