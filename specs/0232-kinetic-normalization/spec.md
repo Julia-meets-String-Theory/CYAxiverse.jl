@@ -117,7 +117,9 @@ first verified, and `10aa3dc`.
   $g^{-1} = 4(\tau\tau^T - \mathcal{V}\kappa t)$, and every generator stores
   it as `Kinv`.
 
-**Where $c = \tfrac12$ enters.** Exactly two Kinv→kinetic conversions do this:
+**Where $c = \tfrac12$ enters.** In `src/read.jl`, exactly two Kinv→kinetic
+conversions do this (the direct factorizations listed next also give
+$c = \tfrac12$):
 - `src/read.jl` `potential_factored`, which forms `C = chol(Kinv).L`. Its
   docstring promises `Kinv ≈ C * C'`;
 - `src/read.jl` `_kinetic_matrix`, which forms `K = inv(Hermitian(Kinv))`.
@@ -330,6 +332,12 @@ $c = \tfrac12$. This specification follows the corrected wording.
   matrix in $-\tfrac12M_{\rm pl}^2K\,\partial\vartheta\partial\vartheta$.
   These APIs never rescale it.
 - **Potential.** The potential uses $K^{a\bar b} = \mathtt{Kinv}$, unchanged.
+- **Inverse metrics stay $g^{-1}$.** Every persisted or exported inverse
+  metric (`Kinv`, the Python `inverse_metric` passed from F5 to the Julia
+  model stage, `kinv` in scripts) stays $g^{-1}$, as CYTools returns it. The
+  factor ½ is applied only inside `kinetic_factor`, `kinetic_matrix`, the
+  R-001 norm and their Python equivalents, never to a stored or exported
+  matrix.
 - **Reproduction contracts.**
   - P96 is $K_\theta = M_{96}/k^2$ with period-one θ, which is $c = \tfrac12$
     because $M_{96} \approx g$.
@@ -475,7 +483,9 @@ For general geometries, the bounds scale with $n\,\kappa(\mathtt{Kinv})\,\epsilo
   $\Lambda_2^4/\Lambda_1^4 \le 10^{-20}$.
 - API: `axion_photon.leading_hierarchy` for $f$ and $m$; the Julia model
   stage for $m$ only (it exposes no decay constants). The hierarchy is set
-  through the fixture's `tau`.
+  through the fixture's `tau`. `plan.md` SHALL pin the model-stage inputs:
+  per-divisor `Q`, `tau` with $\tau_1 < \tau_2$ so that $q_1$ leads, and
+  `cy_volume`.
 - Assertions, to $10^{-10}$ relative:
   - $f_1 = M_{\rm pl}/(2\pi\sqrt{G_{11}})$;
   - $f_2 = M_{\rm pl}/(2\pi\sqrt{\det G/G_{11}})$, where $G = Q^T(\mathtt{Kinv}/2)Q$;
@@ -526,6 +536,9 @@ in the mode sets SHALL be reported.
 | persisted `hierarchy/q` and `hierarchy/theta_from_canonical` (`axion_photon.jl:1382–1383`) | 1/√2 |
 | $g_{a\gamma\gamma}$, `log10_g_effective` under `:divisor_instanton` | 1/√2 |
 | `log10_g_effective` for light modes under `:electron_proxy` | $2^{-3/2}$ |
+| persisted `hierarchy/log10_f_GeV` (`axion_photon.jl:1384`) | $+\tfrac12\log_{10}2$ (×√2) |
+| persisted `hierarchy/log10_mass_eV` (`axion_photon.jl:1385`) | $-\tfrac12\log_{10}2$ (×1/√2) |
+| `log10_g_effective` for heavy modes under `:electron_proxy` | 1/√2 |
 | QED threshold mass | 1/√2 |
 | photon width, all modes under `:divisor_instanton` | $2^{-5/2}$ |
 | photon width, heavy modes under `:electron_proxy` | $2^{-5/2}$ |
@@ -593,7 +606,8 @@ a kinetic matrix or factor derived from `Kinv`: through `kinetic_factor`,
 `kinetic_matrix`, `potential_factored().C`, `read.potential().K`,
 `read.oriented_potential().K`, the R-001 norm, or a reproduction matrix, or
 taken from another K-dependent output. Every writer of a K-dependent output in
-`src/`, `ext/`, `scripts/` or `bin/` SHALL label it, and SHALL increment the
+`src/`, `ext/`, `scripts/` or `bin/`, other than the layout migrations named
+in R-007, SHALL label it, and SHALL increment the
 output's schema or contract version if it has one. The table below lists the
 writers known at `10aa3dc`. It is not the definition: a writer found later is
 governed by this rule, is added to `plan.md`'s inventory, and does not need a
@@ -708,11 +722,23 @@ readers unless its writer is recorded in `plan.md` as purely physical.
   is missing, or a CSV row of such a family with an empty label;
 - a label value outside R-006;
 - a legacy version that carries a label;
-- a physical family whose label is not `"sugra_c1"`, except the per-row
+- a stored `"legacy_c_half"` without `kinetic_normalization_inferred = true`
+  next to it;
+- a physical family whose label is not `"sugra_c1"` or a stored
+  `"legacy_c_half"` (derived outputs), except the per-row
   reproduction-labelled rows of per-row-labelled families; a physical reader
   of such a family SHALL return each row's label, and a physical aggregate
   SHALL filter out reproduction rows *before* applying the combination check
   to the remaining rows;
+
+A *physical family* is any R-006 output family whose primary writers are
+physical functions under the R-008 classification: F1–F6, the F1 and F3
+summary CSVs, the inflation CSV families and the other outputs the general
+rule covers. A current-version output carrying a stored `"legacy_c_half"`
+with `kinetic_normalization_inferred = true` is a derived legacy output. Its
+readers SHALL return `(:legacy_c_half, true)`, exactly as for an inferred
+legacy layout. It is never treated as complete by a batch run (batch resume
+below) and is combined only with inputs of the same label.
 - an F2 `cubic_basis` that is missing or unknown;
 - an unknown version or layout.
 
@@ -728,11 +754,21 @@ readers unless its writer is recorded in `plan.md` as purely physical.
 - CSV writers SHALL refuse to append rows to an existing file whose header
   lacks a `kinetic_normalization` column or whose schema version differs (for
   example `batch_physical_spectrum.jl --append-summary` onto a legacy summary).
-- `scripts/migrate_quartic_index_ordering.jl` SHALL preserve an existing label,
-  and SHALL NOT add a label to a legacy group.
+- A forced F1 rewrite (`--force`, or the batch-resume overwrite below) SHALL
+  delete the whole `spectrum/physical` group, including its `metadata`, before
+  writing, so that no dataset from the earlier output survives. F2, F3 and
+  other children of `spectrum` SHALL NOT be touched.
+- **Layout migrations.** `scripts/migrate_quartic_index_ordering.jl` and
+  `scripts/migrate_legacy_spectra.jl` move or reorder existing values without
+  recomputing them. They are layout migrations, not derived writers, and the
+  R-006 labelling duty does not apply to them. Each SHALL preserve any
+  existing label and `schema_version` it copies, and SHALL NOT add a label or
+  a `schema_version`. The output of `migrate_legacy_spectra.jl` is therefore
+  the unversioned F1 layout, read by inference as `:legacy_c_half`.
 
 **Batch resume.** A physical batch or resumable run SHALL NOT treat an output
-labelled or inferred as anything other than `:sugra_c1` as complete. This
+labelled or inferred as anything other than `:sugra_c1` (including a stored
+derived `"legacy_c_half"`) as complete. This
 covers `batch_physical_spectrum`, `run_batch_axion_photon`,
 `build_orientifold_vacua_inflation.jl` (`_has_inflation_group`) and
 `inflation_scan_prep.jl`'s resume check. Such an output is recomputed and
@@ -784,7 +820,7 @@ hold both physical and reproduction functions, as
 **Search record.** `plan.md` SHALL record a search at the implementation base
 for `M96`, `N5_K_RAW`, `N8_K_RAW`, `K_RAW`, `reduced_models`,
 `n8_kinetic_matrix`, `poly102_inflation`, `N8_BEST_X` and
-`EXPECTED_K_EIGENVALUES` over `src/`, `ext/`, `scripts/`, `bin/`, `test/`,
+`EXPECTED_K_EIGENVALUES` over `src/`, `ext/`, `scripts/`, `bin/`, `test/`, `specs/`,
 `docs/` and `validation/`, and SHALL classify every hit.
 - Hits in `test/`, `docs/`, `validation/` and `specs/` are classified without
   stopping the work.
@@ -909,9 +945,19 @@ branch.
 
 ## Open owner decisions
 
-None at drafting. Decisions 1–7 are recorded on Issue #232. The durable
-`approval_ref` will be the owner comment on Issue #232 that approves the
-reviewed revision.
+Decisions 1–7 are recorded on Issue #232. One interpretation needs the
+owner's explicit confirmation in the approval comment:
+
+- **K-argument contract.** The Issue #232 body lists `_canonical_factor_from_K`
+  and its callers as $c = \tfrac12$ paths, and its risks section names the
+  test "HP spectrum: one-axion analytic mass" as one that may change. This
+  specification instead makes the K-taking APIs convention-neutral (R-001(b)):
+  they inherit $c = 1$ from `read.potential`, which now supplies
+  $K_{\rm kin} = 2\,\mathtt{Kinv}^{-1}$, and that test stays unchanged
+  (R-004). The approval comment SHALL name this contract.
+
+The durable `approval_ref` will be the owner comment on Issue #232 that
+approves the reviewed revision.
 
 ## Completion criterion
 
