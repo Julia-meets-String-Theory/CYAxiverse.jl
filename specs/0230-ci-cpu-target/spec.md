@@ -350,21 +350,26 @@ So every cache entry whose key starts with `julia-cache;`, on every ref
 the owner approves the merge and immediately before it. The owner's approval
 comment for this amendment names this deletion; the merge approval sets its
 time. The deletion is done with the GitHub API by an identity with
-`actions: write` on the repository (the owner, or the agent with the owner's
-credentials). The steps, each recorded on the PR:
+`actions: write` on the repository; the owner's approval comment names who
+does it. The steps, each recorded on the PR:
 
 1. Before the deletion, `gh run list` shows no CI or Documentation run in
    progress or queued, and the owner agrees to push nothing else to `vmm` and
-   to merge nothing else until the merge push has saved its entries.
+   to merge nothing else until step 4 is complete.
 2. The deletion, with the deleted cache IDs, refs and keys, and a listing
    right after it that shows no `julia-cache;` entry.
 3. The merge.
-4. After every job of the merge push (CI and Documentation) has finished, a
-   new listing. Every `julia-cache;` entry created between the deletion and
-   the merge push's saves, other than the merge push's own entries, is
-   deleted. If the merge push restored any entry, its saved entries are
-   deleted as well and its workflows are re-run, so that they build from
-   empty.
+4. After every job of the merge push (CI and Documentation) has finished,
+   and `gh run list` shows no CI or Documentation run in progress or queued,
+   a new listing. Every `julia-cache;` entry whose key's `run_id` is not that
+   of a merge-push run (CI or Documentation) is deleted; PR entries are cheap
+   to lose, because later PR runs restore the `vmm` base. If the merge push
+   restored any entry (its cache step log), its saved entries are deleted as
+   well and its workflows are re-run, so that they build from empty; step 4
+   is then repeated for the re-run.
+5. Later, immediately before the push that brings R-005 to `main`, the
+   `refs/heads/main` `julia-cache;` entries are deleted, because pushes to
+   `main` before then save native entries there. This is recorded on #230.
 
 The merge push then builds every entry from empty, as in run 42950743815.
 PR runs before the merge push has saved its entries start cold; later PR runs
@@ -454,8 +459,7 @@ comment.
     has the line `JULIA_CPU_TARGET: haswell` after its `Sys.CPU_NAME:` line,
     followed by its target table, and the tests and qualification pass. That run restores
     native entries, so its precompile counts are not evidence (R-007);
-  - R-007 steps 1 and 2 are recorded on the PR before the merge, and steps 3
-    and 4 after it.
+  - R-007 steps 1 and 2 are recorded on the PR before the merge.
 - All Python tests pass.
 - An independent review of the exact candidate SHA, reported separately from
   CI.
@@ -466,7 +470,8 @@ comment.
 | --- | --- |
 | First push to `vmm` after merge | Per cached job: CPU model, target table, precompile count, job time, entry size |
 | Later PR runs, until two different CPU models have been seen or the number of runs set by owner decision D2 is reached | Per cached job: CPU model, target table and precompile count |
-| Amendment 1: first push to `vmm` after the merge | Per cached job: no entry restored (else R-007 step 4 deletes and rebuilds); precompile count, job time and entry size |
+| Amendment 1: first push to `vmm` after the merge | R-007 steps 3 and 4 (listing, deleted IDs, any re-run). Per cached job: no entry restored; precompile count, job time and entry size |
+| Amendment 1: the push that brings R-005 to `main` | R-007 step 5: the deleted `main` entries |
 | Amendment 1: the first run that restores each entry of that push, and the later PR runs above whose restored entry was saved after the merge | Per cached job: only `haswell` images restored, none rejected by target; packages compiled again only for new releases (`Installed` lines) |
 
 ## Interfaces and compatibility
