@@ -167,8 +167,9 @@ $c = \tfrac12$):
   `inflation/catastrophes` and `inflation/efolds` contents
   (`candidate_slowroll_saddles`, `n_candidates`, `n_qualified`,
   `flow_efolds`, `flow_slow_roll_efolds`) depend on ε and η.
-  `_has_inflation_group` (line 100) decides resume; `force=true` replaces
-  the group (line 155).
+  `_has_inflation_group` (line 100) decides resume; without `force=true`
+  an existing group is refused (line 155), and with it the group is deleted
+  and rewritten (line 168).
 
 `inflation_scan_common.jl` also stamps rows with
 `INFLATION_SCAN_CONTRACT_VERSION = "4"`.
@@ -187,8 +188,10 @@ Their persisted CSV schemas:
 arXiv:2608.14780 N = 5 and N = 8 source metrics). These consume $M_{96}$,
 `N5_K_RAW`, `N8_K_RAW`, `K_RAW` or the `reduced_models` source kinetic
 matrices, or check against them:
-- `src/paper_benchmarks/{n8_g3_control, n8_continuation, poly102_inflation, reduced_models, compatibility, catastrophe_diagnostics}.jl`,
-  and the module file `src/paper_benchmarks.jl` that includes them
+- `src/paper_benchmarks/{n8_g3_control, n8_continuation, poly102_inflation, reduced_models, compatibility, catastrophe_diagnostics}.jl`.
+  The module file `src/paper_benchmarks.jl` only includes these and the
+  physical `fuzzy_axions_*` files; it has no functions of its own to
+  classify
 - the function `pilot_benchmark_regression` in
   `scripts/inflation_scale_continuation.jl` (line 1829; A96 through
   `poly102_inflation`, printed only). The rest of that file is physical.
@@ -347,8 +350,10 @@ $c = \tfrac12$. This specification follows the corrected wording.
   - A96 is the author's raw-radian $M_{96}/k^2$. In period-one coordinates
     this is $K_\theta = (2\pi)^2M_{96}/k^2$, about $c = 2\pi^2$ in the common
     measure.
-  - The label `"a96_reproduction_raw_radian"` covers the author raw-radian
-    source matrices divided by $k^2$: for N = 8, $M_{96}$ (`N8_K_RAW`); for
+  - The label `"a96_reproduction_raw_radian"` covers the author source
+    matrices divided by $k^2$ *when used in raw-radian coordinates*: for
+    N = 8, $M_{96}$ (`N8_K_RAW`; the same matrix in period-one θ is P96,
+    `n8_continuation.jl:6–8`); for
     N = 5, `N5_K_RAW` (`n5_geometry().metric_convention = :raw_angles_radians`,
     `poly102_inflation.jl:150–161`). Spec 0148 names only the N = 8 matrix
     A96; extending the label to the N = 5 author matrix records the same
@@ -383,8 +388,9 @@ the same contract and have an equivalent test.
 stays as now: the stored matrix symmetrized as `(Kinv + Kinv')/2`
 (`read.jl:294`), without the factor ½.
 
-`_canonical_frame` SHALL compute its `metric_residual` (`axion_photon.jl:1093`)
-from the same factorization that `kinetic_factor` uses, so that the residual
+`leading_hierarchy`'s `metric_residual` (`axion_photon.jl:1093`) SHALL be
+computed from the same factorization that `_canonical_frame` obtains from
+`kinetic_factor`, so that the residual
 tests $\Theta^T(BB^T)^{-1}\Theta = I$ for the $B$ actually applied.
 
 The unexported `read.K` (`read.jl:448`) reads `cytools/potential/K`, which no
@@ -402,7 +408,9 @@ factor C directly (for example `leading_hessian_matrix_float64(C, …)`,
 canonical factor satisfies $CC^T = K^{-1}$ for the K-argument $K$ and is never
 rescaled.
 
-**(c) Exemptions.** These are exempt from (a):
+**(c) Exemptions.** These are exempt from (a), and the reproduction paths
+are also exempt from (b): a reproduction API that takes a kinetic matrix takes
+it in the coordinates of its own contract (R-008):
 - the reproduction paths, including reproduction validations such as the
   `generate_appendix_c_geometry.py` Eq. 96 eigenvalue check, which are
   governed by R-008;
@@ -574,6 +582,7 @@ the Gram–Schmidt step taken in the Eq. 3.7 inverse metric.
 | Output | Factor |
 |---|---|
 | ε, η, every eigenvalue of $K^{-1}H$ | 1/2 |
+| `mass_min`, `mass_max` (log10 eV; diagnostic CSV rows, `inflation_scan_common.jl:343–345, 384`, and F6 `inflation/catastrophes`, `build_orientifold_vacua_inflation.jl:246–247`) | $-\tfrac12\log_{10}2$ |
 | e-fold counts along a fixed trajectory | about 2 in the slow-roll approximation; reported, not gated |
 | candidate classifications | may change; reported |
 | mode counts from `inflation_points._diagnose` | may change; reported |
@@ -633,8 +642,8 @@ driver). Two scripts that read K are not K-dependent writers:
 CSV comes from `jlm_reduced.prepare(Q, L)` and `critical_ensemble` only
 (`solve_reduced`, lines 208–231); and `validate_vacua_stage4_5.jl` writes
 `stage4_inflation.csv` from `LQtilde(Q, L)` and `leading_critical_branches`
-only (lines 157–198, 344–352); it uses no K, so it is not a K-dependent
-output. Its N5/N8 anchor results (`_stage4_n5_n8`, lines 138–155) are
+only (lines 157–190, 344–352); it uses no K, so it is not a K-dependent
+output. Its N5/N8 anchor results (`_stage4_n5_n8`, lines 138–151) are
 written only to the stage-4 text report (lines 342–343); `plan.md`
 classifies that report under R-008.
 
@@ -655,11 +664,14 @@ classifies that report under R-008.
 
 **F5 completeness.** Any other versioned output of
 `reproduce_fuzzy_axions_h11_4.py` whose content depends on the mass evaluator
-SHALL also carry the label and a minor version increment. `plan.md` SHALL
+SHALL also carry the label (a root scalar string dataset
+`kinetic_normalization` in HDF5, a top-level key in JSON) and a version
+increment (`x.y` → `x.(y+1)`; an integer suffix `-n` → `-(n+1)`). `plan.md` SHALL
 list every such output, with the evidence that the others do not depend on
 the evaluator. This includes the model-stage input HDF5 written by
 `_write_model_stage_input` (attribute
-`record_metadata_schema = "kaehler-point-provenance-1"`), whose
+`record_metadata_schema = "kaehler-point-provenance-1"`, which becomes
+`"kaehler-point-provenance-2"`), whose
 production-mode `point`s are optimizer-selected and so depend on the
 evaluator.
 
@@ -800,8 +812,9 @@ writer refusal.
 SHALL NOT catch and suppress an R-007 rejection or a combination error.
 Existing catch-all handlers SHALL let these errors propagate, in particular:
 - the `try … @warn` skip in `scripts/reproduce_appendix_b_spectra.jl:83–101`;
-- `_has_axion_photon` (`axion_photon.jl:2016–2041`, which returns `false` on
-  any error). It is used by `run_batch_axion_photon` (line 2101) and by the
+- both `_has_axion_photon` methods, the file method
+  (`axion_photon.jl:2016–2041`) and the path method (`:2049–2075`), each of
+  which returns `false` on any error. It is used by `run_batch_axion_photon` (line 2101) and by the
   `write_axion_photon_result` overwrite guard. A legacy or unlabelled F3 group
   SHALL NOT read as absent, so that the batch-resume `:failed` rule and the
   writer refusal apply to it.
@@ -875,7 +888,8 @@ reproduction output SHALL carry the matching R-006 string. In particular:
   `"a96_reproduction_raw_radian"` (R-006 per-row labels);
 - `inflation_reproduction.jl`, `benchmark_inflation_scalability.jl` and
   `author_poly102_reference.py` are A96 (including their N = 5 author-matrix
-  functions, such as `n5_kinetic_matrix` at `inflation_reproduction.jl:100`);
+  functions, such as the call to `n5_kinetic_matrix`
+  (defined at `poly102_inflation.jl:161`) at `inflation_reproduction.jl:100`);
 - the `generate_appendix_c_geometry.py` Eq. 96 eigenvalue check is a P96
   reproduction validation and keeps `inv(kinv)`.
 
