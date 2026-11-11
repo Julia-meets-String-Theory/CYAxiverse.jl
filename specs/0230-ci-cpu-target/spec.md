@@ -430,8 +430,11 @@ is not reclassified under L-0012.
   4 times when it is precompiled (R-006).
 - Amendment 1: until R-007 step 5, a `vmm` or PR run that restores a
   `refs/heads/main` entry (the default branch, used when no closer entry
-  matches) gets native images; any entry it saves is deleted and recorded on
-  #230.
+  matches) gets native images. Such a restore shows in the run's cache step
+  log as a restored key whose `run_id` is a run on `main` (`gh run view
+  <run_id>` shows its branch, and `gh cache list --ref refs/heads/main` lists
+  the key); any entry that run saves is deleted, by the
+  identity named for R-007, and recorded on #230.
 - Amendment 1: PR runs between the R-007 deletion and the merge push's saves
   have no `vmm` base and build cold: about 26.6 min for Fast tests and 34 min
   for qualification (run 42950743815).
@@ -508,7 +511,8 @@ covers the R-007 deletion.
 ## Completion criterion
 
 CYAX-0230 G0 and G1 pass and the PR is merged into `vmm`; CYAX-0230 G2 is
-recorded on #230. If R-002 does not confirm the cause, the owner decides
+recorded on #230, except the R-007 step 5 row, which stays an open item on
+#230. If R-002 does not confirm the cause, the owner decides
 under R-002 whether R-001 merges alone; the evidence is recorded on #230.
 If the owner decides that nothing merges, the work is complete when that
 decision and the evidence are recorded on #230.
