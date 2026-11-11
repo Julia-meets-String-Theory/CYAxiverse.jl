@@ -351,7 +351,7 @@ the owner approves the merge and immediately before it. The owner's approval
 comment for this amendment names this deletion; the merge approval sets its
 time. The deletion is done with the GitHub API by an identity with
 `actions: write` on the repository; the owner's approval comment names who
-does it. The steps, each recorded on the PR:
+does the deletions of steps 2, 4 and 5. The steps, each recorded on the PR:
 
 1. Before the deletion, `gh run list` shows no CI or Documentation run in
    progress or queued, and the owner agrees to push nothing else to `vmm` and
@@ -366,10 +366,14 @@ does it. The steps, each recorded on the PR:
    to lose, because later PR runs restore the `vmm` base. If the merge push
    restored any entry (its cache step log), its saved entries are deleted as
    well and its workflows are re-run, so that they build from empty; step 4
-   is then repeated for the re-run.
+   is then repeated for the re-run. After the deletions, `gh run list` shows
+   that no CI or Documentation run started after the check, and a final
+   listing shows only merge-push entries; otherwise step 4 is repeated.
 5. Later, immediately before the push that brings R-005 to `main`, the
    `refs/heads/main` `julia-cache;` entries are deleted, because pushes to
    `main` before then save native entries there. This is recorded on #230.
+   Completion of this work does not wait for step 5; until it is done, it is
+   an open item on #230.
 
 The merge push then builds every entry from empty, as in run 42950743815.
 PR runs before the merge push has saved its entries start cold; later PR runs
@@ -424,6 +428,10 @@ is not reclassified under L-0012.
   no run has shown it.
 - Amendment 1: `HostCPUFeatures` reports no AVX, AVX2, BMI2 or FMA, and warns
   4 times when it is precompiled (R-006).
+- Amendment 1: until R-007 step 5, a `vmm` or PR run that restores a
+  `refs/heads/main` entry (the default branch, used when no closer entry
+  matches) gets native images; any entry it saves is deleted and recorded on
+  #230.
 - Amendment 1: PR runs between the R-007 deletion and the merge push's saves
   have no `vmm` base and build cold: about 26.6 min for Fast tests and 34 min
   for qualification (run 42950743815).
