@@ -151,8 +151,23 @@ first verified, and `10aa3dc`.
 - `scripts/inflation_candidate_refinement.jl`
 - `scripts/inflation_scale_continuation.jl`. Its reciprocity check requires
   `K*Kinv ≈ I`.
-- `scripts/analyze_inflation_candidates.jl`
-- `scripts/compare_reduction_inflation_scan.jl`
+- `scripts/analyze_inflation_candidates.jl` (writes a CSV)
+- `scripts/compare_reduction_inflation_scan.jl` (writes a CSV)
+- `scripts/inflation_scan_prep.jl` (streamed diagnostic-family CSV with a
+  resume check, line 406)
+- `scripts/build_orientifold_vacua_inflation.jl`. It writes an HDF5
+  `inflation` group into each geometry file, with
+  `INFLATION_GROUP_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-2.3"`
+  (legacy `…-1.0`), from `inflation_scan_common.run_geometry` and
+  `inflation_candidate_refinement.scan_geometry_for_inflation`. Its
+  `inflation/catastrophes` and `inflation/efolds` contents
+  (`candidate_slowroll_saddles`, `n_candidates`, `n_qualified`,
+  `flow_efolds`, `flow_slow_roll_efolds`) depend on ε and η.
+  `_has_inflation_group` (line 100) decides resume; `force=true` replaces
+  the group (line 155).
+
+`inflation_scan_common.jl` also stamps rows with
+`INFLATION_SCAN_CONTRACT_VERSION = "4"`.
 
 Their persisted CSV schemas:
 
@@ -168,7 +183,11 @@ Their persisted CSV schemas:
 arXiv:2608.14780 N = 5 and N = 8 source metrics). These consume $M_{96}$,
 `N5_K_RAW`, `N8_K_RAW`, `K_RAW` or the `reduced_models` source kinetic
 matrices, or check against them:
-- `src/paper_benchmarks/{n8_g3_control, n8_continuation, poly102_inflation, reduced_models, compatibility, catastrophe_diagnostics}.jl`
+- `src/paper_benchmarks/{n8_g3_control, n8_continuation, poly102_inflation, reduced_models, compatibility, catastrophe_diagnostics}.jl`,
+  and the module file `src/paper_benchmarks.jl` that includes them
+- the function `pilot_benchmark_regression` in
+  `scripts/inflation_scale_continuation.jl` (line 1829; A96 through
+  `poly102_inflation`, printed only). The rest of that file is physical.
 - `scripts/audit_issue_148_*.jl`
 - `scripts/issue_148_*.jl`
 - `scripts/inflation_refinement_common.jl`. It runs
@@ -256,8 +275,9 @@ $c = \tfrac12$. This specification follows the corrected wording.
   (`kinetic_matrix`), both built from `Kinv`. Every physical Kinv→kinetic
   conversion uses them (R-001).
 - A normative contract for APIs that take K as an argument (R-001).
-- Labelled persisted outputs for F1, F2, F3, the Fuzzy-axion outputs (F4,
-  F5) and the inflation CSV families (R-006).
+- Labelled persisted outputs: every K-dependent output under the R-006
+  general rule, including F1, F2, F3, the Fuzzy-axion outputs (F4, F5), the
+  orientifold inflation group (F6) and the inflation CSV families.
 - Fail-closed readers and writers, and a rule for combining outputs (R-007).
 - Labels on the reproduction paths (R-008).
 - Updates to the physical Python path and the benchmark script.
@@ -414,7 +434,8 @@ h11=2 source-corrected role validation":
 `Q_reduced = [q_{D6} q_{D2}]`. Then:
 - $f_i = M_{\rm pl}/(2\pi\hat q_{ii})$;
 - $m_{\rm fuzzy} = \Lambda_{\rm fuzzy}^2/f_{\rm fuzzy}$;
-- $m_{\rm QCD}$ from Eq. 2.6 of the source. This is not a kinetic-path output.
+- $m_{\rm QCD}$ from Eq. 2.6 of the source, evaluated with the computed
+  $f_{\rm QCD}$. It depends on the convention only through $f_{\rm QCD}$.
 
 **Acceptance.** Each of $f_{\rm QCD}$, $f_{\rm fuzzy}$, $m_{\rm QCD}$ and
 $m_{\rm fuzzy}$ SHALL lie within **5% relative** of Eq. 4.3:
@@ -423,7 +444,8 @@ $m_{\rm fuzzy}$ SHALL lie within **5% relative** of Eq. 4.3:
 
 **Discrimination.** The same evaluation with $c = \tfrac12$ (using `Kinv` in
 place of `Kinv/2`) SHALL miss each $f_a$ by more than 20%. This shows the test
-can tell the two conventions apart.
+can tell the two conventions apart. (At $c = \tfrac12$, $m_{\rm QCD}$ is
+about 2.5e-9 eV, also outside the 5% gate.)
 
 The stringy-only selector `leading_axion_reference_data` is not this gate. Its
 scaling is covered by R-005.
@@ -477,7 +499,7 @@ in the mode sets SHALL be reported.
 | $f_K$, $f_{\rm pert}$ | √2 |
 | masses | 1/√2 |
 | $\lambda_{\rm self}$, $\lambda_{31}$, $\lambda_{22}$ | 1/4 |
-| cubic tensor, `pq_spectrum_save` (canonical mass basis) | $2^{-3/2}$ |
+| cubic tensor, `pq_spectrum_save` (canonical mass basis), with the evaluation phase held fixed in ϑ (ψ₀ = B⁻¹ϑ₀ in each convention) and a nonzero ϑ-phase fixture | $2^{-3/2}$ |
 | cubic tensor, `hp_spectrum_save` (ϑ/charge basis) | 1 |
 
 **Axion–photon (F3):**
@@ -485,7 +507,8 @@ in the mode sets SHALL be reported.
 | Output | Factor |
 |---|---|
 | $f$ | √2 |
-| mixing Θ | 1 |
+| mixing Θ from `mixing_matrix` (ratios of $q$) | 1 |
+| persisted `hierarchy/q` and `hierarchy/theta_from_canonical` (`axion_photon.jl:1381–1382`) | 1/√2 |
 | $g_{a\gamma\gamma}$, `log10_g_effective` under `:divisor_instanton` | 1/√2 |
 | `log10_g_effective` for light modes under `:electron_proxy` | $2^{-3/2}$ |
 | QED threshold mass | 1/√2 |
@@ -495,6 +518,10 @@ in the mode sets SHALL be reported.
 | quartic width | $2^{-9/2}$ |
 | `light_mode_count` under `:divisor_instanton` | unchanged |
 | `light_mode_count` under `:electron_proxy` | may change; reported |
+
+Under `:electron_proxy`, the light-mode and heavy-mode factors apply to modes
+on the same side of the QED threshold in both evaluations. Modes that cross
+the threshold are reported.
 
 The axion–photon decay constants SHALL equal arXiv:2309.13145 Eq. 2.15, with
 the Gram–Schmidt step taken in the Eq. 3.7 inverse metric.
@@ -507,11 +534,16 @@ the Gram–Schmidt step taken in the Eq. 3.7 inverse metric.
 | e-fold counts along a fixed trajectory | 2, in the slow-roll approximation; reported |
 | candidate classifications | may change; reported |
 | mode counts from `inflation_points._diagnose` | may change; reported |
+| F6 `candidate_slowroll_saddles`, `n_candidates`, `n_qualified`, `flow_efolds`, `flow_slow_roll_efolds` | may change; reported |
 
-**Fuzzy-axion model stage (F4, F5):** masses, including
-`model_mass_reference_log10_ev` and `mass_log10_ev`, 1/√2 (that is,
-$-\tfrac12\log_{10}2$ in log10 fields); model counts may change and are
-reported.
+**Fuzzy-axion model stage (F4, F5):**
+
+| Output | Factor |
+|---|---|
+| model-stage masses at fixed inputs, including F4 `model_mass_reference_log10_ev` | 1/√2 ($-\tfrac12\log_{10}2$ in log10 fields) |
+| the F5 mass evaluator `_fuzzy_axion_mass_log10` at a fixed Kähler point | 1/√2 |
+| F4 `model_lambda` and model counts | may change; reported |
+| F5 optimizer outputs: converged points, `mass_log10_ev` at the solution (constrained to the 1e-18 eV target), residuals and feasibility | may change; reported |
 
 ### R-006 — Persisted labelling contract
 
@@ -528,6 +560,16 @@ form is owner-approved decision 7. Allowed values:
 `"legacy_c_half"` is never written. Readers produce it only by inference
 (R-007).
 
+**General rule.** A *K-dependent output* is any persisted value computed from
+a kinetic matrix or factor derived from `Kinv`: through `kinetic_factor`,
+`kinetic_matrix`, `potential_factored().C`, `read.potential().K`,
+`read.oriented_potential().K`, the R-001 norm, or a reproduction matrix. Every
+writer of a K-dependent output in `src/`, `ext/`, `scripts/` or `bin/` SHALL
+label it, and SHALL increment the output's schema or contract version if it
+has one. The table below lists the writers known at `10aa3dc`. It is not the
+definition: a writer found later is governed by this rule, is added to
+`plan.md`'s inventory, and does not need a spec amendment.
+
 **Output families:**
 
 | Family | Label location | Version change |
@@ -539,7 +581,9 @@ form is owner-approved decision 7. Allowed values:
 | F3 CSV summary | `kinetic_normalization` column | — |
 | F4: `fuzzy_axion_model_stage_driver.jl` HDF5 | root dataset `kinetic_normalization` | new root `schema_version = "cyaxiverse-fuzzy-axion-model-stage-1"` |
 | F5: `reproduce_fuzzy_axions_h11_4.py` versioned outputs | top-level `kinetic_normalization` key (JSON) or root scalar string dataset (HDF5) | `REPRODUCTION_SCHEMA_VERSION` → `…-reproduction-1.3`; `KAEHLER_PRODUCTION_SCHEMA_VERSION` → `…-kaehler-production-1.1` |
-| Inflation CSV families (the five schema constants above) | `kinetic_normalization` column | each schema version incremented by one |
+| F6: `build_orientifold_vacua_inflation.jl` HDF5 `inflation` group | `inflation/kinetic_normalization` | `INFLATION_GROUP_SCHEMA_VERSION` → `…-orientifold-inflation-2.4` |
+| Inflation CSV families (the five schema constants above, and rows stamped with `INFLATION_SCAN_CONTRACT_VERSION`) | `kinetic_normalization` column | each schema version incremented by one; contract version `"4"` → `"5"` |
+| Other CSVs written by the inflation scripts (`analyze_inflation_candidates.jl`, `compare_reduction_inflation_scan.jl`) | `kinetic_normalization` column | version incremented if the file has one |
 
 **F5 completeness.** Any other versioned output of
 `reproduce_fuzzy_axions_h11_4.py` whose content depends on the mass evaluator
@@ -547,8 +591,9 @@ SHALL also carry the label and a minor version increment. `plan.md` SHALL
 list every such output, with the evidence that the others do not depend on
 the evaluator.
 
-**Per-row labels in the inflation diagnostic family.** Both the physical scan
-(`inflation_scan_common.jl`) and the A96 reproduction refinement
+**Per-row labels in the inflation diagnostic family.** The physical writers
+(`inflation_scan_common.jl`, `inflation_scan_prep.jl`) and the A96
+reproduction refinement
 (`inflation_refinement_common.jl`) write rows of the
 `INFLATION_DIAGNOSTIC_SCHEMA_VERSION` family. Its label is therefore per row:
 physical rows carry `"sugra_c1"` and refinement rows carry
@@ -561,8 +606,17 @@ physical writers at `10aa3dc`, and their rows carry `"sugra_c1"`.
   physical result it computes from `Kinv`.
 - Reproduction results carry their reproduction label through the
   `kinetic_normalization` field of their own result types (R-008).
-- Readers SHALL return the stored or inferred label as a `Symbol`, as an
-  explicit field of their return value.
+- Readers that return a `NamedTuple` (for example `physical_spectrum`,
+  `read.pq_spectrum`, `read.hp_spectrum`) SHALL add the fields
+  `kinetic_normalization::Symbol` and `kinetic_normalization_inferred::Bool`.
+- Readers that return an exported struct (for example
+  `read_axion_photon_result`, which returns `AxionPhotonResult`) SHALL keep
+  the struct unchanged. The label is available from a new exported accessor,
+  `stored_kinetic_normalization(path; family) -> (label::Symbol, inferred::Bool)`,
+  which applies the same R-007 checks. Struct-returning readers SHALL still
+  enforce R-007 before returning.
+- Python readers expose the same pair as a `(label, inferred)` tuple or as
+  dict keys of the same names.
 - Exported struct field layouts and positional constructors SHALL NOT change.
   In particular, `AxionPotential.K` is $K_{\rm kin}$ and carries no field.
 - Results computed from a caller-supplied K are not labelled by the package.
@@ -581,6 +635,10 @@ physical writers at `10aa3dc`, and their rows carry `"sugra_c1"`.
 - F4 with no `schema_version` and no label, whose root holds
   `total_model_count` and `model_mass_reference_log10_ev`;
 - F5 at `…-reproduction-1.2` or `…-kaehler-production-1.0` with no label;
+- F6 at `…-orientifold-inflation-2.3` or `…-1.0` with no label;
+- any other output covered by the R-006 general rule, at its pre-change
+  version (or with no version), with no label, as recorded in `plan.md`'s
+  inventory;
 - the F1 and F3 summary CSVs, and the inflation CSV families at their current
   versions, with no `kinetic_normalization` column.
 
@@ -592,11 +650,12 @@ family carry no physical claim (non-scope: no regeneration).
 These SHALL be read as `:legacy_c_half`, and the result SHALL record that the
 value was inferred.
 
-**Readers SHALL throw an `ArgumentError`** naming the file and family for:
+**Readers SHALL throw** an `ArgumentError` (Julia) or a `ValueError`
+(Python), naming the file and family, for:
 - a current-version output (F1 `-4`, F2 `spectrum-groups-1`, F3 identity 2,
-  F4 `model-stage-1`, F5 `reproduction-1.3` or `kaehler-production-1.1`, or an
-  incremented inflation schema) whose label is missing, or a CSV row of such a
-  family with an empty label;
+  F4 `model-stage-1`, F5 `reproduction-1.3` or `kaehler-production-1.1`, F6
+  `2.4`, or an incremented inflation schema or contract version) whose label
+  is missing, or a CSV row of such a family with an empty label;
 - a label value outside R-006;
 - a legacy version that carries a label;
 - a physical family whose label is not `"sugra_c1"`, except the per-row
@@ -621,14 +680,25 @@ value was inferred.
 - `scripts/migrate_quartic_index_ordering.jl` SHALL preserve an existing label,
   and SHALL NOT add a label to a legacy group.
 
-**Batch resume.** A physical batch run, whether `batch_physical_spectrum` or
-`run_batch_axion_photon`, SHALL NOT treat an output labelled or inferred as
-anything other than `:sugra_c1` as complete. Such an output is recomputed and
-replaced only under the runner's explicit overwrite option (`force=true` for
-`run_batch_axion_photon`; `plan.md` names the equivalent for
-`batch_physical_spectrum`). Otherwise it is reported as `:failed`, with a
-message naming the stored label, as `run_batch_axion_photon` already does for
-a configuration mismatch.
+**Batch resume.** A physical batch or resumable run SHALL NOT treat an output
+labelled or inferred as anything other than `:sugra_c1` as complete. This
+covers `batch_physical_spectrum`, `run_batch_axion_photon`,
+`build_orientifold_vacua_inflation.jl` (`_has_inflation_group`) and
+`inflation_scan_prep.jl`'s resume check. Such an output is recomputed and
+replaced only under the runner's explicit overwrite option: `force=true` for
+`run_batch_axion_photon` and `build_orientifold_vacua_inflation.jl`, and
+`--force` for `batch_physical_spectrum`. Otherwise it is reported as
+`:failed`, with a message naming the stored label, as
+`run_batch_axion_photon` already does for a configuration mismatch. This
+replaces the current silent recompute in `batch_physical_spectrum` when the
+configuration digest differs only because of the schema version.
+
+**Reader and combiner inventory.** `plan.md` SHALL list every reader and every
+cross-file combiner of the R-006 families in `src/`, `ext/`, `scripts/` and
+`bin/`, including those that bypass the package readers (for example
+`scripts/reproduce_appendix_b_spectra.jl:83–101`, which reads
+`spectrum/physical` directly and aggregates across files). Each SHALL apply
+R-007.
 
 **Combination.** Any CYAxiverse function or script that combines outputs
 across files, calls or CSV rows SHALL reject inputs whose labels differ, with
@@ -650,12 +720,29 @@ reproduction output SHALL carry the matching R-006 string. In particular:
 
 Physical readers SHALL reject reproduction labels, as R-007 requires.
 
-**Classification rule.** A path, existing or new, is a reproduction path if
-and only if it consumes $M_{96}$, `N5_K_RAW`, `N8_K_RAW`, `K_RAW` or the
-`reduced_models` source kinetic matrices, checks against them, or implements a
-spec 0148 contract. `plan.md` SHALL record a repository-wide search at the
-implementation base for these names, and SHALL classify every hit. A hit that
-is not in the list above stops the work for a spec amendment.
+**Classification rule.** Classification is per function (or per top-level
+script entry point where there is no function). A function, existing or new,
+is a reproduction function if and only if it consumes $M_{96}$, `N5_K_RAW`,
+`N8_K_RAW`, `K_RAW` or the `reduced_models` source kinetic matrices, directly
+or through `n8_kinetic_matrix`, `poly102_inflation`, `N8_BEST_X` or the other
+`paper_benchmarks` reproduction APIs; checks against them (for example
+`EXPECTED_K_EIGENVALUES`); or implements a spec 0148 contract. A file can
+hold both physical and reproduction functions, as
+`inflation_scale_continuation.jl` does.
+
+**Search record.** `plan.md` SHALL record a search at the implementation base
+for `M96`, `N5_K_RAW`, `N8_K_RAW`, `K_RAW`, `reduced_models`,
+`n8_kinetic_matrix`, `poly102_inflation`, `N8_BEST_X` and
+`EXPECTED_K_EIGENVALUES` over `src/`, `ext/`, `scripts/`, `bin/`, `test/`,
+`docs/` and `validation/`, and SHALL classify every hit.
+- Hits in `test/`, `docs/`, `validation/` and `specs/` are classified without
+  stopping the work.
+- A function in `src/`, `ext/`, `scripts/` or `bin/` that the rule makes a
+  reproduction function and that is not in the list above is added to
+  `plan.md` with its contract (P96 or A96); this needs no spec amendment.
+- The work stops for a spec amendment only if such a function writes a
+  persisted output that the R-006 tables do not already cover, or if the
+  rule does not decide between P96 and A96.
 
 ### R-009 — Documentation
 
@@ -730,7 +817,8 @@ PR at the exact SHA, plus CI green.
 | Named source fixture and discrimination check | R-003 |
 | Scaling tables, including inflation and the policy-dependent axion–photon outputs | R-005 |
 | Pinned bitwise baseline | R-002 |
-| Round-trip per family (F1–F5, CSVs); each inference and rejection case, including unversioned F1 without `fpert_log10`; F2 replace leaving F1 and F3 intact; append refusal; resume behaviour; mixed-label combination; per-row inflation labels | R-006, R-007 |
+| Round-trip per family (F1–F6, CSVs); each inference and rejection case, including unversioned F1 without `fpert_log10`; F2 replace leaving F1 and F3 intact; append refusal; resume behaviour for each named runner; mixed-label combination; per-row inflation labels; `stored_kinetic_normalization` for F3 | R-006, R-007 |
+| Writer, reader and combiner inventory in `plan.md` under the R-006 general rule | R-006, R-007 |
 | Reproduction paths unchanged and labelled; classification search recorded | R-008 |
 | Docs build | R-009 |
 | Certification audit | R-010 |
@@ -741,7 +829,9 @@ PR at the exact SHA, plus CI green.
 
 **Public API.**
 - Signatures and exported struct layouts are unchanged.
-- New exports: `KINETIC_NORMALIZATION`, `kinetic_factor` and `kinetic_matrix`.
+- New exports: `KINETIC_NORMALIZATION`, `kinetic_factor`, `kinetic_matrix`
+  and `stored_kinetic_normalization`.
+- `NamedTuple`-returning readers gain two fields (R-006).
 - APIs that take K keep their meaning under the K-argument contract.
 - Physical outputs computed from `Kinv` change by the R-005 factors.
 
@@ -750,8 +840,9 @@ PR at the exact SHA, plus CI green.
 - F2 gains `spectrum-groups-1` metadata.
 - F3 identity moves to version 2.
 - F4 gains `fuzzy-axion-model-stage-1`; F5 moves to `reproduction-1.3` and
-  `kaehler-production-1.1`.
-- The inflation CSV schema versions are each incremented by one.
+  `kaehler-production-1.1`; F6 moves to `orientifold-inflation-2.4`.
+- The inflation CSV schema versions are each incremented by one, and the scan
+  contract version moves to `"5"`.
 - Legacy outputs, including unversioned F1 and F4, remain readable as
   `:legacy_c_half`.
 
