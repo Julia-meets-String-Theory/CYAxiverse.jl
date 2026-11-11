@@ -8,9 +8,9 @@ workstream: CI workflows, their depot caches and their tests
 parent: null
 depends_on: []
 created: 2026-11-09
-last_reviewed: 2026-11-10
+last_reviewed: 2026-11-11
 review_required: repository-owner approval
-approval_ref: "PR #231 comment 6781024991 — approves spec revision 47a32b1, with owner decisions D1 (2 re-runs) and D2 (3 PR runs)"
+approval_ref: "PR #231 comment 6781024991 — approves spec revision 47a32b1, with owner decisions D1 (2 re-runs) and D2 (3 PR runs); PR #231 comment 6797717210 — approves Amendment 1 at 5bb0750, with the R-007 deletions done by the owner"
 version_impact: none (CI only)
 ---
 
@@ -175,9 +175,9 @@ address:
 
 ## Amendment 1 — the R-004 fix
 
-Status of this amendment: draft, not approved. When the owner approves it,
-the approval comment is added to `approval_ref` and `last_reviewed` is
-updated; until then R-005 to R-008 are not in force.
+Status of this amendment: approved at `5bb0750` by the owner in PR #231
+comment 6797717210. The deletions of R-007 steps 2, 4 and 5 are done by the
+owner.
 
 R-002 confirmed the cause on CI run 42925415808 and Documentation run
 42925415827 (`ba2364b`; evidence in the PR #231 description). This amendment
