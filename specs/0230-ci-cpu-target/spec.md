@@ -173,6 +173,170 @@ address:
 - if the fix changes any qualification result or tolerance, the work is
   reclassified (L-0012) before it continues.
 
+## Amendment 1 — the R-004 fix
+
+R-002 confirmed the cause on CI run 42925415808 and Documentation run
+42925415827 (`ba2364b`; evidence in the PR #231 description). This amendment
+defines the fix. R-005 to R-008 are its requirements.
+
+### Facts for the amendment
+
+Julia 1.12.7 source:
+
+- `base/loading.jl` (`compilecache_path`, `create_expr_cache`): when
+  `JULIA_CPU_TARGET` is set, the precompile process compiles the package
+  image for that target. The value is also part of the cache file name.
+  Code compiled at run time stays for the runner's own CPU
+  (`src/init.c`: `native` when no `-C` option is given).
+- `src/processor.cpp` (`match_sysimg_targets`): a restored image is
+  rejected only if its target uses a CPU feature that the runner lacks.
+  The CPU name only ranks the candidates.
+- `src/processor_x86.cpp`: `haswell` is a known target name. Its features
+  are the Ivy Bridge set plus `avx2`, `bmi`, `bmi2`, `fma`, `lzcnt` and
+  `movbe`, without AVX-512. `rdrnd` and `xsaveopt` are always removed from
+  image targets. `x86-64-v3` is not a known name.
+- Older files of a package stay in the depot beside new ones (up to 10 per
+  package, `MAX_NUM_PRECOMPILE_FILES`). Any file that passes the checks loads,
+  whatever target it records.
+
+`HostCPUFeatures` v0.1.18 (`src/HostCPUFeatures.jl`, `src/cpu_info_x86.jl`):
+
+- When the precompile target does not contain `native`, the package fixes
+  its CPU features at precompile time (`freeze_cpu_target` becomes true).
+- For a target name containing `well`, `make_generic_x86` sets `avx`,
+  `avx2`, `bmi2` and `fma`. With the default preference
+  `allow_runtime_invalidation = false`, it only warns, and every feature
+  stays false.
+- The preference `cpu_target` replaces the target name it reads.
+  `freeze_cpu_target` is already true here.
+
+Base reads a package's preferences only from projects that list the
+package in `[deps]`, `[extras]` or `[weakdeps]` (`get_uuid_name`).
+`Pkg.test` copies `Base.get_preferences()` into its sandbox.
+
+LoopVectorization code in CI, at `ba2364b`:
+
+- No file under `src/`, `ext/`, `test/`, `bin/` or `scripts/` calls
+  `@turbo`, `@tullio` or `@avx`, or builds a `TensorProductOperator`.
+- In the resolved CI dependency tree (job logs, General registry
+  dependency ranges for the versions used), the only package code that uses
+  LoopVectorization is LoopVectorization itself and
+  `SciMLOperatorsLoopVectorizationExt` (SciMLOperators v1.30.4). That
+  extension uses `@turbo` only in `tensor_outer_mul_fast!`, for tensor-product
+  operators. `RecursiveFactorization`, `TriangularSolve` and `Octavian` are not
+  in the tree.
+
+Measurements on the unmerged branch `experiment/cyax-0230-cpu-target-haswell`
+(`7858274`, the head commit of each run below): `ba2364b` plus `JULIA_CPU_TARGET: 'haswell'`, running only Fast
+tests and qualification, each with its own experiment cache. The
+Documentation build and the lifecycle job were not run; they use the same
+mechanism, and the G1 PR run covers them:
+
+| Run | Job | CPU (`Sys.CPU_NAME`) | Restored images (all `haswell`) | Rejected by target | Precompiled (time) | Job time | Entry saved | Result |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 42950743815 | Fast tests | `znver4` | none (cold) | — | 479 (1081 s) | 26.6 min | 710 MiB | tests pass |
+| 42950743815 | Qualification | `znver5` | none (cold) | — | 276 (461 s) | 34.2 min | 264 MiB | PASS 6/6, 28/28 |
+| 42954635686 | Fast tests | `znver4` | 485 (from run 42950743815) | 0 | 0 | 10.3 min | — | tests pass |
+| 42954635686 | Qualification | `icelake-server` | 276 (from run 42950743815) | 0 | 0 | 35.8 min | — | PASS 6/6, 28/28 |
+| 42958611390 | Fast tests | `znver4` | 485 (from run 42954635686) | 0 | 0 | 8.4 min | — | tests pass |
+| 42958611390 | Qualification | `znver3` | 276 (from run 42954635686) | 0 | 0 | 37.9 min | — | PASS 6/6, 28/28 |
+| 42962732225 | Fast tests | `znver5` | 485 (from run 42958611390) | 0 | 0 | 7.6 min | — | tests pass |
+| 42962732225 | Qualification | `znver5` | 276 (from run 42958611390) | 0 | 0 | 24.9 min | — | PASS 6/6, 28/28 |
+
+Runs 2 to 4 saved entries of the same sizes. Each experiment entry was deleted
+after the next run had restored it, and the last ones after run 42962732225.
+The branch was deleted after the runs.
+
+For comparison, before the fix: earlier `vmm` pushes saved native Fast tests
+entries of 711 to 816 MiB (CYAX-0223 evidence 3 and 4), and 1159 MiB for
+run 42664830366, which held images for two CPU targets. The push run
+42664830366 recompiled 479 packages in 1153 s on `graniterapids`. Qualification
+entries were 267 to 419 MiB. HostCPUFeatures printed its 4 warnings
+(`avx`, `avx2`, `bmi2`, `fma`) once per job, while it was precompiled.
+
+### Alternatives considered
+
+- **Julia's official x86-64 list**
+  (`generic;sandybridge,-xsaveopt,clone_all;haswell,-rdrnd,base(1);x86-64-v4,-rdrnd,base(1)`).
+  It compiles every function at least twice, and some three or four times,
+  so compile time and entry size grow. CI gains nothing from the extra
+  targets. `HostCPUFeatures` reads the first entry, `generic`, so its features
+  are all false here too.
+- **Cache entries keyed by CPU model.** Every job would need a `cache-name`
+  that contains the model. That needs a CYAX-0223 R-004 amendment and a
+  step to read the model before the cache step. Each model needs its own
+  entry, so 6 models seen so far, in 4 cached jobs, would hold about six times
+  today's entries against the 10 GB limit. A PR would hit only if a `vmm`
+  push had run on the same model.
+- **A target list that contains `native`.** `HostCPUFeatures` would then take
+  the features of the CPU that built it, and on an older runner LoopVectorization
+  could emit instructions that the runner lacks.
+- **No change.** Every run on a CPU without a feature of the building CPU
+  recompiles, as R-002 showed.
+
+### R-005 — One CPU target for package images
+
+`CI.yml` and `Documentation.yml` each set, at workflow level,
+`env: JULIA_CPU_TARGET: 'haswell'`, with a comment that cites this
+specification. No job or step in them sets `JULIA_CPU_TARGET`. `WikiRefresh.yml`
+keeps no cache and is not changed.
+
+### R-006 — HostCPUFeatures
+
+No `HostCPUFeatures` preference is set. `Project.toml` and
+`LocalPreferences.toml` do not change. Under R-005, `HostCPUFeatures` reports
+no AVX, AVX2, BMI2 or FMA, and prints 4 warnings when it is precompiled.
+
+Reason: the only LoopVectorization code in the dependency tree is not on the
+tested or qualified paths (*Facts*). Making the preference effective would add
+`HostCPUFeatures` to the package's `[extras]` and test target, a change to
+package metadata for code CI does not run. If LoopVectorization code ran, it
+would use 16-byte vectors and no fused multiply-add. That is still valid code
+on every runner, but slower and rounded differently.
+
+### R-007 — Package images built before the fix
+
+R-005 does not change any `cache-name`, so CYAX-0223 R-004 is unchanged.
+The `vmm` entries of the cached jobs hold native images. After the merge they
+would still be restored and loaded wherever the runner accepts them, and the
+`haswell` images would be added beside them. To start from `haswell` images
+only, the `vmm` entries of the cached jobs are deleted once, by cache ID,
+after the owner approves the merge and immediately before it (owner
+decision D3). The merge push then builds every entry from empty, as in run
+42950743815. Entries on pull-request refs go when cache maintenance deletes
+closed-PR entries (CYAX-0223 R-007). If D3 is declined, the native images age
+out only as packages update.
+
+### R-008 — Tests
+
+`scripts/test_ci_cache_workflow.py` checks that `CI.yml` and
+`Documentation.yml` set `JULIA_CPU_TARGET: 'haswell'` in their workflow-level
+`env`, and that no job or step in them sets `JULIA_CPU_TARGET`. Its tests that
+alter the workflow text show that the check fails when the variable is
+missing, has another value, or is overridden in a job or step. The PR records
+the tests failing against the parent commit.
+
+The same commit fixes the two non-blocking findings of the review of
+`ba2364b`:
+
+- `scripts/ci_report_package_images.jl` opens each file inside its `try`, so
+  a file that cannot be opened counts as unreadable.
+- The R-003 check finds a cache step in any YAML form of
+  `uses: julia-actions/cache@…`.
+
+The first fix is shown by running the script, before and after, on a local
+depot that holds a file it cannot read. The output goes in the PR.
+
+### Numerical effect
+
+Package image code is compiled for `haswell` on every runner: AVX2 and FMA,
+no AVX-512. Before, it was compiled for whichever CPU built the image. Code
+compiled at run time does not change. In all four runs, on `znver5`,
+`icelake-server`, `znver3` and `znver5`, qualification gave the same verdicts and counts as before the fix:
+`fast_qualification=PASS` with 6 producers and 6 replays, and
+`public_qualification=PASS` with 28 and 28. No tolerance changes, so the work
+is not reclassified under L-0012.
+
 ## Accepted limitations
 
 - The recompilation continues until the fix merges.
@@ -180,6 +344,12 @@ address:
   (`Base.parse_cache_header`, `Base.check_clone_targets`); a Julia update may
   break it. Because it cannot fail the job, a break shows as a missing table,
   not a failed run.
+- Amendment 1: a runner that lacks a `haswell` feature would reject the
+  images and compile them again, as before the fix. No runner seen so far
+  lacks one (`znver3`, `znver4`, `znver5`, `icelake-server`,
+  `sapphirerapids`, `graniterapids`).
+- Amendment 1: `HostCPUFeatures` reports no AVX, AVX2, BMI2 or FMA, and warns
+  4 times when it is precompiled (R-006).
 
 ## Acceptance gates
 
@@ -201,7 +371,15 @@ comment.
   probably have removed it (7 days unused) and that job's table may be empty;
   an empty table is not a failure.
 - If confirmed: the approved R-004 amendment, its implementation and tests,
-  and a passing PR CI run.
+  and a passing PR CI run. For amendment 1, also:
+  - the owner's approval comment that names the amendment's commit SHA;
+  - R-005 and the R-008 changes in one commit, with the R-008 tests failing
+    against the parent commit, and the before-and-after script output, in the
+    PR;
+  - on the PR's CI run, every cached job prints `JULIA_CPU_TARGET: haswell`,
+    and the tests and qualification pass;
+  - the R-007 deletion (if D3 is accepted) is recorded on the PR, with the
+    deleted cache IDs and keys, before the merge.
 - All Python tests pass.
 - An independent review of the exact candidate SHA, reported separately from
   CI.
@@ -212,6 +390,8 @@ comment.
 | --- | --- |
 | First push to `vmm` after merge | Per cached job: CPU model, target table, precompile count, job time, entry size |
 | Later PR runs, until two different CPU models have been seen or the number of runs set by owner decision D2 is reached | Per cached job: CPU model, target table and precompile count |
+| Amendment 1: first push to `vmm` after the merge | Per cached job: the target table shows only `haswell` (if D3 was accepted); precompile count, job time and entry size |
+| Amendment 1: the later PR runs above | Per cached job: no `haswell` image rejected by target; packages compiled again only for new releases (`Installed` lines) |
 
 ## Interfaces and compatibility
 
@@ -222,8 +402,8 @@ state its own numerical effect.
 
 ## Owner decisions
 
-The owner chose these values before this spec was committed; the G0 approval
-comment confirms them.
+The owner chose D1 and D2 before this spec was committed; the G0 approval
+comment confirms them. D3 belongs to amendment 1 and its approval comment.
 
 - D1: how many re-runs of the PR's cached jobs R-002 may use if the first run
   decides nothing. Each run samples four runners (lifecycle, fast,
@@ -234,6 +414,11 @@ comment confirms them.
   CPU; the bound is a cost choice. Decision: up to 2 re-runs.
 - D2: how many PR runs G2 records if two CPU models have not been seen.
   Decision: 3, a cost choice on the same basis.
+- D3 (amendment 1): whether the `vmm` cache entries of the cached jobs are
+  deleted once, immediately before the merge (R-007). If yes, the merge push
+  and any PR run before it build their entries from empty: the Fast tests
+  took 26.6 min that way in run 42950743815. If no, native images stay in the
+  entries beside the `haswell` ones until packages update. Decision: pending.
 
 ## Completion criterion
 
