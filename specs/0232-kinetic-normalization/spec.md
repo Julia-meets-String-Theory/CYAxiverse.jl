@@ -234,7 +234,8 @@ finiteness.
     optional.
   - `schema_version = "cyaxiverse-physical-spectrum-3"` since `239a3a7`.
   - Earlier and migrated outputs (`scripts/migrate_legacy_spectra.jl`, which
-    copies old metadata as it is) have no `schema_version`.
+    copies old metadata as it is) have no `schema_version` unless their
+    source carried one.
 - F1 batch summary CSV: `SUMMARY_HEADER` in `scripts/batch_physical_spectrum.jl`.
   With `--append-summary`, `_write_summary_header` keeps an existing file and
   its header unchanged.
@@ -344,6 +345,12 @@ $c = \tfrac12$. This specification follows the corrected wording.
   - A96 is the author's raw-radian $M_{96}/k^2$. In period-one coordinates
     this is $K_\theta = (2\pi)^2M_{96}/k^2$, about $c = 2\pi^2$ in the common
     measure.
+  - The label `"a96_reproduction_raw_radian"` covers the author raw-radian
+    source matrices divided by $k^2$: for N = 8, $M_{96}$ (`N8_K_RAW`); for
+    N = 5, `N5_K_RAW` (`n5_geometry().metric_convention = :raw_angles_radians`,
+    `poly102_inflation.jl:150–161`). Spec 0148 names only the N = 8 matrix
+    A96; extending the label to the N = 5 author matrix records the same
+    raw-radian convention class and changes no numerics.
 
 ## Requirements
 
@@ -385,7 +392,13 @@ SHALL classify it (remove, or document it as unlabelled and not physical).
 **(b) APIs that take K.** APIs that take K SHALL follow the K-argument
 contract and SHALL NOT call `kinetic_factor` on their argument.
 `_canonical_factor_from_K` is unchanged. Docstrings of every K-taking public
-API SHALL state the contract.
+API SHALL state the contract. The same holds for APIs that take a canonical
+factor C directly (for example `leading_hessian_matrix_float64(C, …)`,
+`generate.jl:1319`, its `_scaled` variant at 1440,
+`high_precision_leading_hessian` at 1470 and
+`leading_hessian_mass_basis_float64` at 1778): an argument documented as a
+canonical factor satisfies $CC^T = K^{-1}$ for the K-argument $K$ and is never
+rescaled.
 
 **(c) Exemptions.** These are exempt from (a):
 - the reproduction paths, including reproduction validations such as the
@@ -524,7 +537,7 @@ in the mode sets SHALL be reported.
 | $f_K$, $f_{\rm pert}$ | √2 |
 | masses | 1/√2 |
 | $\lambda_{\rm self}$, $\lambda_{31}$, $\lambda_{22}$ | 1/4 |
-| cubic tensor, `pq_spectrum_save` (canonical mass basis), with the evaluation phase held fixed in ϑ (ψ₀ = B⁻¹ϑ₀ in each convention) and a nonzero ϑ-phase fixture | $2^{-3/2}$ |
+| cubic tensor, `pq_spectrum_save` (canonical mass basis), with the evaluation phase held fixed in ϑ (the mass-basis phase is $x_0 = \mathrm{basis}^TB^{-1}\vartheta_0$ in each convention, since `cubic` takes `Qmass = Q̃ᵀ·C·basis`, `generate.jl:3013–3015`) and a nonzero ϑ-phase fixture | $2^{-3/2}$ |
 | cubic tensor, `hp_spectrum_save` (ϑ/charge basis) | 1 |
 
 **Axion–photon (F3):**
@@ -559,7 +572,7 @@ the Gram–Schmidt step taken in the Eq. 3.7 inverse metric.
 | Output | Factor |
 |---|---|
 | ε, η, every eigenvalue of $K^{-1}H$ | 1/2 |
-| e-fold counts along a fixed trajectory | 2, in the slow-roll approximation; reported |
+| e-fold counts along a fixed trajectory | about 2 in the slow-roll approximation; reported, not gated |
 | candidate classifications | may change; reported |
 | mode counts from `inflation_points._diagnose` | may change; reported |
 | F6 `candidate_slowroll_saddles`, `n_candidates`, `n_qualified`, `flow_efolds`, `flow_slow_roll_efolds` | may change; reported |
@@ -706,8 +719,10 @@ their rows carry `"sugra_c1"`.
   pre-change versions, with no `kinetic_normalization` column.
 
 A legacy F2 layout records neither its writer (`hp_spectrum_save` or
-`pq_spectrum_save`) nor its cubic basis. Its readers SHALL report the cubic
-basis as `:unknown`; any consumer that needs the basis (for example to compare
+`pq_spectrum_save`) nor its cubic basis. Its readers (at `10aa3dc`,
+`read.cubic_tensor`, `read.jl:487`) SHALL report the basis in a
+`cubic_basis::Symbol` field, `:unknown` for legacy F2 and `:charge_basis` or
+`:canonical_mass_basis` for current F2; any consumer that needs the basis (for example to compare
 or rescale cubic tensors) SHALL throw for a legacy F2 cubic tensor.
 
 These SHALL be read as `:legacy_c_half`, and the result SHALL record that the
@@ -723,7 +738,8 @@ SHALL throw. At `10aa3dc` no repository reader consumes such outputs.
 **Mixed legacy files.** A legacy file in which physical and reproduction rows
 share one layout and cannot be told apart (possible for the inflation
 diagnostic family and `stage4_inflation.csv`) SHALL be rejected by physical
-readers unless its writer is recorded in `plan.md` as purely physical.
+readers unless every writer of that legacy layout is recorded in `plan.md` as
+purely physical.
 
 **Readers SHALL throw** an `ArgumentError` (Julia) or a `ValueError`
 (Python), naming the file and family, for:
@@ -737,9 +753,10 @@ readers unless its writer is recorded in `plan.md` as purely physical.
   next to it;
 - a stored `"legacy_c_half"` in an F1–F6 HDF5 output (these primary families
   never hold derived values);
-- a physical family whose label is not `"sugra_c1"`, or, in a derived output,
-  a stored `"legacy_c_half"`, except the per-row reproduction-labelled rows of
-  per-row-labelled families. A physical reader of such a family SHALL return
+- a physical family whose label is neither `"sugra_c1"` nor, for a derived
+  output only, a stored `"legacy_c_half"` with
+  `kinetic_normalization_inferred = true`, except the per-row
+  reproduction-labelled rows of per-row-labelled families. A physical reader of such a family SHALL return
   each row's label, and a physical aggregate SHALL filter out reproduction
   rows *before* applying the combination check to the remaining rows;
 - a current-version F2 (`spectrum-groups-1`) whose `cubic_basis` is missing or
@@ -805,10 +822,11 @@ replaced only under the runner's explicit overwrite option: `force=true` for
 `--force` for `batch_physical_spectrum`. Otherwise it is reported as
 `:failed`, with a message naming the stored label, as
 `run_batch_axion_photon` already does for a configuration mismatch. For
-`batch_physical_spectrum` this replaces the current behaviour, in which any
-configuration-digest mismatch (the digest hashes `schema_version` and the
-git `source_revision`, `batch_physical_spectrum.jl:176–183`) triggers a
-silent recompute. `inflation_scan_prep.jl` has no overwrite option: with
+`batch_physical_spectrum` this `:failed` rule applies only to outputs
+labelled or inferred other than `:sugra_c1`. A `"sugra_c1"` output whose
+configuration digest differs (the digest hashes `schema_version` and the git
+`source_revision`, `batch_physical_spectrum.jl:176–183`) keeps today's
+behaviour: it is silently recomputed. `inflation_scan_prep.jl` has no overwrite option: with
 `--append-summary` the R-007 append rule refuses a legacy summary, and the
 remedy is a new summary path.
 
@@ -833,7 +851,11 @@ reproduction output SHALL carry the matching R-006 string. In particular:
 - `inflation_refinement_common.jl` rows carry
   `"a96_reproduction_raw_radian"` (R-006 per-row labels);
 - `inflation_reproduction.jl`, `benchmark_inflation_scalability.jl` and
-  `author_poly102_reference.py` are A96;
+  `author_poly102_reference.py` are A96 (including their N = 5 author-matrix
+  functions, such as `n5_kinetic_matrix` at `inflation_reproduction.jl:100`);
+- the N = 5 rows of `validate_vacua_stage4_5.jl`'s `stage4_inflation.csv`
+  (`validate_vacua_stage4_5.jl:138–157`) carry
+  `"a96_reproduction_raw_radian"`; its physical rows carry `"sugra_c1"`;
 - the `generate_appendix_c_geometry.py` Eq. 96 eigenvalue check is a P96
   reproduction validation and keeps `inv(kinv)`.
 
