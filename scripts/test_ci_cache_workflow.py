@@ -1,6 +1,7 @@
 """CI cache lifecycle (CYAX-0223): workflow wiring and cache-maintenance selection.
 
-Also the CPU and package-image report after every Julia cache step (CYAX-0230 R-003).
+Also the CPU and package-image report after every Julia cache step (CYAX-0230 R-003)
+and the one CPU target for package images (CYAX-0230 R-005, R-008).
 """
 
 from __future__ import annotations
@@ -43,6 +44,23 @@ CACHED_JOBS = [
     ("CI", "lifecycle"), ("CI", "fast"), ("CI", "fast-cache"), ("CI", "qualification"),
     ("CI", "full"), ("Documentation", "build"),
 ]
+# CYAX-0230 R-005: the only place either workflow names JULIA_CPU_TARGET.
+CPU_TARGET_LINE = "  JULIA_CPU_TARGET: 'haswell'\n"
+# The forms of a julia-actions/cache step the R-003 check must find (R-008).
+CACHE_STEP_FORMS = {
+    "plain": "      - uses: julia-actions/cache@v2\n",
+    "single-quoted": "      - uses: 'julia-actions/cache@v2'\n",
+    "double-quoted": '      - uses: "julia-actions/cache@v2"\n',
+    "trailing comment": "      - uses: julia-actions/cache@v2  # depot cache\n",
+    "quoted with comment": "      - uses: 'julia-actions/cache@v2' # depot cache\n",
+    "after a name": "      - name: Cache the depot\n        uses: julia-actions/cache@v2\n",
+}
+# A step line that uses julia-actions/cache: as "- uses:" or as a "uses:" key
+# after "- name:", the value plain, single- or double-quoted, with or without a
+# trailing comment.
+CACHE_USES = re.compile(
+    r"""^      (?:- |  )uses: *(?P<q>['"]?)julia-actions/cache@[^'"\s#]+(?P=q) *(?:#.*)?$""",
+    flags=re.M)
 BEGIN = "# BEGIN cache-maintenance"
 END = "# END cache-maintenance"
 
@@ -286,8 +304,7 @@ class PackageImageReport(unittest.TestCase):
         for name, workflow in workflows.items():
             for job in _job_names(workflow):
                 steps = _steps(_job_block(workflow, job))
-                caches = [i for i, step in enumerate(steps)
-                          if step.startswith("      - uses: julia-actions/cache@")]
+                caches = [i for i, step in enumerate(steps) if CACHE_USES.search(step)]
                 if not caches:
                     continue
                 self.assertEqual(len(caches), 1, f"{name} job {job}")
@@ -366,6 +383,151 @@ class PackageImageReport(unittest.TestCase):
         broken = {name: text.replace(report, fatal) for name, text in self.workflows.items()}
         with self.assertRaises(AssertionError):
             self._check_report_steps(broken)
+
+    def _with_fast_cache_step(self, form: str) -> dict[str, str]:
+        fast = _job_block(self.workflows["CI"], "fast")
+        changed = fast.replace(CACHE_STEP_FORMS["plain"], form, 1)
+        workflows = dict(self.workflows)
+        workflows["CI"] = self.workflows["CI"].replace(fast, changed, 1)
+        return workflows
+
+    def test_report_check_finds_the_cache_step_in_every_uses_form(self) -> None:
+        # R-008: the review of ba2364b found that the check saw only the plain
+        # "- uses:" form, so a quoted or commented cache step had no report check.
+        for label, form in CACHE_STEP_FORMS.items():
+            with self.subTest(form=label):
+                workflows = self._with_fast_cache_step(form)
+                if label != "plain":
+                    self.assertNotEqual(workflows["CI"], self.workflows["CI"])
+                self._check_report_steps(workflows)
+
+    def test_report_check_fails_for_a_cache_step_without_a_report_in_every_uses_form(self) -> None:
+        # The changes job restores no cache; give it one with no report step after it.
+        changes = _job_block(self.workflows["CI"], "changes")
+        for label, form in CACHE_STEP_FORMS.items():
+            with self.subTest(form=label):
+                changed = changes.replace("    steps:\n", "    steps:\n" + form, 1)
+                self.assertNotEqual(changed, changes)
+                broken = dict(self.workflows)
+                broken["CI"] = self.workflows["CI"].replace(changes, changed, 1)
+                with self.assertRaises(AssertionError):
+                    self._check_report_steps(broken)
+
+
+def _top_level_section(workflow: str, key: str) -> str:
+    """Return a top-level key line (e.g. 'env:') and the indented lines after it."""
+    lines = workflow.splitlines(keepends=True)
+    start = lines.index(f"{key}:\n")
+    out = [lines[start]]
+    for line in lines[start + 1:]:
+        if line.strip() and not line.startswith(" "):
+            break
+        out.append(line)
+    return "".join(out)
+
+
+class CpuTarget(unittest.TestCase):
+    """CYAX-0230 R-005 and R-008: one CPU target for package images, set once."""
+
+    def setUp(self) -> None:
+        self.workflows = {name: path.read_text(encoding="utf-8")
+                          for name, path in WORKFLOWS.items()}
+
+    def _check_cpu_target(self, workflows: dict[str, str]) -> None:
+        """Raise AssertionError unless each workflow sets JULIA_CPU_TARGET to haswell
+        in its workflow-level env, with a comment that cites CYAX-0230, and names
+        JULIA_CPU_TARGET nowhere else (a job or step env:, a run: export or
+        $GITHUB_ENV write, a with: input, or that comment). No subTest, so that a
+        caller expecting the failure sees it (see _check_gc_placement).
+        """
+        for name, workflow in workflows.items():
+            self.assertIn("\nenv:\n", workflow, f"{name}: no workflow-level env")
+            env = _top_level_section(workflow, "env")
+            self.assertIn(CPU_TARGET_LINE, env, name)
+            self.assertRegex(env, r"(?m)^  #.*CYAX-0230", f"{name}: comment citing the spec")
+            self.assertEqual(workflow.count("JULIA_CPU_TARGET"), 1,
+                             f"{name}: JULIA_CPU_TARGET outside the workflow-level env line")
+
+    def _assert_check_fails(self, name: str, old: str, new: str) -> None:
+        self.assertEqual(self.workflows[name].count(old) >= 1, True, f"{name}: {old!r}")
+        broken = dict(self.workflows)
+        broken[name] = self.workflows[name].replace(old, new, 1)
+        self.assertNotEqual(broken[name], self.workflows[name])
+        with self.assertRaises(AssertionError):
+            self._check_cpu_target(broken)
+
+    def test_both_workflows_set_haswell_once_at_workflow_level(self) -> None:
+        self._check_cpu_target(self.workflows)
+
+    def test_wiki_refresh_does_not_set_a_cpu_target(self) -> None:
+        # R-005: WikiRefresh.yml keeps no cache and is not changed.
+        wiki = (ROOT / ".github" / "workflows" / "WikiRefresh.yml").read_text(encoding="utf-8")
+        self.assertNotIn("JULIA_CPU_TARGET", wiki)
+
+    def test_check_fails_when_the_variable_is_missing(self) -> None:
+        for name in WORKFLOWS:
+            with self.subTest(workflow=name):
+                self._assert_check_fails(name, CPU_TARGET_LINE, "")
+
+    def test_check_fails_for_another_value(self) -> None:
+        for name in WORKFLOWS:
+            with self.subTest(workflow=name):
+                self._assert_check_fails(name, CPU_TARGET_LINE,
+                                         "  JULIA_CPU_TARGET: 'native'\n")
+
+    def test_check_fails_when_the_comment_names_the_variable(self) -> None:
+        self._assert_check_fails("CI", CPU_TARGET_LINE,
+                                 "  # Sets JULIA_CPU_TARGET.\n" + CPU_TARGET_LINE)
+
+    def test_check_fails_when_the_comment_does_not_cite_the_spec(self) -> None:
+        env = _top_level_section(self.workflows["CI"], "env")
+        uncited = env.replace("CYAX-0230", "this change")
+        self.assertNotEqual(uncited, env)
+        self._assert_check_fails("CI", env, uncited)
+
+    def test_check_fails_when_the_setting_moves_to_a_job_env(self) -> None:
+        # R-005 places it at workflow level: one occurrence elsewhere is not enough.
+        moved = dict(self.workflows)
+        moved["CI"] = (self.workflows["CI"]
+                       .replace(CPU_TARGET_LINE, "", 1)
+                       .replace("    env:\n      CYAXIVERSE_TEST_FULL: '0'\n",
+                                "    env:\n      JULIA_CPU_TARGET: 'haswell'\n"
+                                "      CYAXIVERSE_TEST_FULL: '0'\n", 1))
+        self.assertEqual(moved["CI"].count("JULIA_CPU_TARGET"), 1)
+        self.assertNotIn(CPU_TARGET_LINE, _top_level_section(moved["CI"], "env"))
+        with self.assertRaises(AssertionError):
+            self._check_cpu_target(moved)
+
+    def test_check_fails_for_a_job_env(self) -> None:
+        self._assert_check_fails("CI", "    env:\n      CYAXIVERSE_TEST_FULL: '0'\n",
+                                 "    env:\n      JULIA_CPU_TARGET: native\n"
+                                 "      CYAXIVERSE_TEST_FULL: '0'\n")
+
+    def test_check_fails_for_a_step_env(self) -> None:
+        self._assert_check_fails("CI", "        env:\n          JULIA_PKG_PRECOMPILE_AUTO: '0'\n",
+                                 "        env:\n          JULIA_CPU_TARGET: native\n"
+                                 "          JULIA_PKG_PRECOMPILE_AUTO: '0'\n")
+
+    def test_check_fails_for_a_run_export(self) -> None:
+        for name in WORKFLOWS:
+            with self.subTest(workflow=name):
+                self._assert_check_fails(name, "        run: |\n",
+                                         "        run: |\n"
+                                         "          export JULIA_CPU_TARGET=native\n")
+
+    def test_check_fails_for_a_github_env_write(self) -> None:
+        for name in WORKFLOWS:
+            with self.subTest(workflow=name):
+                self._assert_check_fails(name, "        run: |\n",
+                                         "        run: |\n"
+                                         "          echo 'JULIA_CPU_TARGET=native' >> \"$GITHUB_ENV\"\n")
+
+    def test_check_fails_for_a_with_input(self) -> None:
+        for name in WORKFLOWS:
+            with self.subTest(workflow=name):
+                self._assert_check_fails(name, "        with:\n          version: '1.12'\n",
+                                         "        with:\n          version: '1.12'\n"
+                                         "          JULIA_CPU_TARGET: native\n")
 
 
 class GarbageCollectionCount(unittest.TestCase):

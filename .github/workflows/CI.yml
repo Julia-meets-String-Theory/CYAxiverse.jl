@@ -41,6 +41,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
+env:
+  # CYAX-0230 R-005 (specs/0230-ci-cpu-target/spec.md): build package images
+  # for the one CPU target haswell, so that the images in a restored depot
+  # cache load on the runner CPU models CI gets (spec: Facts, Accepted
+  # limitations). Set here only, never in a job or step.
+  JULIA_CPU_TARGET: 'haswell'
+
 jobs:
   lifecycle:
     name: Python tests (lifecycle, routing, scripts)

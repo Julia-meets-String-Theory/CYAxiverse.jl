@@ -77,8 +77,10 @@ function source_label(includes)
 end
 
 function inspect(package::String, path::String)
-    io = open(path, "r")
+    io = nothing
     try
+        # Inside the try: a file that cannot be opened counts as unreadable (R-008).
+        io = open(path, "r")
         iszero(Base.isvalid_cache_header(io)) && return unreadable(package, "incompatible header")
         modules, (includes, _, _), required, _, _, _, clone_targets, flags =
             Base.parse_cache_header(io, path)
@@ -100,7 +102,7 @@ function inspect(package::String, path::String)
         err isa InterruptException && rethrow()
         return unreadable(package, string(nameof(typeof(err))))
     finally
-        close(io)
+        io === nothing || close(io)
     end
 end
 
