@@ -81,7 +81,7 @@ $\vartheta$ of period one, and $\tau_i = \tfrac12\kappa_{ijk}t^jt^k$.
 | arXiv:2412.12012 | Eq. 3.1: $-\tfrac12M^2K$. Eq. 3.11: $K = 2\partial_T\partial_{\bar T}\mathcal{K}$. Eq. 3.13 gives the F-term inverse metric | 1 |
 | arXiv:2309.13145 | Eq. 3.6: $-\tfrac{M^2}{2}\mathcal{K}_{ab}$. Eq. 3.9: $\mathcal{K}_{ab} = 2\partial_T\partial_{\bar T}\mathcal{K}$. Eq. 3.7: inverse $= 2(\tau\tau^T - \mathcal{V}\kappa t)$. Eq. 2.2: $\cos 2\pi\mathcal{Q}\theta$ | 1 |
 | arXiv:2608.14780 | Eq. 22: $\tfrac12K$. Eq. 23: $K = \tfrac12\partial_\tau\partial_\tau\mathcal{K}$. Period one is stated | 1 |
-| arXiv:2103.06812 | Eq. (1): $-\tfrac{1}{8\pi^2}M^2K$ with $\cos(\mathcal{Q}\theta+\delta)$, which implies period 2π. Eq. (5): $K = \partial_\tau\partial_\tau\mathcal{K}$. Eq. (6): $W \supset e^{-2\pi q\cdot T}$, which implies period one | 2 under period 2π; $1/(2\pi^2)$ under period one |
+| arXiv:2103.06812 | Eq. (1): $-\tfrac{1}{8\pi^2}M^2K$ with $\cos(\mathcal{Q}\theta+\delta)$, which implies period 2π. $K = \partial_\tau\partial_\tau\mathcal{K}$ (text following Eq. (5)). Eq. (6): $W \supset e^{-2\pi q\cdot T}$, which implies period one | 2 under period 2π; $1/(2\pi^2)$ under period one |
 | arXiv:2512.00144 | Eq. C.18: $[K^{-1}] = 2(\tau\tau^T - \mathcal{V}\kappa t)$, which implies $c = 1$. Eqs. II.4 and A.3 give $K_{ij} = \partial_T\partial_{\bar T}\mathcal{K}$ with no ½; Eq. A.6 uses $\cos(q\phi)$. These are inconsistent with each other | inconsistent |
 | arXiv:2112.04503 | Eq. (41): $-\tfrac12K_{AB}$; $K$ is not defined precisely | undetermined |
 | arXiv:1808.01282 | Eq. 4.3: $-\tfrac{M^2}{2}K$; $K$ is not defined precisely | undetermined |
@@ -153,8 +153,8 @@ first verified, and `10aa3dc`.
   `K*Kinv ≈ I`.
 - `scripts/analyze_inflation_candidates.jl` (writes a CSV)
 - `scripts/compare_reduction_inflation_scan.jl` (writes a CSV)
-- `scripts/inflation_scan_prep.jl` (streamed diagnostic-family CSV with a
-  resume check, line 406)
+- `scripts/inflation_scan_prep.jl` (streamed diagnostic-family CSV, rows from
+  line 406; resume check `_scan_prep_completed`, line 267)
 - `scripts/build_orientifold_vacua_inflation.jl`. It writes an HDF5
   `inflation` group into each geometry file, with
   `INFLATION_GROUP_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-2.3"`
@@ -363,7 +363,16 @@ the same contract and have an equivalent test.
 
 `potential_factored` SHALL return `C = kinetic_factor(Kinv)`, so that
 `C * C' ≈ Kinv / 2`, and its docstring SHALL state this. The `Kinv` it returns
-stays the raw stored matrix.
+stays as now: the stored matrix symmetrized as `(Kinv + Kinv')/2`
+(`read.jl:294`), without the factor ½.
+
+`_canonical_frame` SHALL compute its `metric_residual` (`axion_photon.jl:1093`)
+from the same factorization that `kinetic_factor` uses, so that the residual
+tests $\Theta^T(BB^T)^{-1}\Theta = I$ for the $B$ actually applied.
+
+The unexported `read.K` (`read.jl:448`) reads `cytools/potential/K`, which no
+repository writer produces and whose normalization is unknown. `plan.md`
+SHALL classify it (remove, or document it as unlabelled and not physical).
 
 **(b) APIs that take K.** APIs that take K SHALL follow the K-argument
 contract and SHALL NOT call `kinetic_factor` on their argument.
@@ -425,8 +434,9 @@ reported:
 h11=2 source-corrected role validation":
 - `Q`, `tau`, `cy_volume` and `inverse_metric`;
 - $g_s = 0.5029733$ and $W_0 = 1$;
-- instanton scales from Eq. 3.18, as built by
-  `fuzzy_axions_model_stage.leading_axion_reference_data`;
+- instanton scales from Eq. 3.18, using the formula implemented in
+  `fuzzy_axions_model_stage.jl:87–95` (which `leading_axion_reference_data`
+  uses internally; that function returns only masses);
 - $M_{\rm pl} = $ `constants()["MPlanck"]`.
 
 **Evaluation.** The leading directions are taken in the order QCD first
@@ -463,7 +473,9 @@ For general geometries, the bounds scale with $n\,\kappa(\mathtt{Kinv})\,\epsilo
 - Inputs: `Kinv` $= \begin{pmatrix}3&1\\1&2\end{pmatrix}$, charges
   $q_1 = (1,0)^T$ and $q_2 = (1,1)^T$, and a hierarchy
   $\Lambda_2^4/\Lambda_1^4 \le 10^{-20}$.
-- API: `axion_photon.leading_hierarchy` and the Julia model stage.
+- API: `axion_photon.leading_hierarchy` for $f$ and $m$; the Julia model
+  stage for $m$ only (it exposes no decay constants). The hierarchy is set
+  through the fixture's `tau`.
 - Assertions, to $10^{-10}$ relative:
   - $f_1 = M_{\rm pl}/(2\pi\sqrt{G_{11}})$;
   - $f_2 = M_{\rm pl}/(2\pi\sqrt{\det G/G_{11}})$, where $G = Q^T(\mathtt{Kinv}/2)Q$;
@@ -484,7 +496,10 @@ K-argument contract it SHALL stay unchanged and pass.
 
 On the R-004 non-diagonal fixture and on the R-003 fixture inputs, every
 listed output, compared with a $c = \tfrac12$ evaluation of the same inputs,
-SHALL equal the factor below to $10^{-10}$ relative. The exception is counts,
+SHALL equal the factor below to $10^{-10}$ relative (for log10 fields: the
+corresponding offset, e.g. $-\tfrac12\log_{10}2$, to $10^{-10}$ absolute;
+for the canonical-mass-basis cubic tensor: up to one sign per mass-basis
+mode, since eigenvector signs are arbitrary). The exception is counts,
 which SHALL be reported.
 
 Some outputs keep only modes above a mass threshold (the $H_0$ cut in
@@ -508,7 +523,7 @@ in the mode sets SHALL be reported.
 |---|---|
 | $f$ | √2 |
 | mixing Θ from `mixing_matrix` (ratios of $q$) | 1 |
-| persisted `hierarchy/q` and `hierarchy/theta_from_canonical` (`axion_photon.jl:1381–1382`) | 1/√2 |
+| persisted `hierarchy/q` and `hierarchy/theta_from_canonical` (`axion_photon.jl:1382–1383`) | 1/√2 |
 | $g_{a\gamma\gamma}$, `log10_g_effective` under `:divisor_instanton` | 1/√2 |
 | `log10_g_effective` for light modes under `:electron_proxy` | $2^{-3/2}$ |
 | QED threshold mass | 1/√2 |
@@ -553,22 +568,40 @@ form is owner-approved decision 7. Allowed values:
 
 | Value | Meaning | Written by |
 |---|---|---|
-| `"sugra_c1"` | $K_{\rm kin} = 2\,\mathtt{Kinv}^{-1}$ | every physical writer |
+| `"sugra_c1"` | $K_{\rm kin} = 2\,\mathtt{Kinv}^{-1}$ | every physical writer that computes from `Kinv` |
 | `"p96_reproduction_c_half"` | the P96 contract | P96 reproduction writers only |
 | `"a96_reproduction_raw_radian"` | the A96 contract | A96 reproduction writers only |
+| `"legacy_c_half"` | the pre-change physical convention | derived writers only (below) |
 
-`"legacy_c_half"` is never written. Readers produce it only by inference
-(R-007).
+Primary writers, which compute K-dependent values from `Kinv`, never write
+`"legacy_c_half"`. Readers produce it by inference (R-007).
+
+**Derived writers.** A *derived writer* writes K-dependent values that it takes
+from persisted outputs or from results returned by readers, rather than
+computing them from `Kinv` (for example
+`scripts/reproduce_appendix_b_spectra.jl`, which aggregates F1 into
+`appendix_b_quantiles.csv`, and `axion_photon.write_scan_csv` applied to
+results from `read_axion_photon_result`). A derived writer SHALL apply the
+R-007 checks to its inputs, SHALL reject inputs whose labels differ (R-007
+combination), and SHALL write the common input label. When that label was
+inferred it SHALL also write `kinetic_normalization_inferred = true` (a CSV
+column or scalar dataset next to the label). A derived writer SHALL NOT write
+`"sugra_c1"` for inputs labelled or inferred otherwise.
 
 **General rule.** A *K-dependent output* is any persisted value computed from
 a kinetic matrix or factor derived from `Kinv`: through `kinetic_factor`,
 `kinetic_matrix`, `potential_factored().C`, `read.potential().K`,
-`read.oriented_potential().K`, the R-001 norm, or a reproduction matrix. Every
-writer of a K-dependent output in `src/`, `ext/`, `scripts/` or `bin/` SHALL
-label it, and SHALL increment the output's schema or contract version if it
-has one. The table below lists the writers known at `10aa3dc`. It is not the
-definition: a writer found later is governed by this rule, is added to
-`plan.md`'s inventory, and does not need a spec amendment.
+`read.oriented_potential().K`, the R-001 norm, or a reproduction matrix, or
+taken from another K-dependent output. Every writer of a K-dependent output in
+`src/`, `ext/`, `scripts/` or `bin/` SHALL label it, and SHALL increment the
+output's schema or contract version if it has one. The table below lists the
+writers known at `10aa3dc`. It is not the definition: a writer found later is
+governed by this rule, is added to `plan.md`'s inventory, and does not need a
+spec amendment. Known writers not in the table include
+`scan_relaxed_qcd_candidates.jl` (CSV built with `read.oriented_potential` K),
+`validate_vacua_stage4_5.jl` (`stage4_inflation.csv`, which holds N5
+reproduction rows and physical rows, so it is labelled per row) and
+`spectra.jl` (an F2 driver).
 
 **Output families:**
 
@@ -593,12 +626,13 @@ the evaluator.
 
 **Per-row labels in the inflation diagnostic family.** The physical writers
 (`inflation_scan_common.jl`, `inflation_scan_prep.jl`) and the A96
-reproduction refinement
-(`inflation_refinement_common.jl`) write rows of the
-`INFLATION_DIAGNOSTIC_SCHEMA_VERSION` family. Its label is therefore per row:
-physical rows carry `"sugra_c1"` and refinement rows carry
-`"a96_reproduction_raw_radian"`. The other four inflation families have only
-physical writers at `10aa3dc`, and their rows carry `"sugra_c1"`.
+reproduction refinement (`inflation_refinement_common.jl`) produce rows of the
+`INFLATION_DIAGNOSTIC_SCHEMA_VERSION` family. At `10aa3dc` the refinement rows
+stay in memory (the file is included only by `test/runtests.jl`). The label is
+nevertheless per row, in memory and in any file: physical rows carry
+`"sugra_c1"` and refinement rows carry `"a96_reproduction_raw_radian"`. The
+other four inflation families have only physical writers at `10aa3dc`, and
+their rows carry `"sugra_c1"`.
 
 **In memory.**
 - The package SHALL export the constant
@@ -609,16 +643,25 @@ physical writers at `10aa3dc`, and their rows carry `"sugra_c1"`.
 - Readers that return a `NamedTuple` (for example `physical_spectrum`,
   `read.pq_spectrum`, `read.hp_spectrum`) SHALL add the fields
   `kinetic_normalization::Symbol` and `kinetic_normalization_inferred::Bool`.
-- Readers that return an exported struct (for example
-  `read_axion_photon_result`, which returns `AxionPhotonResult`) SHALL keep
-  the struct unchanged. The label is available from a new exported accessor,
+- Readers that return a public struct (for example
+  `read_axion_photon_result`, which returns `axion_photon.AxionPhotonResult`)
+  SHALL keep the struct layout unchanged. The label is available from a new
+  public accessor,
   `stored_kinetic_normalization(path; family) -> (label::Symbol, inferred::Bool)`,
-  which applies the same R-007 checks. Struct-returning readers SHALL still
-  enforce R-007 before returning.
+  with `family ∈ (:f1, :f2, :f3, :f4, :f6)` for HDF5 outputs, which applies
+  the same R-007 checks. Struct-returning readers SHALL still enforce R-007
+  before returning.
+- **F3 in memory.** `AxionPhotonIdentity.schema_version` SHALL hold the
+  *stored* identity version; `_read_axion_photon_identity` currently replaces
+  it with the current constant (`axion_photon.jl:1566`), and that SHALL
+  change. Version 2 means `:sugra_c1` (only physical writers write F3);
+  version 1 means `:legacy_c_half`, inferred. `write_scan_csv` and every other
+  consumer of `AxionPhotonResult` SHALL derive the label from this field.
 - Python readers expose the same pair as a `(label, inferred)` tuple or as
   dict keys of the same names.
-- Exported struct field layouts and positional constructors SHALL NOT change.
-  In particular, `AxionPotential.K` is $K_{\rm kin}$ and carries no field.
+- Field layouts and positional constructors of public structs (exported from
+  `CYAxiverse` or from any of its submodules) SHALL NOT change. In particular,
+  `AxionPotential.K` is $K_{\rm kin}$ and carries no field.
 - Results computed from a caller-supplied K are not labelled by the package.
 
 ### R-007 — Readers, writers and combination (fail closed)
@@ -636,19 +679,26 @@ physical writers at `10aa3dc`, and their rows carry `"sugra_c1"`.
   `total_model_count` and `model_mass_reference_log10_ev`;
 - F5 at `…-reproduction-1.2` or `…-kaehler-production-1.0` with no label;
 - F6 at `…-orientifold-inflation-2.3` or `…-1.0` with no label;
-- any other output covered by the R-006 general rule, at its pre-change
-  version (or with no version), with no label, as recorded in `plan.md`'s
-  inventory;
+- any other output covered by the R-006 general rule that is written by a
+  *physical* function (R-008 classification), at its pre-change version (or
+  with no version), with no label, as recorded in `plan.md`'s inventory;
 - the F1 and F3 summary CSVs, and the inflation CSV families at their current
   versions, with no `kinetic_normalization` column.
 
-A legacy inflation diagnostic row written by the A96 refinement cannot be told
-apart from a physical row, so the inferred `:legacy_c_half` applies to the
-whole legacy file. This is a known limit of inference; legacy files of that
-family carry no physical claim (non-scope: no regeneration).
-
 These SHALL be read as `:legacy_c_half`, and the result SHALL record that the
 value was inferred.
+
+**Legacy reproduction outputs.** An unlabelled pre-change output written by a
+reproduction function is never inferred as `:legacy_c_half`. If `plan.md`'s
+inventory identifies its layout as written only by a reproduction function,
+it is read with that function's contract label (`:p96_reproduction_c_half` or
+`:a96_reproduction_raw_radian`), recorded as inferred. Otherwise the reader
+SHALL throw. At `10aa3dc` no repository reader consumes such outputs.
+
+**Mixed legacy files.** A legacy file in which physical and reproduction rows
+share one layout and cannot be told apart (possible for the inflation
+diagnostic family and `stage4_inflation.csv`) SHALL be rejected by physical
+readers unless its writer is recorded in `plan.md` as purely physical.
 
 **Readers SHALL throw** an `ArgumentError` (Julia) or a `ValueError`
 (Python), naming the file and family, for:
@@ -659,9 +709,10 @@ value was inferred.
 - a label value outside R-006;
 - a legacy version that carries a label;
 - a physical family whose label is not `"sugra_c1"`, except the per-row
-  `"a96_reproduction_raw_radian"` rows of the inflation diagnostic family;
-  a physical reader of that family SHALL return each row's label and SHALL
-  NOT include reproduction rows in physical aggregates;
+  reproduction-labelled rows of per-row-labelled families; a physical reader
+  of such a family SHALL return each row's label, and a physical aggregate
+  SHALL filter out reproduction rows *before* applying the combination check
+  to the remaining rows;
 - an F2 `cubic_basis` that is missing or unknown;
 - an unknown version or layout.
 
