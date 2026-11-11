@@ -82,14 +82,16 @@ $\vartheta$ of period one, and $\tau_i = \tfrac12\kappa_{ijk}t^jt^k$.
 | arXiv:2309.13145 | Eq. 3.6: $-\tfrac{M^2}{2}\mathcal{K}_{ab}$. Eq. 3.9: $\mathcal{K}_{ab} = 2\partial_T\partial_{\bar T}\mathcal{K}$. Eq. 3.7: inverse $= 2(\tau\tau^T - \mathcal{V}\kappa t)$. Eq. 2.2: $\cos 2\pi\mathcal{Q}\theta$ | 1 |
 | arXiv:2608.14780 | Eq. 22: $\tfrac12K$. Eq. 23: $K = \tfrac12\partial_\tau\partial_\tau\mathcal{K}$. Period one is stated | 1 |
 | arXiv:2103.06812 | Eq. (1): $-\tfrac{1}{8\pi^2}M^2K$ with $\cos(\mathcal{Q}\theta+\delta)$, which implies period 2π. $K = \partial_\tau\partial_\tau\mathcal{K}$ (text following Eq. (5)). Eq. (6): $W \supset e^{-2\pi q\cdot T}$, which implies period one | 2 under period 2π; $1/(2\pi^2)$ under period one |
-| arXiv:2512.00144 | Eq. C.18: $[K^{-1}] = 2(\tau\tau^T - \mathcal{V}\kappa t)$, which implies $c = 1$. Eqs. II.4 and A.3 give $K_{ij} = \partial_T\partial_{\bar T}\mathcal{K}$ with no ½; Eq. A.6 uses $\cos(q\phi)$. These are inconsistent with each other | inconsistent |
+| arXiv:2512.00144 | Eq. C.18: $[K^{-1}] = 2(\tau\tau^T - \mathcal{V}\kappa t)$, which implies $c = 1$. Eq. A.3 gives $K_{ij} = \partial_T\partial_{\bar T}\mathcal{K}$, and Eq. II.4 writes the τ kinetic term $K^{ij}d\tau_i\wedge\star d\tau_j$, both with no ½; Eq. A.6 uses $\cos(q\phi)$. These are inconsistent with each other | inconsistent |
 | arXiv:2112.04503 | Eq. (41): $-\tfrac12K_{AB}$; $K$ is not defined precisely | undetermined |
 | arXiv:1808.01282 | Eq. 4.3: $-\tfrac{M^2}{2}K$; $K$ is not defined precisely | undetermined |
 | arXiv:2309.01831 | No kinetic term. Eq. 9 writes the pair term as $\pi q^TK^{-1}q'$ | n/a |
 
 Equation numbers for arXiv:2103.06812 and arXiv:2112.04503 are those of the
 v2 HTML rendering; the other entries use the latest arXiv version as of
-2026-11-10. The conventions page (R-009) records the version for each entry.
+2026-11-10. The conventions page (R-009) records the version for each entry,
+and maps the arXiv:2103.06812 v2 numbers (1), (5), (6) to the 1.1, 2.4, 2.5
+numbering used in the Issue #232 correction comment.
 
 The arXiv:2512.00144 entries II.4, A.3 and A.6 follow the CYAX-0232 G0
 review's reading of the paper. The author verified C.18 directly.
@@ -456,7 +458,7 @@ h11=2 source-corrected role validation":
 - `Q`, `tau`, `cy_volume` and `inverse_metric`;
 - $g_s = 0.5029733$ and $W_0 = 1$;
 - instanton scales from Eq. 3.18, using the formula implemented in
-  `fuzzy_axions_model_stage.jl:87–95` (which `leading_axion_reference_data`
+  `fuzzy_axions_model_stage.jl:87–96` (which `leading_axion_reference_data`
   uses internally; that function returns only masses);
 - $M_{\rm pl} = $ `constants()["MPlanck"]`.
 
@@ -625,11 +627,16 @@ in R-007, SHALL label it, and SHALL increment the
 output's schema or contract version if it has one. The table below lists the
 writers known at `10aa3dc`. It is not the definition: a writer found later is
 governed by this rule, is added to `plan.md`'s inventory, and does not need a
-spec amendment. Known writers not in the table include
-`scan_relaxed_qcd_candidates.jl` (CSV built with `read.oriented_potential` K),
-`validate_vacua_stage4_5.jl` (`stage4_inflation.csv`, which holds N5
-reproduction rows and physical rows, so it is labelled per row) and
-`spectra.jl` (an F2 driver).
+spec amendment. A known writer not in the table is `spectra.jl` (an F2
+driver). Two scripts that read K are not K-dependent writers:
+`scan_relaxed_qcd_candidates.jl` loads `read.oriented_potential` K but its
+CSV comes from `jlm_reduced.prepare(Q, L)` and `critical_ensemble` only
+(`solve_reduced`, lines 208–231); and `validate_vacua_stage4_5.jl` writes
+`stage4_inflation.csv` from `LQtilde(Q, L)` and `leading_critical_branches`
+only (lines 157–198, 344–352); it uses no K, so it is not a K-dependent
+output. Its N5/N8 anchor results (`_stage4_n5_n8`, lines 138–155) are
+written only to the stage-4 text report (lines 342–343); `plan.md`
+classifies that report under R-008.
 
 **Output families:**
 
@@ -650,7 +657,11 @@ reproduction rows and physical rows, so it is labelled per row) and
 `reproduce_fuzzy_axions_h11_4.py` whose content depends on the mass evaluator
 SHALL also carry the label and a minor version increment. `plan.md` SHALL
 list every such output, with the evidence that the others do not depend on
-the evaluator.
+the evaluator. This includes the model-stage input HDF5 written by
+`_write_model_stage_input` (attribute
+`record_metadata_schema = "kaehler-point-provenance-1"`), whose
+production-mode `point`s are optimizer-selected and so depend on the
+evaluator.
 
 **Per-row labels in the inflation diagnostic family.** The physical writers
 (`inflation_scan_common.jl`, `inflation_scan_prep.jl`) and the A96
@@ -711,7 +722,11 @@ their rows carry `"sugra_c1"`.
 - F4 with no `schema_version` and no label, whose root holds
   `total_model_count` and `model_mass_reference_log10_ev`;
 - F5 at `…-reproduction-1.2` or `…-kaehler-production-1.0` with no label;
-- F6 at `…-orientifold-inflation-2.3` or `…-1.0` with no label;
+- F6 at `…-orientifold-inflation-2.3` or `…-1.0` with no label. The F6
+  version is `inflation/schema_version`; the nested compatibility marker
+  `inflation/catastrophes/legacy_v1/schema_version`
+  (`build_orientifold_vacua_inflation.jl:268–269`) is not the group version
+  and does not trigger the "legacy version that carries a label" rejection;
 - any other output covered by the R-006 general rule that is written by a
   *physical* function (R-008 classification), at its pre-change version (or
   with no version), with no label, as recorded in `plan.md`'s inventory;
@@ -737,7 +752,7 @@ SHALL throw. At `10aa3dc` no repository reader consumes such outputs.
 
 **Mixed legacy files.** A legacy file in which physical and reproduction rows
 share one layout and cannot be told apart (possible for the inflation
-diagnostic family and `stage4_inflation.csv`) SHALL be rejected by physical
+diagnostic family) SHALL be rejected by physical
 readers unless every writer of that legacy layout is recorded in `plan.md` as
 purely physical.
 
@@ -777,13 +792,19 @@ for an inferred legacy layout. It is never treated as complete by a batch run
 
 **Primary HDF5 writers.** The F1–F6 HDF5 writers SHALL write only values they
 compute from `Kinv` at the current convention, and SHALL refuse results or
-inputs read back from a legacy or derived output.
+inputs read back from a legacy or derived output. Layout migrations (below)
+are not primary writers: they are exempt from this refusal and from the F2
+writer refusal.
 
-**Errors are not skipped.** A reader, aggregator or combiner SHALL NOT catch
-and suppress an R-007 rejection or a combination error. Existing catch-all
-handlers, such as the `try … @warn` skip in
-`scripts/reproduce_appendix_b_spectra.jl:83–101`, SHALL let these errors
-propagate.
+**Errors are not skipped.** A reader, aggregator, combiner or existence check
+SHALL NOT catch and suppress an R-007 rejection or a combination error.
+Existing catch-all handlers SHALL let these errors propagate, in particular:
+- the `try … @warn` skip in `scripts/reproduce_appendix_b_spectra.jl:83–101`;
+- `_has_axion_photon` (`axion_photon.jl:2016–2041`, which returns `false` on
+  any error). It is used by `run_batch_axion_photon` (line 2101) and by the
+  `write_axion_photon_result` overwrite guard. A legacy or unlabelled F3 group
+  SHALL NOT read as absent, so that the batch-resume `:failed` rule and the
+  writer refusal apply to it.
 
 **Writers and migration.**
 - F2 writers SHALL refuse to write into a `spectrum` group that holds legacy
@@ -825,8 +846,10 @@ replaced only under the runner's explicit overwrite option: `force=true` for
 `batch_physical_spectrum` this `:failed` rule applies only to outputs
 labelled or inferred other than `:sugra_c1`. A `"sugra_c1"` output whose
 configuration digest differs (the digest hashes `schema_version` and the git
-`source_revision`, `batch_physical_spectrum.jl:176–183`) keeps today's
-behaviour: it is silently recomputed. `inflation_scan_prep.jl` has no overwrite option: with
+`source_revision`, `batch_physical_spectrum.jl:176–183`) is silently
+recomputed as today, and that rewrite also deletes the whole
+`spectrum/physical` group first (forced-rewrite rule above).
+`inflation_scan_prep.jl` has no overwrite option: with
 `--append-summary` the R-007 append rule refuses a legacy summary, and the
 remedy is a new summary path.
 
@@ -853,9 +876,6 @@ reproduction output SHALL carry the matching R-006 string. In particular:
 - `inflation_reproduction.jl`, `benchmark_inflation_scalability.jl` and
   `author_poly102_reference.py` are A96 (including their N = 5 author-matrix
   functions, such as `n5_kinetic_matrix` at `inflation_reproduction.jl:100`);
-- the N = 5 rows of `validate_vacua_stage4_5.jl`'s `stage4_inflation.csv`
-  (`validate_vacua_stage4_5.jl:138–157`) carry
-  `"a96_reproduction_raw_radian"`; its physical rows carry `"sugra_c1"`;
 - the `generate_appendix_c_geometry.py` Eq. 96 eigenvalue check is a P96
   reproduction validation and keeps `inv(kinv)`.
 
