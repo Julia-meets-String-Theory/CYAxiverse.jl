@@ -29,7 +29,9 @@ recommendations below where they differ:
 
 Focused G0 round 1 of `f6c75bd` returned REQUEST_CHANGES (F5 versions span
 commit ranges; inflation family identity needs the header; the A7 trigger).
-The revision resolves all findings and nits.
+Round 2 of `98060aa` returned REQUEST_CHANGES (the cubic tests reused the
+R-004 fixture, whose Λ hierarchy defeats Float64). The current revision
+resolves all findings and nits of both rounds.
 
 The held tasks stay held until Clarification A passes a focused G0 review and
 the owner approves it.
@@ -308,11 +310,29 @@ Reproduction functions not named in the spec: `n8_g3_control.jl` (P96),
 | Rows | Test route | Extension needed |
 |---|---|---|
 | Spectrum f, m, quartics | HDF5 fixture with the R-004 pins through `run_batch` (F1) and `hp_spectrum_save`/`pq_spectrum_save` (F2); template runtests.jl:2469–2500 | new fixture file; F1 runner has no test today |
-| Cubic, both bases | same, with ϑ₀ = [0.1, 0.05]; both writers take ϑ₀ and `pq_spectrum_save` transforms it to x₀ = basisᵀC⁻¹ϑ₀ internally (A1.2); plus an h11 = 3 fixture for `pq_spectrum_save` (ϑ₀ = [0.1, 0.05, 0.02], non-degenerate leading masses) and an `:hp_effective` case with N > h11; each tensor checked against central differences of the Hessian of the writer's own `(L, Q)` potential, step 1e-5, tolerance 1e-6·max\|tensor\| (A1.4) | A1 |
+| Cubic, both bases | dedicated fixtures in *Cubic fixtures (A1.4)* below, not the R-004 pins | A1 |
 | F3 (all rows, both policies) | test/axion_photon.jl templates (11–87, 171–221, 223, 314) with `Kinv = [3 1; 1 2]` and the R-004 Q/L; modes at 10^24.26 eV and 10^−1.14 eV lie either side of `ELECTRON_MASS_EV`; `qed_charge = [1, 1]` (norm 7 vs 3.5), `em_charge`, `qed_log10_lambda4` | fixture metadata |
 | Inflation ε, η, eig(K⁻¹H), mass_min/max | runtests.jl:645–704 and full.jl:784–840 with `Kinv = [3 1; 1 2]`; non-stationary evaluation points for `diagnose` | evaluation points |
 | F4, F5 masses | runtests.jl:1692 and 2017; new direct Python test of `_fuzzy_axion_mass_log10` with the R-004 pins (its superpotential adds Σe^{−2πτ}, line 1107) | Python test |
 | F6 | full.jl:784–840 through `write_inflation_group!` | as inflation |
+
+### Cubic fixtures (A1.4)
+
+Every Λ lies within 10^1.5 of the others. `L` columns are (sign, log10 Λ), all
+signs +1. Leading masses were checked as non-degenerate with a replica of the
+c = 1 leading Hessian `Cᵀ(Σ Λ q qᵀ)C`, `C = chol(Kinv/2)`.
+
+| Fixture | `Kinv` | `Q` (columns are charges) | log10 Λ | ϑ₀ | Use |
+|---|---|---|---|---|---|
+| C2 | `[3 1; 1 2]` | `[1 1 0; 0 1 1]` | `(0, −0.5, −1.0)` | `[0.1, 0.05]` | both writers, h11 = 2; leading m² ratios differ by > 90% |
+| C2-hp | `[3 1; 1 2]` | `[1 1 0; 0 1 1]` | `(0, −0.5, −0.7)` | `[0.1, 0.05]` | `hp_spectrum_save` `:hp_effective`: q₃ passes the `αmatrix` threshold (−0.7 ≥ −0.5 + log10 0.5), so N = 3 > h11 |
+| C3 | `[3 1 0; 1 2 0.5; 0 0.5 1.5]` | `[1 0 0 1; 0 1 0 1; 0 0 1 1]` | `(0, −0.4, −0.9, −1.5)` | `[0.1, 0.05, 0.02]` | `pq_spectrum_save`, h11 = 3; leading m² gaps > 70% |
+
+The finite-difference check uses central differences of the Hessian of the
+writer's own `(L, Q)` potential, step 1e-5, tolerance 1e-6·max|tensor|
+(truncation ≈ 1e-11·|Q|², roundoff ≈ 2e-10 relative). The R-005 cubic
+comparison is normwise (Frobenius) after per-mode sign alignment, relative
+tolerance 1e-10. T030 asserts the `Canonicalα` branch for C2-hp.
 
 ### R-010 audit
 

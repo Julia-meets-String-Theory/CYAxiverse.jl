@@ -77,8 +77,9 @@ the decisions (A1–A7); all others proceed.
   - Output: `spectrum-groups-1`, `cubic_basis`, label; F2 replace keyword;
     readers report `cubic_basis` (`:unknown` for legacy); `cubic` called with
     N×2 `L` and N×n `Q`; `pq_spectrum_save` transforms ϑ₀ to x₀; ϑ₀ stored.
-  - Verify: round trip; F2 replace leaves F1 and F3 intact; A1.4 tests (fixed
-    nonzero ϑ₀, N > h11, h11 = 3, finite differences); cubic rows of R-005.
+  - Verify: round trip; F2 replace leaves F1 and F3 intact; A1.4 tests on
+    fixtures C2, C2-hp and C3 (fixed ϑ₀, `Canonicalα` branch, x₀ check,
+    finite differences); normwise cubic rows of R-005.
 
 - [ ] **T031 [R-006] F1 writer, summary CSV and reader**
   - Output: `-4`, label, summary column; `physical_spectrum` label fields.
@@ -120,6 +121,16 @@ the decisions (A1–A7); all others proceed.
   - Verify: no writer outside the inventory.
   - Escalate if: a new writer falls outside the spec's rules.
 
+- [ ] **T041 [A2, A3] Historical layout records** — **Held: OD-2, OD-3**
+  - Output: in `plan.md`, every F5 1.0/1.1 layout (key-path sets, flag
+    variants, commits, K-dependent fields) and every inflation CSV entry
+    (header, `row_type`, version values, commits, writer functions).
+  - Verify: each entry traced to the source at its commits; reviewed in G2
+    with the other inventories. No separate owner approval: the rules are
+    approved in Clarification A.
+  - Escalate if: an entry has writers the A2/A3 rules do not decide, or two
+    entries cannot be told apart.
+
 ## Phase 4 — Readers, resume and errors (R-007)
 
 - [ ] **T050 [R-011] Reciprocity check**
@@ -130,8 +141,7 @@ the decisions (A1–A7); all others proceed.
   - Verify: one test per case.
 
 - [ ] **T061 [R-007, A2] F5 readers** — **Held: OD-2**
-  - Input: every distinct 1.0 and 1.1 layout recorded in `plan.md` over the
-    full commit range of each version (A2).
+  - Input: the T041 F5 layout records (A2).
   - Output: `analyze_fuzzy_axions_orientifold_gap.py`,
     `trace_lost_h11_3_fixed_components.py`, `orientifold_population_preflight.py`.
   - Verify: Python tests per accepted and rejected version.
@@ -143,8 +153,7 @@ the decisions (A1–A7); all others proceed.
   - Verify: a legacy or invalid input raises at each site.
 
 - [ ] **T063 [R-007, A3] Inflation CSV inference** — **Held: OD-3**
-  - Input: the layout-key table in `plan.md` (A3.2): header, `row_type` and
-    version values, with the commits that wrote each.
+  - Input: the T041 inflation CSV entries (A3.2).
   - Verify: one test per recorded key; unknown keys and contradictory version
     values rejected.
 
@@ -159,8 +168,9 @@ the decisions (A1–A7); all others proceed.
     with the overwrite option.
 
 - [ ] **T066 [R-007, A5] Scale-continuation resume** — **Held: OD-5**
-  - Output: legacy rows not complete; `--resume` on a legacy report refuses
-    naming the label; `_pilot_completed_scales` propagates errors.
+  - Output: legacy rows not complete; `--resume` on a legacy report or shard
+    refuses naming the stored or inferred label, before the header check;
+    `_pilot_completed_scales` raises at all three silent skips.
   - Verify: resume test with a legacy report; parse-error propagation test.
 
 - [ ] **T067 [R-007] Layout migrations**

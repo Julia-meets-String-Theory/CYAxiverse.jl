@@ -1,7 +1,7 @@
 # CYAX-0232 Clarification A — Decisions OD-1 to OD-7
 
-**Status:** Draft, revision 2 (focused G0 round 1 of `f6c75bd`: REQUEST_CHANGES,
-resolved here; round 2 pending; owner approval pending)
+**Status:** Draft, revision 3 (focused G0 rounds 1 (`f6c75bd`) and 2 (`98060aa`):
+REQUEST_CHANGES, resolved here; round 3 pending; owner approval pending)
 **Amends:** `spec.md` approved at `f097536` (`approval_ref` in `spec.md`)
 **Origin:** the seven open points in `plan.md` (*Owner decisions required
 before the affected tasks*) and an independent scientific review of the plan
@@ -44,13 +44,23 @@ rewritten. File:line citations refer to `10aa3dc`.
   so that `Qmass·x₀ = Q̃ᵀ·ϑ₀`. This is the transformation that the R-005 cubic
   row already assumes.
 - **A1.3** `spectrum/cubic/phase` SHALL store ϑ₀ for both writers.
-- **A1.4** Tests SHALL cover:
-  - both writers at a fixed nonzero ϑ₀, pinned in `plan.md` for every
-    fixture (including the h11 = 3 fixture);
-  - `hp_spectrum_save` with an `:hp_effective` selection where N > h11;
-  - `pq_spectrum_save` at h11 = 3, with non-degenerate leading masses (the
-    R-005 sign-only allowance does not hold under rotation inside a
-    degenerate subspace);
+- **A1.4** Tests SHALL use dedicated cubic fixtures, pinned in `plan.md` with
+  every `Kinv`, `Q`, `L` and ϑ₀. In each fixture, all instanton scales Λ lie
+  within a factor 10³ of one another. (The R-004 fixture, with
+  Λ₂⁴/Λ₁⁴ ≈ 3·10⁻⁵¹, is unsuitable: Float64 rounding in the mass basis exceeds
+  the subleading content.) The tests SHALL cover:
+  - both writers at a fixed nonzero ϑ₀;
+  - an h11 = 2 fixture for both writers;
+  - `hp_spectrum_save` with an `:hp_effective` input whose merged charge
+    passes the `αmatrix` threshold (`generate.jl:3602–3609`), so that it
+    reaches the `Canonicalα` branch and N > h11;
+  - `pq_spectrum_save` at h11 = 3;
+  - non-degenerate leading masses in every `pq_spectrum_save` fixture,
+    asserted in the test (the R-005 sign-only allowance does not hold under
+    rotation inside a degenerate subspace);
+  - the test computes x₀ itself from the stored ϑ₀ and asserts
+    `Qmass·x₀ ≈ Q̃ᵀ·ϑ₀`, so that the check is not circular with respect to
+    A1.2;
   - an independent check of each stored tensor against central finite
     differences of the Hessian of V(x) = Σₐ Λₐ(1 − cos(Qₐ·x)), built from
     exactly the `(L, Q)` passed to `cubic` in that writer's basis: the
@@ -60,7 +70,8 @@ rewritten. File:line citations refer to `10aa3dc`.
     test uses `generate.hessian` (`generate.jl:543`), it SHALL pass that
     function's own argument orientation (L N×2, Q n×N);
   - the R-005 cubic rows (scale 2^{-3/2} in the mass basis at fixed ϑ₀, and 1
-    in the charge basis).
+    in the charge basis), compared normwise (Frobenius norm) after aligning
+    the sign of each mass-basis mode, at relative tolerance 1e-10.
 - **A1.5** The conventions page (R-009) SHALL state that a cubic tensor in the
   legacy F2 layout (no `spectrum/metadata`) whose stored `spectrum/cubic/phase`
   is nonzero is unreliable (mis-oriented or wrong evaluation point). R-007 already makes
@@ -80,9 +91,13 @@ Each version was written by a range of commits, not one:
 
 `plan.md` SHALL record every distinct layout written under each version over
 its full commit range, each with the commits that wrote it and the fields that
-depend on the kinetic matrix. A reader SHALL infer only a file that matches
-one recorded layout for its version, and SHALL throw otherwise. One test per
-recorded layout.
+depend on the kinetic matrix. A layout is the set of key paths present in the
+JSON at every depth. A key whose value is `null` is present, with value
+`null`. Runtime flags change the layout within one commit (for example
+`--model-stage` and `--keep-details` at `aee4c1a`, lines 722 and 797), so each
+flag variant is a separate recorded layout. A reader SHALL infer only a file
+whose key-path set equals one recorded layout for its version, and SHALL throw
+otherwise. One test per recorded layout.
 
 ## A3 — Historical inflation CSV versions (OD-3)
 
@@ -93,25 +108,32 @@ pilot CSVs all use the generic column `schema_version`
 (`inflation_candidate_refinement.jl:21, 42`; `inflation_scale_continuation.jl:56`);
 refinement (`c7482f5`) and pilot (`10aa058`) both first wrote `"3"`; and the
 refinement file (`point` and `summary` rows, 168, 391) and the separate flow
-file (`flow` rows, 285, 551) use the same column name. Only the shard family
-has its own column, `shard_schema_version`.
+file (`flow` rows, 285, 551) use the same column name. A row can also carry
+several version columns at once: scan-prep rows carry `contract_version` and
+`diagnostic_schema_version` (`inflation_scan_prep.jl:21`), and shard rows add
+`shard_schema_version` to the scan-prep fields
+(`inflation_scan_shards_common.jl:15–16`).
 
-- **A3.1** A legacy row's *layout key* is:
-  - the exact header of its file (the ordered column list);
-  - its `row_type`, where the header has one;
-  - the values of that family's version columns.
-  The version columns are enumerated per family in `plan.md` (for example
-  `schema_version`, `shard_schema_version`, `contract_version`,
-  `diagnostic_schema_version`). The pilot columns
-  `domain_certificate_version` and `conversion_policy_version` version other
-  contracts, not the CSV layout; they are not part of the key.
-- **A3.2** `plan.md` SHALL record every layout key that merged code wrote to a
-  persisted inflation CSV, each with its family and the commits that wrote it.
-- **A3.3** A legacy row is inferred as `:legacy_c_half` only if its layout key
-  matches exactly one recorded entry. No column takes priority over another.
-  A row whose key matches no entry, or matches entries of more than one
-  family, SHALL be rejected with the R-007 error naming the file, the row and
-  the values.
+- **A3.1** A *recorded entry* is one historical file layout:
+  - the exact header (the ordered column list);
+  - the `row_type` value, where the header has one;
+  - the values of the version columns listed for that entry (for example
+    `schema_version`, `shard_schema_version`, `contract_version`,
+    `diagnostic_schema_version`).
+  The pilot columns `domain_certificate_version` and
+  `conversion_policy_version` version other contracts, not the CSV layout;
+  they are not listed in any entry.
+- **A3.2** `plan.md` SHALL record every entry that merged code wrote to a
+  persisted inflation CSV, each with the commits and the writer functions that
+  wrote it.
+- **A3.3** A legacy row is inferred as `:legacy_c_half` only if it matches
+  exactly one recorded entry and every writer of that entry is a physical
+  function (R-008 classification). No column takes priority over another. A
+  row that matches no entry, or more than one entry, SHALL be rejected with
+  the R-007 error naming the file, the row and the values. An entry with a
+  reproduction writer follows the R-007 rules for legacy reproduction outputs
+  and mixed legacy files; for example, `inflation_refinement_common.jl:74`
+  writes A96 rows in the diagnostic layout.
 - **A3.4** One test per recorded layout key, and rejection tests for an
   unknown key and for a contradictory version value under a known header.
 
@@ -130,7 +152,11 @@ R-007 *Batch resume* also covers `run_scale_continuation`
 (`inflation_scale_continuation.jl:2023`), with the `inflation_scan_prep.jl`
 rule:
 - a row labelled or inferred other than `"sugra_c1"` is not complete;
-- `--resume` on a report that holds such rows refuses, naming the stored label;
+- `--resume` on a report or shard file that holds such rows refuses, naming
+  the stored or inferred label. This check SHALL run before the existing
+  header comparison in `pilot_prepare_csv` (`:1452–1455`, called at
+  `:2039–2040`), so that a legacy file is reported by its label rather than
+  as a "CSV schema mismatch";
 - the remedy is a new report path, because the runner has no overwrite option;
 - `_pilot_completed_scales` (`:1474`) SHALL raise instead of silently
   skipping. Today it skips in three places: missing required columns return an
@@ -162,7 +188,8 @@ result:
 Classification is by provenance: a field depends on every contract whose
 function produced a value it was computed from, even where the value is
 mathematically independent of K (for example an inertia count, or a
-degeneracy scale).
+degeneracy scale). K-free functions (A4) contribute no contract, even when
+they belong to a reproduction module.
 
 `pilot_benchmark_regression` (`inflation_scale_continuation.jl:1829–1897`) is
 such a result:
