@@ -44,6 +44,7 @@ include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "migrate_quartic_index_ordering.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "build_orientifold_vacua_inflation.jl"))
 include(joinpath(@__DIR__, "axion_photon.jl"))
+include(joinpath(@__DIR__, "kinetic_normalization.jl"))
 
 @testset "Slurm log directory resolution" begin
     withenv("SLURM_JOB_ID" => "42", "SLURM_ARRAY_TASK_ID" => nothing,
