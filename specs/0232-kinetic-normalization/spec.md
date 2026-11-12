@@ -3,14 +3,14 @@ spec_id: CYAX-0232
 title: Adopt the supergravity axion kinetic normalization
 issue: 232
 class: S2
-status: draft
+status: approved
 workstream: axion spectrum physical conventions
 parent: null
 depends_on: []
 created: 2026-11-10
-last_reviewed: null
+last_reviewed: 2026-11-12
 review_required: Spec Reviewer + Scientific/Numerical Reviewer
-approval_ref: N/A while draft
+approval_ref: https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/232#issuecomment-6829248647
 ---
 
 # Adopt the supergravity axion kinetic normalization
