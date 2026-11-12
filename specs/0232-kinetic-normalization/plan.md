@@ -416,8 +416,11 @@ candidate `b149791` gave identical hashes.
 | `db5025462dcbf4d039cff704df1a2f2af81f4476407b3cec5b629c87eccbe58b` | `h11_3_det_6_relevant_subleading` |
 | `1c878cd1531409e29cd585cc9ee097ed5e068b356196ac6b984ab34b4b9a59e4` | `r002_artifacts.txt` |
 
-Julia patch release and BLAS configuration: printed to the job log from the
-next run (the first run wrote them only to the job summary).
+Environment (run 43307736586, which printed it to the job log; same hashes,
+candidate `e0cc584`): Julia 1.12.7, BLAS `LBTConfig([ILP64]
+libopenblas64_.so)`, Ubuntu 26.04.1 LTS, x64. T090 repeats the comparison at
+the implementation SHA; if CI's Julia 1.12 patch release changes in the
+meantime, the base is regenerated in the same job, as R-002 requires.
 
 ## Proposed approach
 
