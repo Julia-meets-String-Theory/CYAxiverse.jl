@@ -1,13 +1,18 @@
 # CYAX-0232 Clarification A — Decisions OD-1 to OD-7
 
-**Status:** Draft, revision 3 (focused G0 rounds 1 (`f6c75bd`) and 2 (`98060aa`):
-REQUEST_CHANGES, resolved here; round 3 pending; owner approval pending)
+**Status:** Draft, revision 4 (focused G0 rounds 1–3 (`f6c75bd`, `98060aa`,
+`ea93938`): REQUEST_CHANGES, resolved here; round 4 pending; owner approval
+pending)
 **Amends:** `spec.md` approved at `f097536` (`approval_ref` in `spec.md`)
 **Origin:** the seven open points in `plan.md` (*Owner decisions required
 before the affected tasks*) and an independent scientific review of the plan
 at `dceecbf`, which the owner adopted on 2026-11-12. That review accepted
 OD-2, OD-4 and OD-5, accepted OD-1 with an added phase requirement, accepted
 OD-6 with an explicit non-certification statement, and modified OD-3 and OD-7.
+
+*Merged code* and *merged commits* below mean commits that are ancestors of the
+implementation base `10aa3dc`. Outputs written by other commits match no
+recorded layout or entry, and readers throw.
 
 This is a normative amendment to CYAX-0232. Where it conflicts with wording in
 `spec.md`, this clarification supersedes that wording. `spec.md` is not
@@ -45,18 +50,24 @@ rewritten. File:line citations refer to `10aa3dc`.
   row already assumes.
 - **A1.3** `spectrum/cubic/phase` SHALL store ϑ₀ for both writers.
 - **A1.4** Tests SHALL use dedicated cubic fixtures, pinned in `plan.md` with
-  every `Kinv`, `Q`, `L` and ϑ₀. In each fixture, all instanton scales Λ lie
-  within a factor 10³ of one another. (The R-004 fixture, with
+  every `Kinv`, `Q`, `L` and ϑ₀. In each fixture, all potential coefficients
+  Λₐ = 10^{L[2,a]} (the coefficients `cubic` uses, not physical scales) lie
+  within a factor 10³ of one another. For the two R-005 cubic rows these
+  fixtures replace the R-004 and R-003 fixture inputs. (The R-004 fixture, with
   Λ₂⁴/Λ₁⁴ ≈ 3·10⁻⁵¹, is unsuitable: Float64 rounding in the mass basis exceeds
   the subleading content.) The tests SHALL cover:
   - both writers at a fixed nonzero ϑ₀;
   - an h11 = 2 fixture for both writers;
-  - `hp_spectrum_save` with an `:hp_effective` input whose merged charge
-    passes the `αmatrix` threshold (`generate.jl:3602–3609`), so that it
-    reaches the `Canonicalα` branch and N > h11;
+  - `hp_spectrum_save` with an `:hp_effective` input whose subleading charge
+    passes both `αmatrix` tests: the `valid_cols` filter
+    (log10 Λ̄ ≥ min log10 Λ̃ + log10 0.5, `generate.jl:3602–3609`) and the
+    per-pair keep test (log10 Λ̄ − log10 Λ̃ⱼ > log10 0.5 for some j with
+    |αᵢⱼ| > 1e-3, `:3621–3631`), so that it reaches the `Canonicalα` branch
+    with N > h11;
   - `pq_spectrum_save` at h11 = 3;
   - non-degenerate leading masses in every `pq_spectrum_save` fixture,
-    asserted in the test (the R-005 sign-only allowance does not hold under
+    asserted in the test as a relative gap of at least 0.5 between adjacent
+    leading Hessian eigenvalues (the R-005 sign-only allowance does not hold under
     rotation inside a degenerate subspace);
   - the test computes x₀ itself from the stored ϑ₀ and asserts
     `Qmass·x₀ ≈ Q̃ᵀ·ϑ₀`, so that the check is not circular with respect to
@@ -91,13 +102,29 @@ Each version was written by a range of commits, not one:
 
 `plan.md` SHALL record every distinct layout written under each version over
 its full commit range, each with the commits that wrote it and the fields that
-depend on the kinetic matrix. A layout is the set of key paths present in the
-JSON at every depth. A key whose value is `null` is present, with value
-`null`. Runtime flags change the layout within one commit (for example
-`--model-stage` and `--keep-details` at `aee4c1a`, lines 722 and 797), so each
-flag variant is a separate recorded layout. A reader SHALL infer only a file
-whose key-path set equals one recorded layout for its version, and SHALL throw
-otherwise. One test per recorded layout.
+depend on the kinetic matrix.
+
+A file's *normalized path set* is built from its JSON as follows:
+- object keys form paths at every depth; a key whose value is `null` is
+  present;
+- an array collapses to one path segment `[]`, and the keys of its elements
+  are the union over all elements;
+- an object whose keys are data values rather than field names (a count by
+  reason, a map keyed by h11, polytope, class, matrix or component, for
+  example `reason_counts_by_polytope` at `e7a8f51:957–976`) is recorded as a
+  map node `<map>`; its keys are not compared, and its values are normalized
+  as one element.
+
+A recorded layout is a required set R and an optional set O of normalized
+paths. Each optional path cites the source lines that make it optional (for
+example `model_stage.convention.prefactor_P`, absent when there are no records,
+`aee4c1a:491–590`, or status-dependent `details[]` keys). Runtime flags change
+the layout within one commit (for example `--model-stage` and `--keep-details`
+at `aee4c1a`, lines 722 and 797); each flag variant is a separate recorded
+layout. A file matches a layout when R ⊆ (its normalized path set) ⊆ R ∪ O.
+A reader SHALL infer only a file that matches exactly one recorded layout for
+its version, and SHALL throw otherwise. One test per recorded layout, plus a
+rejection test for a file with an unrecorded path.
 
 ## A3 — Historical inflation CSV versions (OD-3)
 
@@ -125,7 +152,8 @@ several version columns at once: scan-prep rows carry `contract_version` and
   they are not listed in any entry.
 - **A3.2** `plan.md` SHALL record every entry that merged code wrote to a
   persisted inflation CSV, each with the commits and the writer functions that
-  wrote it.
+  wrote it. Entries with the same header SHALL list the same version columns,
+  so that no row can match two entries by construction.
 - **A3.3** A legacy row is inferred as `:legacy_c_half` only if it matches
   exactly one recorded entry and every writer of that entry is a physical
   function (R-008 classification). No column takes priority over another. A
@@ -134,7 +162,7 @@ several version columns at once: scan-prep rows carry `contract_version` and
   reproduction writer follows the R-007 rules for legacy reproduction outputs
   and mixed legacy files; for example, `inflation_refinement_common.jl:74`
   writes A96 rows in the diagnostic layout.
-- **A3.4** One test per recorded layout key, and rejection tests for an
+- **A3.4** One test per recorded entry, and rejection tests for an
   unknown key and for a contradictory version value under a known header.
 
 ## A4 — Reproduction functions that use no kinetic matrix (OD-4)
@@ -154,10 +182,12 @@ rule:
 - a row labelled or inferred other than `"sugra_c1"` is not complete;
 - `--resume` on a report or shard file that holds such rows refuses, naming
   the stored or inferred label. This check SHALL run before the existing
-  header comparison in `pilot_prepare_csv` (`:1452–1455`, called at
-  `:2039–2040`), so that a legacy file is reported by its label rather than
-  as a "CSV schema mismatch";
-- the remedy is a new report path, because the runner has no overwrite option;
+  header comparison in `pilot_prepare_csv` (`:1456`, called at
+  `:2039–2040`), for both the report and the shard file before either call,
+  so that a legacy file is reported by its label rather than as a "CSV schema
+  mismatch";
+- the remedy is a new report path and a new shard directory, because the
+  runner has no overwrite option;
 - `_pilot_completed_scales` (`:1474`) SHALL raise instead of silently
   skipping. Today it skips in three places: missing required columns return an
   empty set (`:1482`), a field-count mismatch skips the row (`:1486`), and a
@@ -183,7 +213,10 @@ result:
 - SHALL carry `kinetic_normalization_by_field`, a `NamedTuple` that maps each
   K-dependent field to a sorted tuple of labels
   (`(:a96_reproduction_raw_radian,)`, `(:p96_reproduction_c_half,)`, or both).
-  Tuple values keep the type stable. K-free fields are omitted.
+  K-free fields are omitted.
+
+For such a result this also supersedes the R-006 *In memory* requirement of a
+single `kinetic_normalization` field.
 
 Classification is by provenance: a field depends on every contract whose
 function produced a value it was computed from, even where the value is

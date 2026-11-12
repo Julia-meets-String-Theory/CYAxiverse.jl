@@ -122,9 +122,10 @@ the decisions (A1–A7); all others proceed.
   - Escalate if: a new writer falls outside the spec's rules.
 
 - [ ] **T041 [A2, A3] Historical layout records** — **Held: OD-2, OD-3**
-  - Output: in `plan.md`, every F5 1.0/1.1 layout (key-path sets, flag
-    variants, commits, K-dependent fields) and every inflation CSV entry
-    (header, `row_type`, version values, commits, writer functions).
+  - Output: in `plan.md`, every F5 1.0/1.1 layout from merged commits
+    (required and optional normalized path sets with source evidence, map
+    nodes, flag variants, commits, K-dependent fields) and every inflation CSV
+    entry (header, `row_type`, version values, commits, writer functions).
   - Verify: each entry traced to the source at its commits; reviewed in G2
     with the other inventories. No separate owner approval: the rules are
     approved in Clarification A.

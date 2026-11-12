@@ -30,8 +30,10 @@ recommendations below where they differ:
 Focused G0 round 1 of `f6c75bd` returned REQUEST_CHANGES (F5 versions span
 commit ranges; inflation family identity needs the header; the A7 trigger).
 Round 2 of `98060aa` returned REQUEST_CHANGES (the cubic tests reused the
-R-004 fixture, whose Λ hierarchy defeats Float64). The current revision
-resolves all findings and nits of both rounds.
+R-004 fixture, whose Λ hierarchy defeats Float64). Round 3 of `ea93938`
+returned REQUEST_CHANGES (A2 exact key-path equality fails on data-keyed
+maps). The current revision resolves all findings and nits of all three
+rounds.
 
 The held tasks stay held until Clarification A passes a focused G0 review and
 the owner approves it.
@@ -318,21 +320,23 @@ Reproduction functions not named in the spec: `n8_g3_control.jl` (P96),
 
 ### Cubic fixtures (A1.4)
 
-Every Λ lies within 10^1.5 of the others. `L` columns are (sign, log10 Λ), all
+Every potential coefficient Λₐ = 10^{L[2,a]} lies within 10^1.5 of the others. `L` columns are (sign, log10 Λ), all
 signs +1. Leading masses were checked as non-degenerate with a replica of the
 c = 1 leading Hessian `Cᵀ(Σ Λ q qᵀ)C`, `C = chol(Kinv/2)`.
 
 | Fixture | `Kinv` | `Q` (columns are charges) | log10 Λ | ϑ₀ | Use |
 |---|---|---|---|---|---|
 | C2 | `[3 1; 1 2]` | `[1 1 0; 0 1 1]` | `(0, −0.5, −1.0)` | `[0.1, 0.05]` | both writers, h11 = 2; leading m² ratios differ by > 90% |
-| C2-hp | `[3 1; 1 2]` | `[1 1 0; 0 1 1]` | `(0, −0.5, −0.7)` | `[0.1, 0.05]` | `hp_spectrum_save` `:hp_effective`: q₃ passes the `αmatrix` threshold (−0.7 ≥ −0.5 + log10 0.5), so N = 3 > h11 |
+| C2-hp | `[3 1; 1 2]` | `[1 1 0; 0 1 1]` | `(0, −0.5, −0.7)` | `[0.1, 0.05]` | `hp_spectrum_save` `:hp_effective`: q₃ passes the `valid_cols` filter (−0.7 ≥ −0.5 + log10 0.5, generate.jl:3602–3609) and the keep test (−0.7 − (−0.5) = −0.2 > log10 0.5, :3621–3631), so `Canonicalα` and N = 3 > h11. C2 under `:hp_effective` drops q₃ (N = 2) |
 | C3 | `[3 1 0; 1 2 0.5; 0 0.5 1.5]` | `[1 0 0 1; 0 1 0 1; 0 0 1 1]` | `(0, −0.4, −0.9, −1.5)` | `[0.1, 0.05, 0.02]` | `pq_spectrum_save`, h11 = 3; leading m² gaps > 70% |
 
 The finite-difference check uses central differences of the Hessian of the
 writer's own `(L, Q)` potential, step 1e-5, tolerance 1e-6·max|tensor|
 (truncation ≈ 1e-11·|Q|², roundoff ≈ 2e-10 relative). The R-005 cubic
 comparison is normwise (Frobenius) after per-mode sign alignment, relative
-tolerance 1e-10. T030 asserts the `Canonicalα` branch for C2-hp.
+tolerance 1e-10. Non-degeneracy is asserted as a relative gap ≥ 0.5 between
+adjacent leading Hessian eigenvalues. T030 asserts the `Canonicalα` branch
+for C2-hp.
 
 ### R-010 audit
 
