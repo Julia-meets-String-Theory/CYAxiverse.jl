@@ -115,7 +115,9 @@ end
     @test payload.selected_determinant == "1000003"
 
     # Hand-computed case: the first charge is (2, 1), the second is (1, 0),
-    # and Gram--Schmidt gives q = [sqrt(5) 2/sqrt(5); 0 1/sqrt(5)].
+    # and Gram--Schmidt gives q = [sqrt(5) 2/sqrt(5); 0 1/sqrt(5)] for the
+    # factor I. At c = 1 (CYAX-0232) the factor for Kinv = I is I/sqrt(2), so
+    # q and theta_from_canonical both carry 1/sqrt(2).
     hand = axion_photon.leading_hierarchy(
         axion_photon.InstantonData(Int[2 1; 1 0], Float64[7.0, 6.0],
             Int[1, 1], Int[1, 2]), Matrix{Float64}(I, 2, 2))
@@ -123,9 +125,9 @@ end
     @test hand.dependent_indices == Int[]
     @test hand.rank_certificate.prefix_ranks == [1, 2]
     @test hand.rank_certificate.selected_determinant == -1
-    @test hand.q ≈ [sqrt(5.0) 2 / sqrt(5.0); 0.0 1 / sqrt(5.0)]
+    @test hand.q ≈ [sqrt(5.0) 2 / sqrt(5.0); 0.0 1 / sqrt(5.0)] / sqrt(2.0)
     @test hand.theta_from_canonical ≈
-        [2 / sqrt(5.0) 1 / sqrt(5.0); 1 / sqrt(5.0) -2 / sqrt(5.0)]
+        [2 / sqrt(5.0) 1 / sqrt(5.0); 1 / sqrt(5.0) -2 / sqrt(5.0)] / sqrt(2.0)
 
     rng = MersenneTwister(0x03_0e_aa)
     for _ in 1:40
