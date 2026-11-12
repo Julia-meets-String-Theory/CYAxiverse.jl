@@ -725,7 +725,8 @@ end
             oriented = CYAxiverse.read.oriented_potential(geom_idx)
             @test oriented.Q == Int[1 0 1; 0 1 1]
             @test oriented.L == Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0]
-            @test Matrix(oriented.K) == Matrix{Float64}(I, 2, 2)
+            # c = 1 (CYAX-0232): K = 2 Kinv⁻¹, and the stored Kinv is I.
+            @test Matrix(oriented.K) == 2 * Matrix{Float64}(I, 2, 2)
             @test from_geometry.Qtilde == from_matrices.Qtilde
             @test from_geometry.Ltilde == from_matrices.Ltilde
             @test from_geometry.Qbar == from_matrices.Qbar
