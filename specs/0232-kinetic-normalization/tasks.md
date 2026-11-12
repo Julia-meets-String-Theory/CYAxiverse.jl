@@ -2,7 +2,8 @@
 
 `tasks.md` records evidence readiness, not live PR, Issue or Project state.
 File:line references are at `10aa3dc` (see `plan.md`). Tasks marked
-**Held: OD-n** wait for that owner decision in `plan.md`; all others proceed.
+**Held: OD-n** wait for the approval of `clarification-a.md`, which records
+the decisions (A1–A7); all others proceed.
 
 ## Phase 1 — Baseline
 
@@ -62,7 +63,8 @@ File:line references are at `10aa3dc` (see `plan.md`). Tasks marked
 
 - [ ] **T020 [R-001] K-argument docstrings**
   - Output: contract text on every K-taking API in the plan's list (approval
-    note 1).
+    note 1); `read.K` warning that it is not the physical kinetic-matrix
+    accessor.
   - Verify: docs build; doctest-free review of the list.
 
 - [ ] **T021 [R-001] Python evaluator equivalence**
@@ -71,10 +73,12 @@ File:line references are at `10aa3dc` (see `plan.md`). Tasks marked
 
 ## Phase 3 — Labels and schemas (R-006)
 
-- [ ] **T030 [R-006, R-005] F2 writers and readers** — **Held: OD-1**
+- [ ] **T030 [R-006, R-005, A1] F2 writers and readers** — **Held: OD-1**
   - Output: `spectrum-groups-1`, `cubic_basis`, label; F2 replace keyword;
-    readers report `cubic_basis` (`:unknown` for legacy).
-  - Verify: round trip; F2 replace leaves F1 and F3 intact; cubic rows of R-005.
+    readers report `cubic_basis` (`:unknown` for legacy); `cubic` called with
+    N×2 `L` and N×n `Q`; `pq_spectrum_save` transforms ϑ₀ to x₀; ϑ₀ stored.
+  - Verify: round trip; F2 replace leaves F1 and F3 intact; A1.4 tests (fixed
+    nonzero ϑ₀, N > h11, h11 = 3, finite differences); cubic rows of R-005.
 
 - [ ] **T031 [R-006] F1 writer, summary CSV and reader**
   - Output: `-4`, label, summary column; `physical_spectrum` label fields.
@@ -111,8 +115,8 @@ File:line references are at `10aa3dc` (see `plan.md`). Tasks marked
     `"legacy_c_half"` with the inferred flag.
 
 - [ ] **T040 [R-006] Inventory completeness check**
-  - Output: rerun the writer search at the implementation SHA; note
-    `scan_fresh_relaxed_qcd_candidates.py` per OD-6.
+  - Output: rerun the writer search at the implementation SHA; record
+    `scan_fresh_relaxed_qcd_candidates.py` as not certified (A6).
   - Verify: no writer outside the inventory.
   - Escalate if: a new writer falls outside the spec's rules.
 
@@ -125,7 +129,9 @@ File:line references are at `10aa3dc` (see `plan.md`). Tasks marked
   - Output: every inference and rejection case in R-007 for F1–F6.
   - Verify: one test per case.
 
-- [ ] **T061 [R-007] F5 readers** — **Held: OD-2**
+- [ ] **T061 [R-007, A2] F5 readers** — **Held: OD-2**
+  - Input: the 1.0 and 1.1 layouts recorded in `plan.md` from `ec73c15` and
+    `b191af1`.
   - Output: `analyze_fuzzy_axions_orientifold_gap.py`,
     `trace_lost_h11_3_fixed_components.py`, `orientifold_population_preflight.py`.
   - Verify: Python tests per accepted and rejected version.
@@ -136,10 +142,13 @@ File:line references are at `10aa3dc` (see `plan.md`). Tasks marked
     resume readers let R-007 errors propagate.
   - Verify: a legacy or invalid input raises at each site.
 
-- [ ] **T063 [R-007] Inflation CSV inference** — **Held: OD-3**
-  - Verify: one test per accepted historical version.
+- [ ] **T063 [R-007, A3] Inflation CSV inference** — **Held: OD-3**
+  - Input: the version-tuple table in `plan.md` (A3.1), one entry per
+    combination merged code wrote, with its commit.
+  - Verify: one test per recorded combination; contradictory, unknown and
+    multi-family tuples rejected.
 
-- [ ] **T064 [R-007] Combination rule** — **Held: OD-3** for the version-column choice
+- [ ] **T064 [R-007] Combination rule** — **Held: OD-3** for family membership (A3)
   - Output: mixed-label rejection in every combiner in the reader inventory.
   - Verify: `ArgumentError` naming both labels.
 
@@ -149,7 +158,10 @@ File:line references are at `10aa3dc` (see `plan.md`). Tasks marked
   - Verify: one resume test per runner, including a legacy output without and
     with the overwrite option.
 
-- [ ] **T066 [R-007] Scale-continuation resume** — **Held: OD-5**
+- [ ] **T066 [R-007, A5] Scale-continuation resume** — **Held: OD-5**
+  - Output: legacy rows not complete; `--resume` on a legacy report refuses
+    naming the label; `_pilot_completed_scales` propagates errors.
+  - Verify: resume test with a legacy report; parse-error propagation test.
 
 - [ ] **T067 [R-007] Layout migrations**
   - Output: migrations add no label or version and refuse a current-version
@@ -168,11 +180,17 @@ File:line references are at `10aa3dc` (see `plan.md`). Tasks marked
     the `.jls` fixture, the A96 JSON and the comparison CSV.
   - Verify: label assertions; physical readers reject reproduction labels.
 
-- [ ] **T072 [R-008] K-free and mixed reproduction functions** — **Held: OD-4, OD-7**
+- [ ] **T072 [R-008, A4, A7] K-free and mixed reproduction functions** — **Held: OD-4, OD-7**
+  - Output: K-free functions recorded without a label (A4);
+    `pilot_benchmark_regression` returns `kinetic_normalization_by_field` and
+    no top-level label (A7).
+  - Verify: test asserts the field map, including `passed` with both labels.
 
 ## Phase 6 — Documentation and evidence
 
 - [ ] **T080 [R-009] Conventions page and pointers**
+  - Output: includes the unreliable legacy F2 cubic note (A1.5) and the
+    non-certified script (A6) once Clarification A is approved.
   - Verify: docs build; links from docstrings, README and the axion–photon page.
 
 - [ ] **T081 [R-010] Certification audit note**

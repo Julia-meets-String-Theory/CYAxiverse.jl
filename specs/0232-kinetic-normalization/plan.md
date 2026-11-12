@@ -12,12 +12,25 @@ Implementation base: `origin/vmm` at `10aa3dc`. All file:line citations below
 refer to `10aa3dc`. If the implementation branch is based on a later `vmm`,
 the inventories are re-run and the R-002 baseline is regenerated (spec R-002).
 
-## Owner decisions required before the affected tasks
+## Owner decisions before the affected tasks
 
 The inventory found points that the approved spec does not decide (spec stop
 condition). Each holds only the tasks named; all other tasks proceed.
 
-| ID | Question | Recommendation | Held tasks |
+**Status (2026-11-12).** The owner adopted an independent review of this plan.
+The decisions are drafted as `clarification-a.md` (A1–A7), which supersedes the
+recommendations below where they differ:
+- OD-1 adds the `pq_spectrum_save` phase transformation (A1);
+- OD-2 requires a recorded historical layout before inference (A2);
+- OD-3 drops the column priority, requires a consistent version tuple, and
+  rejects ambiguous rows (A3);
+- OD-6 states that the script's outputs are not certified (A6);
+- OD-7 uses field-level labels instead of one A96 label (A7).
+
+The held tasks stay held until Clarification A passes a focused G0 review and
+the owner approves it.
+
+| ID | Question | Original recommendation | Held tasks |
 |---|---|---|---|
 | OD-1 | `generate.cubic` (generate.jl:567) expects `L` as N×2 and `Q` as N×h11. `pq_spectrum_save` (3013–3015) passes `Ltilde` as 2×h11, and `hp_spectrum_save` (1071) passes 2×N and h11×N. The stored F2 cubic tensor is mis-indexed at h11 = 2 and the call throws otherwise. Neither function has a test. Is the orientation fix in scope? | Fix it in this work (F2 gets a new schema anyway, and legacy F2 already reads as `cubic_basis = :unknown`); record legacy F2 cubic tensors as unreliable in the conventions page. | T030 |
 | OD-2 | F5 legacy inference lists only `reproduction-1.2` and `kaehler-production-1.0`. Versions `1.0` (ec73c15) and `1.1` (b191af1) exist and contain the K-dependent `model_stage` block; `analyze_fuzzy_axions_orientifold_gap.py` accepts only `1.1` (lines 56, 656, 997). | Amend R-007 to infer F5 `1.0` and `1.1` as `:legacy_c_half`, as for F6 2.0–2.2. | T060, T061 |
@@ -30,7 +43,9 @@ condition). Each holds only the tasks named; all other tasks proceed.
 `read.K` is decided here without the owner: it is kept and documented as
 unlabelled and not physical (R-001(a) allows this, and it avoids a signature
 change that the Interfaces section excludes). It has no caller and no writer at
-`10aa3dc`.
+`10aa3dc`. It reads `cytools/potential/K`, not the stored
+`cytools/geometric/Kinv`. T020 adds a docstring warning that it is not the
+supported physical kinetic-matrix accessor and points to `kinetic_matrix`.
 
 ## Approval notes (G1 obligations from the approval comment)
 
@@ -289,7 +304,7 @@ Reproduction functions not named in the spec: `n8_g3_control.jl` (P96),
 | Rows | Test route | Extension needed |
 |---|---|---|
 | Spectrum f, m, quartics | HDF5 fixture with the R-004 pins through `run_batch` (F1) and `hp_spectrum_save`/`pq_spectrum_save` (F2); template runtests.jl:2469–2500 | new fixture file; F1 runner has no test today |
-| Cubic, both bases | same, with ϑ₀ = [0.1, 0.05]; `pq_spectrum_save` takes the mass-basis phase x₀ = basisᵀB⁻¹ϑ₀ per convention | OD-1 |
+| Cubic, both bases | same, with ϑ₀ = [0.1, 0.05]; both writers take ϑ₀ and `pq_spectrum_save` transforms it to x₀ = basisᵀC⁻¹ϑ₀ internally (A1.2); plus an h11 = 3 fixture for `pq_spectrum_save` and an `:hp_effective` case with N > h11, each checked against finite differences (A1.4) | A1 |
 | F3 (all rows, both policies) | test/axion_photon.jl templates (11–87, 171–221, 223, 314) with `Kinv = [3 1; 1 2]` and the R-004 Q/L; modes at 10^24.26 eV and 10^−1.14 eV lie either side of `ELECTRON_MASS_EV`; `qed_charge = [1, 1]` (norm 7 vs 3.5), `em_charge`, `qed_log10_lambda4` | fixture metadata |
 | Inflation ε, η, eig(K⁻¹H), mass_min/max | runtests.jl:645–704 and full.jl:784–840 with `Kinv = [3 1; 1 2]`; non-stationary evaluation points for `diagnose` | evaluation points |
 | F4, F5 masses | runtests.jl:1692 and 2017; new direct Python test of `_fuzzy_axion_mass_log10` with the R-004 pins (its superpotential adds Σe^{−2πτ}, line 1107) | Python test |
@@ -364,4 +379,4 @@ Stop for the owner if:
 
 T001–T002 gate everything. T010 precedes all label work. Family tasks
 (T030–T045) are independent of one another after T010. OD-held tasks wait for
-their decision; nothing else does.
+the approval of Clarification A; nothing else does.
