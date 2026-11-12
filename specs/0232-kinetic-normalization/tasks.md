@@ -130,8 +130,8 @@ the decisions (A1–A7); all others proceed.
   - Verify: one test per case.
 
 - [ ] **T061 [R-007, A2] F5 readers** — **Held: OD-2**
-  - Input: the 1.0 and 1.1 layouts recorded in `plan.md` from `ec73c15` and
-    `b191af1`.
+  - Input: every distinct 1.0 and 1.1 layout recorded in `plan.md` over the
+    full commit range of each version (A2).
   - Output: `analyze_fuzzy_axions_orientifold_gap.py`,
     `trace_lost_h11_3_fixed_components.py`, `orientifold_population_preflight.py`.
   - Verify: Python tests per accepted and rejected version.
@@ -143,10 +143,10 @@ the decisions (A1–A7); all others proceed.
   - Verify: a legacy or invalid input raises at each site.
 
 - [ ] **T063 [R-007, A3] Inflation CSV inference** — **Held: OD-3**
-  - Input: the version-tuple table in `plan.md` (A3.1), one entry per
-    combination merged code wrote, with its commit.
-  - Verify: one test per recorded combination; contradictory, unknown and
-    multi-family tuples rejected.
+  - Input: the layout-key table in `plan.md` (A3.2): header, `row_type` and
+    version values, with the commits that wrote each.
+  - Verify: one test per recorded key; unknown keys and contradictory version
+    values rejected.
 
 - [ ] **T064 [R-007] Combination rule** — **Held: OD-3** for family membership (A3)
   - Output: mixed-label rejection in every combiner in the reader inventory.
@@ -184,7 +184,8 @@ the decisions (A1–A7); all others proceed.
   - Output: K-free functions recorded without a label (A4);
     `pilot_benchmark_regression` returns `kinetic_normalization_by_field` and
     no top-level label (A7).
-  - Verify: test asserts the field map, including `passed` with both labels.
+  - Verify: test asserts the field map, including `passed` and the detuned
+    fields with both labels; a physical consumer rejects the result.
 
 ## Phase 6 — Documentation and evidence
 

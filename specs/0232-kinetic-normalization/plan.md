@@ -27,13 +27,17 @@ recommendations below where they differ:
 - OD-6 states that the script's outputs are not certified (A6);
 - OD-7 uses field-level labels instead of one A96 label (A7).
 
+Focused G0 round 1 of `f6c75bd` returned REQUEST_CHANGES (F5 versions span
+commit ranges; inflation family identity needs the header; the A7 trigger).
+The revision resolves all findings and nits.
+
 The held tasks stay held until Clarification A passes a focused G0 review and
 the owner approves it.
 
 | ID | Question | Original recommendation | Held tasks |
 |---|---|---|---|
-| OD-1 | `generate.cubic` (generate.jl:567) expects `L` as N×2 and `Q` as N×h11. `pq_spectrum_save` (3013–3015) passes `Ltilde` as 2×h11, and `hp_spectrum_save` (1071) passes 2×N and h11×N. The stored F2 cubic tensor is mis-indexed at h11 = 2 and the call throws otherwise. Neither function has a test. Is the orientation fix in scope? | Fix it in this work (F2 gets a new schema anyway, and legacy F2 already reads as `cubic_basis = :unknown`); record legacy F2 cubic tensors as unreliable in the conventions page. | T030 |
-| OD-2 | F5 legacy inference lists only `reproduction-1.2` and `kaehler-production-1.0`. Versions `1.0` (ec73c15) and `1.1` (b191af1) exist and contain the K-dependent `model_stage` block; `analyze_fuzzy_axions_orientifold_gap.py` accepts only `1.1` (lines 56, 656, 997). | Amend R-007 to infer F5 `1.0` and `1.1` as `:legacy_c_half`, as for F6 2.0–2.2. | T060, T061 |
+| OD-1 | `generate.cubic` (generate.jl:567) expects `L` as N×2 and `Q` as N×h11. `pq_spectrum_save` (3013–3015) passes `Ltilde` as 2×h11, and `hp_spectrum_save` (1073) passes 2×N and h11×N. The stored F2 cubic tensor is mis-indexed at h11 = 2 and the call throws otherwise. Neither function has a test. Is the orientation fix in scope? | Fix it in this work (F2 gets a new schema anyway, and legacy F2 already reads as `cubic_basis = :unknown`); record legacy F2 cubic tensors as unreliable in the conventions page. | T030 |
+| OD-2 | F5 legacy inference lists only `reproduction-1.2` and `kaehler-production-1.0`. Versions `1.0` (written by `ec73c15`…`e7a8f51`; `model_stage` from `aee4c1a` on) and `1.1` (`b191af1`, `31cf465`, `f45ea31`, `68df2a2`, `239a3a7`) exist; `analyze_fuzzy_axions_orientifold_gap.py` accepts only `1.1` (lines 56, 656, 997). | Amend R-007 to infer F5 `1.0` and `1.1` as `:legacy_c_half`, as for F6 2.0–2.2. | T060, T061 |
 | OD-3 | Approval note 5 limits inflation CSV inference to the pre-change constants "unless history shows earlier versions in use". History shows contract `1`–`3`, shard `1`, and pilot `3`/`4` written by merged code. Rows also carry several version columns at once. | Infer every historical version that merged code wrote; family membership is decided by `contract_version`, then `diagnostic_schema_version`, then the file's own schema column. | T063, T064 |
 | OD-4 | Reproduction functions that use no kinetic matrix (for example `validate_vacua_stage4_5.jl` `_stage4_n5_n8`, `catastrophic_inflation_population_study.jl` `main`, `reproduce_2023_n8.jl`, the K-free `reduced_models`/`author_inflation` functions) cannot be assigned P96 or A96 by R-008. | No label duty for functions and outputs that consume no kinetic matrix (they are not K-dependent under R-006); record them as K-free in the search record. | T072 |
 | OD-5 | `inflation_scale_continuation.jl` `run_scale_continuation` (2023) is a resumable physical runner not named in R-007 *Batch resume*; its `_pilot_completed_scales` (1474) swallows parse errors (1488–1494) and has no overwrite option. | Treat as `inflation_scan_prep.jl`: legacy rows are not complete, `--resume` on a legacy report refuses, remedy is a new report path; parse errors propagate. | T066 |
@@ -304,7 +308,7 @@ Reproduction functions not named in the spec: `n8_g3_control.jl` (P96),
 | Rows | Test route | Extension needed |
 |---|---|---|
 | Spectrum f, m, quartics | HDF5 fixture with the R-004 pins through `run_batch` (F1) and `hp_spectrum_save`/`pq_spectrum_save` (F2); template runtests.jl:2469–2500 | new fixture file; F1 runner has no test today |
-| Cubic, both bases | same, with ϑ₀ = [0.1, 0.05]; both writers take ϑ₀ and `pq_spectrum_save` transforms it to x₀ = basisᵀC⁻¹ϑ₀ internally (A1.2); plus an h11 = 3 fixture for `pq_spectrum_save` and an `:hp_effective` case with N > h11, each checked against finite differences (A1.4) | A1 |
+| Cubic, both bases | same, with ϑ₀ = [0.1, 0.05]; both writers take ϑ₀ and `pq_spectrum_save` transforms it to x₀ = basisᵀC⁻¹ϑ₀ internally (A1.2); plus an h11 = 3 fixture for `pq_spectrum_save` (ϑ₀ = [0.1, 0.05, 0.02], non-degenerate leading masses) and an `:hp_effective` case with N > h11; each tensor checked against central differences of the Hessian of the writer's own `(L, Q)` potential, step 1e-5, tolerance 1e-6·max\|tensor\| (A1.4) | A1 |
 | F3 (all rows, both policies) | test/axion_photon.jl templates (11–87, 171–221, 223, 314) with `Kinv = [3 1; 1 2]` and the R-004 Q/L; modes at 10^24.26 eV and 10^−1.14 eV lie either side of `ELECTRON_MASS_EV`; `qed_charge = [1, 1]` (norm 7 vs 3.5), `em_charge`, `qed_log10_lambda4` | fixture metadata |
 | Inflation ε, η, eig(K⁻¹H), mass_min/max | runtests.jl:645–704 and full.jl:784–840 with `Kinv = [3 1; 1 2]`; non-stationary evaluation points for `diagnose` | evaluation points |
 | F4, F5 masses | runtests.jl:1692 and 2017; new direct Python test of `_fuzzy_axion_mass_log10` with the R-004 pins (its superpotential adds Σe^{−2πτ}, line 1107) | Python test |
