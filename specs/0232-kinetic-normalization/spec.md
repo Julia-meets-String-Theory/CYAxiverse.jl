@@ -467,7 +467,7 @@ h11=2 source-corrected role validation":
 - $g_s = 0.5029733$ and $W_0 = 1$;
 - instanton scales from Eq. 3.18, using the formula implemented in
   `fuzzy_axions_model_stage.jl:87–96` (which `leading_axion_reference_data`
-  uses internally; that function returns only masses);
+  uses internally; that function returns no decay constants);
 - $M_{\rm pl} = $ `constants()["MPlanck"]`.
 
 **Evaluation.** The leading directions are taken in the order QCD first
@@ -562,7 +562,8 @@ in the mode sets SHALL be reported.
 | persisted `hierarchy/log10_f_GeV` (`axion_photon.jl:1384`) | $+\tfrac12\log_{10}2$ (×√2) |
 | persisted `hierarchy/log10_mass_eV` (`axion_photon.jl:1385`) | $-\tfrac12\log_{10}2$ (×1/√2) |
 | `log10_g_effective` for heavy modes under `:electron_proxy` | 1/√2 |
-| QED threshold mass | 1/√2 |
+| QED threshold under `:divisor_instanton` (`qed_instanton_log10_threshold_eV`, from the QED kinetic norm) | 1/√2 |
+| QED threshold under `:electron_proxy` (`light_threshold_eV`, by default the electron mass) | 1 (fixed) |
 | photon width, all modes under `:divisor_instanton` | $2^{-5/2}$ |
 | photon width, heavy modes under `:electron_proxy` | $2^{-5/2}$ |
 | photon width, light modes under `:electron_proxy` | $2^{-9/2}$ |
@@ -690,7 +691,8 @@ their rows carry `"sugra_c1"`.
   `CYAxiverse.KINETIC_NORMALIZATION == :sugra_c1`, which describes every
   physical result it computes from `Kinv`.
 - Reproduction results carry their reproduction label through the
-  `kinetic_normalization` field of their own result types (R-008).
+  `kinetic_normalization` field of their own result types; reproduction
+  functions that return a bare array document their contract instead (R-008).
 - Readers that return a `NamedTuple` (for example `physical_spectrum`,
   `read.pq_spectrum`, `read.hp_spectrum`) SHALL add the fields
   `kinetic_normalization::Symbol` and `kinetic_normalization_inferred::Bool`.
@@ -734,7 +736,8 @@ their rows carry `"sugra_c1"`.
 - F4 with no `schema_version` and no label, whose root holds
   `total_model_count` and `model_mass_reference_log10_ev`;
 - F5 at `…-reproduction-1.2` or `…-kaehler-production-1.0` with no label;
-- F6 at `…-orientifold-inflation-2.3` or `…-1.0` with no label. The F6
+- F6 at `…-orientifold-inflation-2.3`, `…-2.2`, `…-2.1`, `…-2.0` or `…-1.0`
+  with no label (all historical group versions). The F6
   version is `inflation/schema_version`; the nested compatibility marker
   `inflation/catastrophes/legacy_v1/schema_version`
   (`build_orientifold_vacua_inflation.jl:268–269`) is not the group version
@@ -813,7 +816,7 @@ SHALL NOT catch and suppress an R-007 rejection or a combination error.
 Existing catch-all handlers SHALL let these errors propagate, in particular:
 - the `try … @warn` skip in `scripts/reproduce_appendix_b_spectra.jl:83–101`;
 - both `_has_axion_photon` methods, the file method
-  (`axion_photon.jl:2016–2041`) and the path method (`:2049–2075`), each of
+  (`axion_photon.jl:2016–2047`) and the path method (`:2049–2075`), each of
   which returns `false` on any error. It is used by `run_batch_axion_photon` (line 2101) and by the
   `write_axion_photon_result` overwrite guard. A legacy or unlabelled F3 group
   SHALL NOT read as absent, so that the batch-resume `:failed` rule and the
@@ -855,7 +858,12 @@ replaced only under the runner's explicit overwrite option: `force=true` for
 `run_batch_axion_photon` and `build_orientifold_vacua_inflation.jl`, and
 `--force` for `batch_physical_spectrum`. Otherwise it is reported as
 `:failed`, with a message naming the stored label, as
-`run_batch_axion_photon` already does for a configuration mismatch. For
+`run_batch_axion_photon` already does for a configuration mismatch. The
+exception is `run_pipeline2` in `build_orientifold_vacua_inflation.jl`, which
+keeps its existing `:blocked` status fields for an existing group
+(`build_orientifold_vacua_inflation.jl:447–460`); when the blocking group is
+an F6 group labelled or inferred other than `:sugra_c1`, its `vacua_error`
+message SHALL name the stored label. For
 `batch_physical_spectrum` this `:failed` rule applies only to outputs
 labelled or inferred other than `:sugra_c1`. A `"sugra_c1"` output whose
 configuration digest differs (the digest hashes `schema_version` and the git
@@ -867,7 +875,8 @@ recomputed as today, and that rewrite also deletes the whole
 remedy is a new summary path.
 
 **Reader and combiner inventory.** `plan.md` SHALL list every reader and every
-cross-file combiner of the R-006 families in `src/`, `ext/`, `scripts/` and
+cross-file combiner of the R-006 families in `src/`, `ext/`, `scripts/`,
+`notebooks/` and
 `bin/`, including those that bypass the package readers (for example
 `scripts/reproduce_appendix_b_spectra.jl:83–101`, which reads
 `spectrum/physical` directly and aggregates across files). Each SHALL apply
@@ -882,7 +891,12 @@ an `ArgumentError` naming both values. No implicit conversion is provided.
 The reproduction paths named under *Implementation facts* SHALL be numerically
 unchanged, and so SHALL their tests. Their results SHALL carry
 `kinetic_normalization` = `:p96_reproduction_c_half` or
-`:a96_reproduction_raw_radian`, according to their contract. Any persisted
+`:a96_reproduction_raw_radian`, according to their contract. This field
+duty applies to reproduction functions that return result structs or
+`NamedTuple`s. Reproduction functions that return a bare array (for example
+`n5_kinetic_matrix` and `n8_kinetic_matrix`) keep their return types; their
+docstrings and the conventions page (R-009) SHALL state their contract (P96
+or A96). Any persisted
 reproduction output SHALL carry the matching R-006 string. In particular:
 - `inflation_refinement_common.jl` rows carry
   `"a96_reproduction_raw_radian"` (R-006 per-row labels);
@@ -1004,7 +1018,8 @@ PR at the exact SHA, plus CI green.
 ## Interfaces and compatibility
 
 **Public API.**
-- Signatures and exported struct layouts are unchanged.
+- Existing signatures and exported struct layouts are unchanged; the only
+  signature change is the additive F2 replace keyword (R-007).
 - New exports: `KINETIC_NORMALIZATION`, `kinetic_factor`, `kinetic_matrix`
   and `stored_kinetic_normalization`.
 - `NamedTuple`-returning readers gain two fields (R-006).
