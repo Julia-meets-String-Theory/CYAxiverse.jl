@@ -12,6 +12,7 @@ using NLsolve
 using Optim
 using SHA
 using ..generate: LQtilde, reduced_critical_points, constants, pq_canonical_frame
+using ..read: kinetic_factor
 
 include(joinpath(@__DIR__, "paper_benchmarks", "reduced_models.jl"))
 include(joinpath(@__DIR__, "paper_benchmarks", "poly102_inflation.jl"))

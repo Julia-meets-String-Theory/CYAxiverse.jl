@@ -728,9 +728,10 @@ function _pilot_physical_domain_certificate_big(geometry, Q, L, K, scale,
                 scale=k, precision_bits, normalization=raw_normalization,
                 source_identity=raw_source, configuration_digest=raw_config)
         identity = Matrix{BigFloat}(I, h11, h11)
-        inverse_residual = maximum(abs.(base_K * kinv - identity))
+        # c = 1 (CYAX-0232 R-011): the physical K is 2 Kinv⁻¹, so K * Kinv = 2I.
+        inverse_residual = maximum(abs.(base_K * kinv - 2 * identity))
         inverse_residual <= spd_tolerance || return cert_result(
-            :domain_failure, "K and Kinv are not reciprocal in one basis";
+            :domain_failure, "K and Kinv do not satisfy K * Kinv = 2I in one basis";
             scale=k, precision_bits, normalization=raw_normalization,
             source_identity=raw_source, configuration_digest=raw_config)
         scaled_K = base_K / k^2

@@ -82,7 +82,8 @@ function leading_axion_reference_data(Q::AbstractMatrix{Int}, tau::AbstractVecto
 
     Kinv = Matrix{Float64}(inverse_metric)
     Kinv = (Kinv + Kinv') / 2
-    C = Matrix(cholesky(Symmetric(Kinv)).L)
+    # Canonical factor at c = 1 (CYAX-0232): C * C' = Kinv / 2.
+    C = Matrix(kinetic_factor(Kinv))
 
     # eq. 3.18's constant prefactor (identical for every instanton at the
     # reference dilation λ=1): log10(8π * sqrt(P) * (m_3/2/Mpl) / V).

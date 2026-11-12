@@ -155,10 +155,40 @@ end
 #############################
 
 """
+    kinetic_factor(Kinv)
+
+Return the canonical kinetic factor `B = cholesky(Symmetric(Kinv ./ 2)).L`:
+lower triangular with positive diagonal and `B * B' ≈ Kinv / 2`.
+
+`Kinv` is the inverse Kähler metric as CYTools returns it and as it is stored
+(`cytools/geometric/Kinv`). CYAxiverse uses the supergravity axion kinetic
+normalization (c = 1, CYAX-0232): the kinetic term is
+`-(1/2) M_pl² K ∂ϑ ∂ϑ` with `K = 2 Kinv⁻¹` and period-one ϑ, so the factor
+satisfies `B * B' = K⁻¹` and `ϑ = B ψ` gives canonically normalized ψ.
+
+`Symmetric` reads the upper triangle; symmetrize `Kinv` first if it may be
+asymmetric. The factor ½ is applied only here, in [`kinetic_matrix`](@ref) and
+in the kinetic norm `qᵀ (Kinv/2) q`; stored and exported inverse metrics stay
+unscaled; `CYAxiverse.KINETIC_NORMALIZATION` names this convention.
+"""
+kinetic_factor(Kinv::AbstractMatrix{<:Real}) = cholesky(Symmetric(Kinv ./ 2)).L
+
+"""
+    kinetic_matrix(Kinv)
+
+Return the physical axion kinetic matrix `K = 2 inv(Hermitian(Kinv))`, the
+matrix in `-(1/2) M_pl² K ∂ϑ ∂ϑ` with period-one ϑ (c = 1, CYAX-0232).
+`Kinv` is the stored, unscaled CYTools inverse Kähler metric; see
+[`kinetic_factor`](@ref).
+"""
+kinetic_matrix(Kinv::AbstractMatrix{<:Real}) = 2 * inv(Hermitian(Kinv))
+
+"""
     _kinetic_matrix(Kinv, geom_idx)
 
-Construct the axion kinetic matrix `K = (1/2) g` from the stored inverse
-Kähler metric `Kinv` using a symmetry-aware inverse.
+Construct the physical axion kinetic matrix `K = 2 Kinv⁻¹` (c = 1, see
+[`kinetic_matrix`](@ref)) from the stored inverse Kähler metric `Kinv` using a
+symmetry-aware inverse.
 
 `Kinv` is read from HDF5 as a plain `Matrix`. Inverting it directly
 (`inv(Kinv)`) selects a general LU factorisation that ignores its symmetry;
@@ -179,11 +209,11 @@ reported as a `DomainError` naming the geometry, rather than letting a raw
 """
 function _kinetic_matrix(Kinv::AbstractMatrix{Float64}, geom_idx::GeometryIndex)
     try
-        Hermitian(inv(Hermitian(Matrix{Float64}(Kinv))))
+        Hermitian(kinetic_matrix(Matrix{Float64}(Kinv)))
     catch err
         err isa SingularException || rethrow()
         throw(DomainError(0.0,
-            "kinetic matrix K = (1/2) g could not be constructed: stored " *
+            "kinetic matrix K = 2 Kinv⁻¹ could not be constructed: stored " *
             "inverse metric Kinv is exactly singular for geometry " *
             "h11=$(geom_idx.h11), polytope=$(geom_idx.polytope), " *
             "frst=$(geom_idx.frst)"))
@@ -194,7 +224,7 @@ end
     _validate_kinetic_matrix(K, Kinv, geom_idx)
 
 Enforce the physical invariant (`.copilot/AGENTS.md`, section 3) that the
-axion kinetic matrix `K_ij = 1/2 g_ij` is symmetric positive-definite,
+axion kinetic matrix `K = 2 Kinv⁻¹` is symmetric positive-definite,
 throwing a `DomainError` naming the offending geometry and quantity when it
 is not, so a corrupt on-disk artifact is identifiable from the error alone.
 
@@ -229,7 +259,7 @@ function _validate_kinetic_matrix(K::Hermitian{Float64, Matrix{Float64}},
     λmin_K = eigmin(K)
     λmin_Kinv = eigmin(Hermitian(Matrix{Float64}(Kinv)))
     throw(DomainError(λmin_K,
-        "kinetic matrix K = (1/2) g is not symmetric positive-definite for " *
+        "kinetic matrix K = 2 Kinv⁻¹ is not symmetric positive-definite for " *
         "geometry h11=$(geom_idx.h11), polytope=$(geom_idx.polytope), " *
         "frst=$(geom_idx.frst): smallest eigenvalue of K is $λmin_K " *
         "(smallest eigenvalue of the stored Kinv is $λmin_Kinv). A negative " *
@@ -270,9 +300,12 @@ end
 """
     potential_factored(geom_idx::GeometryIndex; hilbert=false)
 
-Read a potential together with the inverse kinetic metric and its Cholesky
-factor.  Return `C` such that `Kinv ≈ C * C'`; callers that whiten a Hessian
-can therefore form `C' * H * C` without explicitly constructing `inv(Kinv)`.
+Read a potential together with the stored inverse Kähler metric and the
+canonical kinetic factor. Return `C = kinetic_factor(Kinv)`, so that
+`C * C' ≈ Kinv / 2 = K⁻¹` for the physical kinetic matrix `K = 2 Kinv⁻¹`
+(c = 1, CYAX-0232); callers that whiten a Hessian can therefore form
+`C' * H * C` without explicitly constructing `K`. The returned `Kinv` is the
+stored matrix symmetrized as `(Kinv + Kinv')/2`, without the factor ½.
 """
 function potential_factored(geom_idx::GeometryIndex; hilbert = false)
     L, Q, Kinv = h5open(cyax_file(geom_idx), "r") do file
@@ -292,7 +325,7 @@ function potential_factored(geom_idx::GeometryIndex; hilbert = false)
     size(Kinv, 1) == size(Kinv, 2) ||
         throw(DimensionMismatch("Kinv must be square"))
     Kinv = (Kinv + transpose(Kinv)) / 2
-    C = Matrix(cholesky(Symmetric(Kinv)).L)
+    C = Matrix(kinetic_factor(Kinv))
     (; L, Q, Kinv, C)
 end
 

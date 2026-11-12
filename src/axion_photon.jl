@@ -20,6 +20,7 @@ using SHA
 import Nemo
 
 using ..filestructure: resolve_data_dir
+using ..read: kinetic_factor
 using ..structs: GeometryIndex
 
 const M_PLANCK_GEV = 2.435e18
@@ -1034,7 +1035,10 @@ function _canonical_frame(Q_reduced::Matrix{Int}, Kinv::Matrix{T}) where {T<:Abs
     n = size(Q_reduced, 1)
     size(Q_reduced, 2) == n || throw(DimensionMismatch(
         "selected charge matrix must be square"))
-    factor = cholesky(Symmetric(Kinv))
+    # c = 1 (CYAX-0232): the canonical factor B satisfies B * B' = Kinv / 2.
+    # Wrapping B as a Cholesky object keeps `factor \ theta` in
+    # `leading_hierarchy`'s metric residual on the same factorization.
+    factor = Cholesky(kinetic_factor(Kinv))
     lower = factor.L
     Q_float = Matrix{T}(Q_reduced)
     charge_columns = Matrix{T}(undef, n, n)
@@ -1149,8 +1153,9 @@ function qed_instanton_log10_threshold_eV(
     @inbounds for index in eachindex(charge)
         charge[index] = T(assignment.qed_charge[index])
     end
+    # Kinetic norm qᵀ (Kinv/2) q of the QED charge (c = 1, CYAX-0232).
     mul!(transformed, geometry.kinv, charge)
-    norm_squared = dot(charge, transformed)
+    norm_squared = dot(charge, transformed) / 2
     norm_squared > zero(T) && isfinite(norm_squared) || throw(ArgumentError(
         "QED divisor charge has a non-positive kinetic norm"))
     T(0.5) * assignment.qed_log10_lambda4 + log10(planck) + T(9) +

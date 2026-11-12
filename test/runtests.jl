@@ -151,7 +151,8 @@ end
     @test base_L[2, 4] ≈ log10(abs(cross_coefficient)) -
         BigFloat(2) * BigFloat(π) * log10(exp(BigFloat(1))) *
         dot(base_Q[:, 1] + base_Q[:, 2], base_geometry.τ_volumes)
-    base_K = Matrix{BigFloat}(I, 2, 2)
+    # c = 1 (CYAX-0232 R-011): the physical K is 2 Kinv⁻¹; here Kinv = I.
+    base_K = 2 * Matrix{BigFloat}(I, 2, 2)
     scale = parse(BigFloat, "0.9")
     fixed = pilot_scaled_inputs(base_Q, base_L, base_K, 0.9;
         scale_status=:unsupported, geometry=base_geometry,
@@ -779,7 +780,7 @@ end
 
 @testset "Kinetic matrix construction and section-3 positive-definiteness invariant" begin
     # `.copilot/AGENTS.md` section 3 requires the kinetic matrix
-    # K = 1/2 g to be symmetric positive-definite, throwing a domain error
+    # K = 2 Kinv⁻¹ (c = 1, CYAX-0232) to be symmetric positive-definite, throwing a domain error
     # when it is not. `read.potential` previously built K as
     # `Hermitian(inv(Kinv))`: a plain, symmetry-unaware `inv` on the
     # `Matrix` read from HDF5, wrapped in `Hermitian` only afterwards. That
@@ -1720,7 +1721,7 @@ end
         m32_neutral = 1.0 / (8π)
         reference_neutral = PB.leading_axion_reference_data(
             Q, tau, V_neutral, P_neutral, m32_neutral, Kinv)
-        Kmetric = Hermitian(inv(Hermitian(Kinv)))
+        Kmetric = Hermitian(CYAxiverse.read.kinetic_matrix(Kinv))
         L_raw = PB.instanton_scales(tau, 1.0)
         established = G.pq_spectrum(Kmetric, L_raw, Q; mixing_correction=false)
         @test isapprox(
@@ -2492,12 +2493,13 @@ end
             geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
             factored = CYAxiverse.read.potential_factored(geom_idx)
             @test factored.Kinv ≈ Kinv
-            @test factored.C * transpose(factored.C) ≈ Kinv rtol=1e-12 atol=1e-15
+            # c = 1 (CYAX-0232 R-001): C = kinetic_factor(Kinv), C * C' = Kinv / 2.
+            @test factored.C * transpose(factored.C) ≈ Kinv / 2 rtol=1e-12 atol=1e-15
 
             hp = CYAxiverse.generate.hp_spectrum(geom_idx;
                 prec=200, quartics=false, selection=:raw)
             reference = setprecision(BigFloat, 400) do
-                Cbig = cholesky(Symmetric(BigFloat.(Kinv))).L
+                Cbig = cholesky(Symmetric(BigFloat.(Kinv) / 2)).L
                 Hbig = BigFloat.(Q) *
                     Diagonal(BigFloat.(L[1, :]) .* (BigFloat(10) .^ BigFloat.(L[2, :]))) *
                     transpose(BigFloat.(Q))
@@ -3977,7 +3979,7 @@ end
                 )
                 @test raw_or_transposed_matches
 
-                # Kinetic matrix K = (1/2) g must be symmetric positive-definite.
+                # Kinetic matrix K = 2 Kinv⁻¹ must be symmetric positive-definite.
                 @test isposdef(normalised.K)
                 @test issymmetric(Matrix(normalised.K))
 
