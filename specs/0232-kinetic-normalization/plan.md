@@ -32,8 +32,11 @@ commit ranges; inflation family identity needs the header; the A7 trigger).
 Round 2 of `98060aa` returned REQUEST_CHANGES (the cubic tests reused the
 R-004 fixture, whose Λ hierarchy defeats Float64). Round 3 of `ea93938`
 returned REQUEST_CHANGES (A2 exact key-path equality fails on data-keyed
-maps). The current revision resolves all findings and nits of all three
-rounds.
+maps). Round 4 of `644b106` returned REQUEST_CHANGES (flag variants with
+identical path sets made "exactly one match" fail). The current revision
+resolves all findings and nits of all four rounds, and records the F5
+file-provenance meaning of the label (A2), which round 4 found follows from
+the approved spec.
 
 The held tasks stay held until Clarification A passes a focused G0 review and
 the owner approves it.
@@ -320,7 +323,8 @@ Reproduction functions not named in the spec: `n8_g3_control.jl` (P96),
 
 ### Cubic fixtures (A1.4)
 
-Every potential coefficient Λₐ = 10^{L[2,a]} lies within 10^1.5 of the others. `L` columns are (sign, log10 Λ), all
+Every potential coefficient |Λₐ| (10 to the instanton's log10 column) lies
+within 10^1.5 of the others. `L` columns are (sign, log10 Λ), all
 signs +1. Leading masses were checked as non-degenerate with a replica of the
 c = 1 leading Hessian `Cᵀ(Σ Λ q qᵀ)C`, `C = chol(Kinv/2)`.
 
@@ -334,8 +338,8 @@ The finite-difference check uses central differences of the Hessian of the
 writer's own `(L, Q)` potential, step 1e-5, tolerance 1e-6·max|tensor|
 (truncation ≈ 1e-11·|Q|², roundoff ≈ 2e-10 relative). The R-005 cubic
 comparison is normwise (Frobenius) after per-mode sign alignment, relative
-tolerance 1e-10. Non-degeneracy is asserted as a relative gap ≥ 0.5 between
-adjacent leading Hessian eigenvalues. T030 asserts the `Canonicalα` branch
+tolerance 1e-10. Non-degeneracy is asserted as (λ_{k+1} − λ_k)/λ_{k+1} ≥ 0.5 for
+adjacent ascending leading Hessian eigenvalues. T030 asserts the `Canonicalα` branch
 for C2-hp.
 
 ### R-010 audit

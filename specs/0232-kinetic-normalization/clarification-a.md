@@ -1,8 +1,8 @@
 # CYAX-0232 Clarification A — Decisions OD-1 to OD-7
 
-**Status:** Draft, revision 4 (focused G0 rounds 1–3 (`f6c75bd`, `98060aa`,
-`ea93938`): REQUEST_CHANGES, resolved here; round 4 pending; owner approval
-pending)
+**Status:** Draft, revision 5 (focused G0 rounds 1–4 (`f6c75bd`, `98060aa`,
+`ea93938`, `644b106`): REQUEST_CHANGES, resolved here; round 5 pending; owner
+approval pending)
 **Amends:** `spec.md` approved at `f097536` (`approval_ref` in `spec.md`)
 **Origin:** the seven open points in `plan.md` (*Owner decisions required
 before the affected tasks*) and an independent scientific review of the plan
@@ -51,8 +51,8 @@ rewritten. File:line citations refer to `10aa3dc`.
 - **A1.3** `spectrum/cubic/phase` SHALL store ϑ₀ for both writers.
 - **A1.4** Tests SHALL use dedicated cubic fixtures, pinned in `plan.md` with
   every `Kinv`, `Q`, `L` and ϑ₀. In each fixture, all potential coefficients
-  Λₐ = 10^{L[2,a]} (the coefficients `cubic` uses, not physical scales) lie
-  within a factor 10³ of one another. For the two R-005 cubic rows these
+  |Λₐ| = 10^{log10 column of instanton a} (the coefficients `cubic` uses, not
+  physical scales) lie within a factor 10^1.5 of one another. For the two R-005 cubic rows these
   fixtures replace the R-004 and R-003 fixture inputs. (The R-004 fixture, with
   Λ₂⁴/Λ₁⁴ ≈ 3·10⁻⁵¹, is unsuitable: Float64 rounding in the mass basis exceeds
   the subleading content.) The tests SHALL cover:
@@ -66,8 +66,8 @@ rewritten. File:line citations refer to `10aa3dc`.
     with N > h11;
   - `pq_spectrum_save` at h11 = 3;
   - non-degenerate leading masses in every `pq_spectrum_save` fixture,
-    asserted in the test as a relative gap of at least 0.5 between adjacent
-    leading Hessian eigenvalues (the R-005 sign-only allowance does not hold under
+    asserted in the test as (λ_{k+1} − λ_k)/λ_{k+1} ≥ 0.5 for adjacent
+    ascending leading Hessian eigenvalues (the R-005 sign-only allowance does not hold under
     rotation inside a degenerate subspace);
   - the test computes x₀ itself from the stored ϑ₀ and asserts
     `Qmass·x₀ ≈ Q̃ᵀ·ϑ₀`, so that the check is not circular with respect to
@@ -104,27 +104,46 @@ Each version was written by a range of commits, not one:
 its full commit range, each with the commits that wrote it and the fields that
 depend on the kinetic matrix.
 
+**Meaning of the F5 label.** The F5 label states the convention of the file's
+K-dependent fields, which `plan.md` lists per layout. At 1.0 and 1.1 these are
+the `model_stage.*` values computed by the Julia driver. The label asserts
+nothing about K-free contents (counts, statuses, geometry, or the stored
+CYTools `inverse_metric`, which is `Kinv` itself); these are identical under
+both conventions. A layout with no K-dependent field (for example `ec73c15`,
+or a later run without `--model-stage`, which writes `model_stage = null`) is
+still read as inferred `:legacy_c_half`, as for `1.2` (R-007), so that
+combining it with `sugra_c1` outputs fails closed. This is a file-provenance
+convention, not a statement that those values carry the c = ½ normalization.
+The conventions page (R-009) SHALL state it.
+
 A file's *normalized path set* is built from its JSON as follows:
 - object keys form paths at every depth; a key whose value is `null` is
   present;
 - an array collapses to one path segment `[]`, and the keys of its elements
   are the union over all elements;
+- empty arrays, arrays of scalars and `null` array elements add no path
+  below `[]`;
 - an object whose keys are data values rather than field names (a count by
   reason, a map keyed by h11, polytope, class, matrix or component, for
-  example `reason_counts_by_polytope` at `e7a8f51:957–976`) is recorded as a
-  map node `<map>`; its keys are not compared, and its values are normalized
-  as one element.
+  example `reason_counts_by_polytope` at `e7a8f51:957–976`) is a map node
+  `<map>`; its keys are not compared, and its values are normalized as one
+  element. Map nodes cannot be identified from the JSON alone, so each
+  recorded layout lists the paths of its map nodes, and a file is normalized
+  against each layout's list.
 
 A recorded layout is a required set R and an optional set O of normalized
 paths. Each optional path cites the source lines that make it optional (for
 example `model_stage.convention.prefactor_P`, absent when there are no records,
 `aee4c1a:491–590`, or status-dependent `details[]` keys). Runtime flags change
 the layout within one commit (for example `--model-stage` and `--keep-details`
-at `aee4c1a`, lines 722 and 797); each flag variant is a separate recorded
-layout. A file matches a layout when R ⊆ (its normalized path set) ⊆ R ∪ O.
-A reader SHALL infer only a file that matches exactly one recorded layout for
-its version, and SHALL throw otherwise. One test per recorded layout, plus a
-rejection test for a file with an unrecorded path.
+at `aee4c1a`, lines 722 and 797); flag variants with different path sets are
+recorded as separate layouts, and variants with identical path sets are one
+layout listing all their commits and flags. A file matches a layout when
+R ⊆ (its normalized path set) ⊆ R ∪ O. Every 1.0 and 1.1 layout gives the
+same inferred label, so a reader SHALL infer a file that matches at least one
+recorded layout for its version, and SHALL throw if it matches none. One test
+per recorded layout, plus a rejection test for a file with an unrecorded
+path.
 
 ## A3 — Historical inflation CSV versions (OD-3)
 
@@ -160,8 +179,10 @@ several version columns at once: scan-prep rows carry `contract_version` and
   row that matches no entry, or more than one entry, SHALL be rejected with
   the R-007 error naming the file, the row and the values. An entry with a
   reproduction writer follows the R-007 rules for legacy reproduction outputs
-  and mixed legacy files; for example, `inflation_refinement_common.jl:74`
-  writes A96 rows in the diagnostic layout.
+  and mixed legacy files. An A96 row that only a test persisted (for example
+  the diagnostic rows built at `inflation_refinement_common.jl:74`, see
+  `plan.md` *Mixed legacy files*) does not make its writer a writer of a
+  recorded entry.
 - **A3.4** One test per recorded entry, and rejection tests for an
   unknown key and for a contradictory version value under a known header.
 
