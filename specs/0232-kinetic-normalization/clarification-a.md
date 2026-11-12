@@ -1,8 +1,13 @@
 # CYAX-0232 Clarification A — Decisions OD-1 to OD-7
 
-**Status:** Draft, revision 5 (focused G0 rounds 1–4 (`f6c75bd`, `98060aa`,
-`ea93938`, `644b106`): REQUEST_CHANGES, resolved here; round 5 pending; owner
-approval pending)
+**Status:** Approved
+**Approved:** 2026-11-12, revision `1ada61d` (blob `6b84c48`)
+**Approval provenance:** GitHub Issue #232 comment `6835402073`
+(https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/232#issuecomment-6835402073)
+**Review:** focused G0 rounds 1–4 (`f6c75bd`, `98060aa`, `ea93938`, `644b106`)
+REQUEST_CHANGES, each resolved; round 5 (`1ada61d`) APPROVE_WITH_NITS. The
+four round-5 nits are G1 obligations recorded in the approval comment and in
+`plan.md`.
 **Amends:** `spec.md` approved at `f097536` (`approval_ref` in `spec.md`)
 **Origin:** the seven open points in `plan.md` (*Owner decisions required
 before the affected tasks*) and an independent scientific review of the plan

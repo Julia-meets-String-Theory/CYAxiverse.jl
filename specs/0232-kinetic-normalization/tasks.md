@@ -1,9 +1,9 @@
 # Tasks — CYAX-0232
 
 `tasks.md` records evidence readiness, not live PR, Issue or Project state.
-File:line references are at `10aa3dc` (see `plan.md`). Tasks marked
-**Held: OD-n** wait for the approval of `clarification-a.md`, which records
-the decisions (A1–A7); all others proceed.
+File:line references are at `10aa3dc` (see `plan.md`). Tasks that cite A1–A7
+follow `clarification-a.md`, approved at `1ada61d` (Issue #232 comment
+`6835402073`); the OD holds are released.
 
 ## Phase 1 — Baseline
 
@@ -73,7 +73,7 @@ the decisions (A1–A7); all others proceed.
 
 ## Phase 3 — Labels and schemas (R-006)
 
-- [ ] **T030 [R-006, R-005, A1] F2 writers and readers** — **Held: OD-1**
+- [ ] **T030 [R-006, R-005, A1] F2 writers and readers**
   - Output: `spectrum-groups-1`, `cubic_basis`, label; F2 replace keyword;
     readers report `cubic_basis` (`:unknown` for legacy); `cubic` called with
     N×2 `L` and N×n `Q`; `pq_spectrum_save` transforms ϑ₀ to x₀; ϑ₀ stored.
@@ -121,7 +121,7 @@ the decisions (A1–A7); all others proceed.
   - Verify: no writer outside the inventory.
   - Escalate if: a new writer falls outside the spec's rules.
 
-- [ ] **T041 [A2, A3] Historical layout records** — **Held: OD-2, OD-3**
+- [ ] **T041 [A2, A3] Historical layout records**
   - Output: in `plan.md`, every F5 1.0/1.1 layout from merged commits
     (required and optional normalized path sets with source evidence, map
     nodes, flag variants, commits, K-dependent fields) and every inflation CSV
@@ -137,11 +137,11 @@ the decisions (A1–A7); all others proceed.
 - [ ] **T050 [R-011] Reciprocity check**
   - Verify: `base_K = 2I` passes; `base_K = I` returns `:domain_failure`.
 
-- [ ] **T060 [R-007] Inference and rejection matrix** — **Held: OD-2** for F5 only
+- [ ] **T060 [R-007] Inference and rejection matrix**
   - Output: every inference and rejection case in R-007 for F1–F6.
   - Verify: one test per case.
 
-- [ ] **T061 [R-007, A2] F5 readers** — **Held: OD-2**
+- [ ] **T061 [R-007, A2] F5 readers**
   - Input: the T041 F5 layout records (A2).
   - Output: `analyze_fuzzy_axions_orientifold_gap.py`,
     `trace_lost_h11_3_fixed_components.py`, `orientifold_population_preflight.py`.
@@ -153,12 +153,12 @@ the decisions (A1–A7); all others proceed.
     resume readers let R-007 errors propagate.
   - Verify: a legacy or invalid input raises at each site.
 
-- [ ] **T063 [R-007, A3] Inflation CSV inference** — **Held: OD-3**
+- [ ] **T063 [R-007, A3] Inflation CSV inference**
   - Input: the T041 inflation CSV entries (A3.2).
   - Verify: one test per recorded key; unknown keys and contradictory version
     values rejected.
 
-- [ ] **T064 [R-007] Combination rule** — **Held: OD-3** for family membership (A3)
+- [ ] **T064 [R-007] Combination rule**
   - Output: mixed-label rejection in every combiner in the reader inventory.
   - Verify: `ArgumentError` naming both labels.
 
@@ -168,7 +168,7 @@ the decisions (A1–A7); all others proceed.
   - Verify: one resume test per runner, including a legacy output without and
     with the overwrite option.
 
-- [ ] **T066 [R-007, A5] Scale-continuation resume** — **Held: OD-5**
+- [ ] **T066 [R-007, A5] Scale-continuation resume**
   - Output: legacy rows not complete; `--resume` on a legacy report or shard
     refuses naming the stored or inferred label, before the header check;
     `_pilot_completed_scales` raises at all three silent skips.
@@ -191,7 +191,7 @@ the decisions (A1–A7); all others proceed.
     the `.jls` fixture, the A96 JSON and the comparison CSV.
   - Verify: label assertions; physical readers reject reproduction labels.
 
-- [ ] **T072 [R-008, A4, A7] K-free and mixed reproduction functions** — **Held: OD-4, OD-7**
+- [ ] **T072 [R-008, A4, A7] K-free and mixed reproduction functions**
   - Output: K-free functions recorded without a label (A4);
     `pilot_benchmark_regression` returns `kinetic_normalization_by_field` and
     no top-level label (A7).
@@ -202,7 +202,7 @@ the decisions (A1–A7); all others proceed.
 
 - [ ] **T080 [R-009] Conventions page and pointers**
   - Output: includes the unreliable legacy F2 cubic note (A1.5) and the
-    non-certified script (A6) once Clarification A is approved.
+    non-certified script (A6), and the F5 label meaning (A2, plan G1 note 1).
   - Verify: docs build; links from docstrings, README and the axion–photon page.
 
 - [ ] **T081 [R-010] Certification audit note**

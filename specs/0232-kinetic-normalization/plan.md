@@ -12,44 +12,38 @@ Implementation base: `origin/vmm` at `10aa3dc`. All file:line citations below
 refer to `10aa3dc`. If the implementation branch is based on a later `vmm`,
 the inventories are re-run and the R-002 baseline is regenerated (spec R-002).
 
-## Owner decisions before the affected tasks
+## Owner decisions on the points the spec did not decide
 
-The inventory found points that the approved spec does not decide (spec stop
-condition). Each holds only the tasks named; all other tasks proceed.
+The inventory found seven points that the approved spec does not decide
+(OD-1..OD-7). The owner approved their resolution as `clarification-a.md`
+(A1–A7) at `1ada61d` on Issue #232 (comment `6835402073`), after five focused G0
+rounds. The tasks they held (T030, T041, T060 for F5, T061, T063, T064, T066,
+T072) are released.
 
-**Status (2026-11-12).** The owner adopted an independent review of this plan.
-The decisions are drafted as `clarification-a.md` (A1–A7), which supersedes the
-recommendations below where they differ:
-- OD-1 adds the `pq_spectrum_save` phase transformation (A1);
-- OD-2 requires a recorded historical layout before inference (A2);
-- OD-3 drops the column priority, requires a consistent version tuple, and
-  rejects ambiguous rows (A3);
-- OD-6 states that the script's outputs are not certified (A6);
-- OD-7 uses field-level labels instead of one A96 label (A7).
+| ID | Point | Approved decision |
+|---|---|---|
+| OD-1 | `generate.cubic` argument orientation in both F2 writers; `pq_spectrum_save` phase coordinates | A1: N×2 `L`, N×n `Q`; x₀ = basisᵀ·C⁻¹·ϑ₀; ϑ₀ stored; fixtures C2, C2-hp, C3 |
+| OD-2 | F5 `1.0`/`1.1` legacy inference | A2: infer files matching a recorded layout from merged commits (normalized path sets, R ⊆ paths ⊆ R ∪ O, at least one match); file-provenance meaning of the F5 label |
+| OD-3 | Historical inflation CSV versions | A3: recorded file-layout entries (header, `row_type`, version values); no column priority; ambiguous or unknown rows rejected; physical writers only |
+| OD-4 | Reproduction functions with no kinetic matrix | A4: no label duty; listed as K-free |
+| OD-5 | `run_scale_continuation` resume | A5: scan-prep rule; label check before the header check; all three silent skips raise |
+| OD-6 | `scan_fresh_relaxed_qcd_candidates.py` (untracked dependency) | A6: out of scope, exempt from R-006, outputs not certified |
+| OD-7 | `pilot_benchmark_regression` mixes A96 and P96 | A7: `kinetic_normalization_by_field` by provenance; physical consumers reject it |
 
-Focused G0 round 1 of `f6c75bd` returned REQUEST_CHANGES (F5 versions span
-commit ranges; inflation family identity needs the header; the A7 trigger).
-Round 2 of `98060aa` returned REQUEST_CHANGES (the cubic tests reused the
-R-004 fixture, whose Λ hierarchy defeats Float64). Round 3 of `ea93938`
-returned REQUEST_CHANGES (A2 exact key-path equality fails on data-keyed
-maps). Round 4 of `644b106` returned REQUEST_CHANGES (flag variants with
-identical path sets made "exactly one match" fail). The current revision
-resolves all findings and nits of all four rounds, and records the F5
-file-provenance meaning of the label (A2), which round 4 found follows from
-the approved spec.
-
-The held tasks stay held until Clarification A passes a focused G0 review and
-the owner approves it.
-
-| ID | Question | Original recommendation | Held tasks |
-|---|---|---|---|
-| OD-1 | `generate.cubic` (generate.jl:567) expects `L` as N×2 and `Q` as N×h11. `pq_spectrum_save` (3013–3015) passes `Ltilde` as 2×h11, and `hp_spectrum_save` (1073) passes 2×N and h11×N. The stored F2 cubic tensor is mis-indexed at h11 = 2 and the call throws otherwise. Neither function has a test. Is the orientation fix in scope? | Fix it in this work (F2 gets a new schema anyway, and legacy F2 already reads as `cubic_basis = :unknown`); record legacy F2 cubic tensors as unreliable in the conventions page. | T030 |
-| OD-2 | F5 legacy inference lists only `reproduction-1.2` and `kaehler-production-1.0`. Versions `1.0` (written by `ec73c15`…`e7a8f51`; `model_stage` from `aee4c1a` on) and `1.1` (`b191af1`, `31cf465`, `f45ea31`, `68df2a2`, `239a3a7`) exist; `analyze_fuzzy_axions_orientifold_gap.py` accepts only `1.1` (lines 56, 656, 997). | Amend R-007 to infer F5 `1.0` and `1.1` as `:legacy_c_half`, as for F6 2.0–2.2. | T060, T061 |
-| OD-3 | Approval note 5 limits inflation CSV inference to the pre-change constants "unless history shows earlier versions in use". History shows contract `1`–`3`, shard `1`, and pilot `3`/`4` written by merged code. Rows also carry several version columns at once. | Infer every historical version that merged code wrote; family membership is decided by `contract_version`, then `diagnostic_schema_version`, then the file's own schema column. | T063, T064 |
-| OD-4 | Reproduction functions that use no kinetic matrix (for example `validate_vacua_stage4_5.jl` `_stage4_n5_n8`, `catastrophic_inflation_population_study.jl` `main`, `reproduce_2023_n8.jl`, the K-free `reduced_models`/`author_inflation` functions) cannot be assigned P96 or A96 by R-008. | No label duty for functions and outputs that consume no kinetic matrix (they are not K-dependent under R-006); record them as K-free in the search record. | T072 |
-| OD-5 | `inflation_scale_continuation.jl` `run_scale_continuation` (2023) is a resumable physical runner not named in R-007 *Batch resume*; its `_pilot_completed_scales` (1474) swallows parse errors (1488–1494) and has no overwrite option. | Treat as `inflation_scan_prep.jl`: legacy rows are not complete, `--resume` on a legacy report refuses, remedy is a new report path; parse errors propagate. | T066 |
-| OD-6 | `scan_fresh_relaxed_qcd_candidates.py` passes `kinv` to the untracked `cytools_catastrophe_scan.solve_at_k`; its outputs cannot be classified from the repository. | Out of scope; document that the script is not covered and refuse to label its outputs. | T040 (inventory note only) |
-| OD-7 | `pilot_benchmark_regression` (inflation_scale_continuation.jl:1829) mixes A96 and P96 (`n8_hilltop`, 1862) and returns a printed `NamedTuple`. | Label it `:a96_reproduction_raw_radian` and document the P96 sub-call in its docstring. | T072 |
+**G1 obligations from the round-5 nits** (approval comment):
+1. A2 K-dependent fields are the values the Julia driver computes under
+   `model_stage` and fields derived from them (for example
+   `claim_status.model_count`, `aee4c1a:786–795`). K-free contents are the
+   population counts under `counts`, the other `claim_status` entries,
+   geometry and the stored `inverse_metric`. T041 and T080 use this wording.
+2. A2 normalization: only object keys create paths; each array nesting level
+   adds one `[]`; element keys of an array that can be empty go in O, with the
+   line that allows the empty case cited (T041).
+3. A1.4 scale spread is tested in log space,
+   `maximum(log10 column) − minimum(log10 column) ≤ 1.5` (T030).
+4. A3.3: the test-only A96 diagnostic row is built by
+   `inflation_refinement_diagnostic_row` (`inflation_diagnostics_common.jl:39`)
+   and appended by `inflation_append_diagnostic_row` (`:108`).
 
 `read.K` is decided here without the owner: it is kept and documented as
 unlabelled and not physical (R-001(a) allows this, and it avoids a signature
@@ -410,5 +404,5 @@ Stop for the owner if:
 ## Task decomposition
 
 T001–T002 gate everything. T010 precedes all label work. Family tasks
-(T030–T045) are independent of one another after T010. OD-held tasks wait for
-the approval of Clarification A; nothing else does.
+(T030–T045) are independent of one another after T010. T041 precedes T061
+and T063.
