@@ -397,10 +397,27 @@ fails on any difference. This satisfies the R-002 requirement that both runs
 share the Julia patch release, OS image and BLAS.
 
 **Local check at `10aa3dc`** (macOS aarch64, Julia 1.12.6; not the pinned
-environment): two runs give identical hashes.
+environment): two runs give identical hashes. Against CI, only
+`ill_conditioned_kinv` differs, by one ulp in two ϑ-Hessian entries of order
+1e-19 to 1e-18. This is why base and candidate run in the same job.
 
-**Pinned hashes.** Base `10aa3dc`, from the first CI run of the workflow (to be
-recorded): sha256 of `r002_artifacts.txt` and one per fixture.
+**Pinned hashes.** Base `10aa3dce4a39816846c4da34a295367ef0dcaf63`, workflow run
+43305737956 (runner image ubuntu-26.04, image version 20261111.82.6). The
+candidate `b149791` gave identical hashes.
+
+| sha256 | Artifact |
+|---|---|
+| `8855cf5b82b413941c8ad884e4217e50d7f0df0df201d86394ed5cb8e02d9763` | `r004_nondiagonal` |
+| `27dd39599f8b23d02b9a77287d1b328f3234fb3220d83e918b3d6b1b3c7a2eed` | `c3_h11_3` |
+| `fcff3044b3ce4cfb2a656e69517ea0d27011bcbf8d0b67544d2da7fa758088a4` | `geometry_2_2_1` |
+| `03894bbf861305f024d4f365f79d1c77afebbaf1b4d4f0d540e9a50a14dc740d` | `non_unimodular_qtilde` |
+| `680e3fb56da050a1c9117dcd4069e22b914fe83b3ab47a8f8980f73b29097a18` | `ill_conditioned_kinv` |
+| `5ae88afab45c8853ff4e341fbb790a285d4a0e498a89fcbafb6d1b138bcc5b1a` | `merged_subleading_charge` |
+| `db5025462dcbf4d039cff704df1a2f2af81f4476407b3cec5b629c87eccbe58b` | `h11_3_det_6_relevant_subleading` |
+| `1c878cd1531409e29cd585cc9ee097ed5e068b356196ac6b984ab34b4b9a59e4` | `r002_artifacts.txt` |
+
+Julia patch release and BLAS configuration: printed to the job log from the
+next run (the first run wrote them only to the job summary).
 
 ## Proposed approach
 

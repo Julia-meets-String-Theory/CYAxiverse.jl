@@ -74,7 +74,7 @@ jobs:
             echo "base:"; cat "$RUNNER_TEMP/r002/base/r002_sha256.txt"
             echo "candidate:"; cat "$RUNNER_TEMP/r002/head/r002_sha256.txt"
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
           diff -u "$RUNNER_TEMP/r002/base/r002_artifacts.txt" "$RUNNER_TEMP/r002/head/r002_artifacts.txt"
       - uses: actions/upload-artifact@v4
         if: always()
