@@ -363,8 +363,44 @@ G1 lists every other changed test with its reason.
 
 ## Baseline (R-002)
 
-To be recorded by T002 before any code change: base commit, Julia patch
-release, OS image, BLAS, artifact paths and sha256.
+**Design.** `scripts/r002_invariance_artifacts.jl` writes a canonical text dump
+of the R-002 quantities for seven pinned fixture geometries, built as HDF5
+files in a temporary data directory:
+- `r004_nondiagonal` and `c3_h11_3`: the R-004 and C3 inputs;
+- `geometry_2_2_1` and `non_unimodular_qtilde`: the runtests.jl:2278 cases;
+- `ill_conditioned_kinv`: the runtests.jl:2469 case;
+- `merged_subleading_charge`: the C2-hp charges;
+- `h11_3_det_6_relevant_subleading`: 6 vacua, 48 leading branches.
+
+For each fixture it records:
+- (a) `Q`, `L` and `Kinv` read back through `read.potential_factored` and
+  `read.potential`;
+- (b, c) `vacua_estimate`, `vacua_id`, and the `vacua_pipeline` datasets and
+  count metadata for each method (`:legacy`, `:leading_branches`,
+  `:reduced_jlm`, `:auto`), with seeds fixed and run-specific metadata
+  excluded;
+- (d) the ϑ-Hessian at each stored coordinate column.
+
+Floats are written as IEEE-754 hex. Errors are recorded by type and first
+line: `vacua_id` already throws a `BoundsError` at the base for the last two
+fixtures, so the candidate must reproduce that error unchanged.
+
+`:auto` selects the exact-determinant path for every fixture, so its
+reduced-JLM non-square and legacy fallbacks are not exercised. Both read only
+`(Q, L)`.
+
+**Comparison.** `.github/workflows/R002Invariance.yml` runs the script at the
+merge base with `vmm` and at the candidate in the same job (ubuntu-latest,
+Julia 1.12 x64, `JULIA_NUM_THREADS = OPENBLAS_NUM_THREADS = 1`). The job
+summary records the Julia version, BLAS configuration and runner, and the job
+fails on any difference. This satisfies the R-002 requirement that both runs
+share the Julia patch release, OS image and BLAS.
+
+**Local check at `10aa3dc`** (macOS aarch64, Julia 1.12.6; not the pinned
+environment): two runs give identical hashes.
+
+**Pinned hashes.** Base `10aa3dc`, from the first CI run of the workflow (to be
+recorded): sha256 of `r002_artifacts.txt` and one per fixture.
 
 ## Proposed approach
 

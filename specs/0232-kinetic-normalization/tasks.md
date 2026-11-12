@@ -15,8 +15,9 @@ follow `clarification-a.md`, approved at `1ada61d` (Issue #232 comment
 
 - [ ] **T002 [R-002] Generate and pin the bitwise baseline**
   - Input: base commit; the R-002 artifact list (vacua datasets, ϑ-Hessians).
-  - Output: artifacts and their sha256, Julia patch, OS image and BLAS recorded
-    in `plan.md` *Baseline*.
+  - Output: `scripts/r002_invariance_artifacts.jl` and
+    `.github/workflows/R002Invariance.yml`; artifacts and their sha256, Julia
+    patch, OS image and BLAS recorded in `plan.md` *Baseline* from CI.
   - Verify: regeneration on the same environment reproduces the hashes.
   - Escalate if: the hashes are not reproducible at the base.
 

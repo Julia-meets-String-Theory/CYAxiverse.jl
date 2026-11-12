@@ -1,0 +1,83 @@
+name: R-002 invariance
+
+# CYAX-0232 R-002: the potential data, the stored Kinv, the vacua and the
+# ϑ-Hessians must be bitwise unchanged by the kinetic-normalization switch.
+# This job runs scripts/r002_invariance_artifacts.jl against the implementation
+# base (the merge base with vmm) and against the candidate, in the same job, so
+# both runs share the Julia patch release, OS image and BLAS. It fails if any
+# hash differs.
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'Project.toml'
+      - '.github/workflows/R002Invariance.yml'
+  push:
+    branches:
+      - 'impl/0232-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  r002:
+    name: R-002 bitwise invariance
+    runs-on: ubuntu-latest
+    env:
+      JULIA_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve the implementation base
+        id: base
+        run: |
+          git fetch --no-tags origin vmm
+          base=$(git merge-base HEAD origin/vmm)
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+          git worktree add "$RUNNER_TEMP/base" "$base"
+          echo "base=$base head=$(git rev-parse HEAD)"
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+          arch: x64
+      # No julia-actions/cache step: the CI cache quota and garbage collection
+      # are governed by CYAX-0223, and this job only needs two precompiles.
+      - name: Instantiate both environments
+        run: |
+          julia --startup-file=no --project="$RUNNER_TEMP/base" -e 'using Pkg; Pkg.instantiate()'
+          julia --startup-file=no --project=. -e 'using Pkg; Pkg.instantiate()'
+      - name: Artifacts at the base
+        run: julia --startup-file=no --project="$RUNNER_TEMP/base" scripts/r002_invariance_artifacts.jl "$RUNNER_TEMP/r002/base"
+      - name: Artifacts at the candidate
+        run: julia --startup-file=no --project=. scripts/r002_invariance_artifacts.jl "$RUNNER_TEMP/r002/head"
+      - name: Compare
+        run: |
+          {
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Base | ${{ steps.base.outputs.sha }} |"
+            echo "| Candidate | $(git rev-parse HEAD) |"
+            echo "| Julia | $(julia --startup-file=no -e 'print(VERSION)') |"
+            echo "| BLAS | $(julia --startup-file=no -e 'using LinearAlgebra; print(BLAS.get_config())') |"
+            echo "| Runner | $(lsb_release -ds 2>/dev/null || uname -a) |"
+            echo
+            echo '```'
+            echo "base:"; cat "$RUNNER_TEMP/r002/base/r002_sha256.txt"
+            echo "candidate:"; cat "$RUNNER_TEMP/r002/head/r002_sha256.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          diff -u "$RUNNER_TEMP/r002/base/r002_artifacts.txt" "$RUNNER_TEMP/r002/head/r002_artifacts.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r002-invariance
+          path: ${{ runner.temp }}/r002
