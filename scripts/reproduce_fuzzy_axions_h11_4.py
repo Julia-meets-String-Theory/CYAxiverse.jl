@@ -1099,7 +1099,9 @@ def _fuzzy_axion_mass_log10(
 
     metric = 0.5 * (inverse_metric + inverse_metric.T)
     try:
-        cholesky = np.linalg.cholesky(metric)
+        # c = 1 supergravity kinetic normalization (CYAX-0232): the canonical
+        # factor is cholesky(Kinv / 2), as CYAxiverse.kinetic_factor.
+        cholesky = np.linalg.cholesky(0.5 * metric)
     except np.linalg.LinAlgError as exc:
         raise ValueError("optimizer mass inputs require a positive-definite inverse metric") from exc
 
