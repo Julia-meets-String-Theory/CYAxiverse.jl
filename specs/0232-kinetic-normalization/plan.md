@@ -510,6 +510,99 @@ notebook reader still requires F6 `2.0`.
   `…-1.1` inputs are refused until T061 implements the A2 layout matching
   (sharding started at `f45ea31`, a 1.1 commit, so such merges exist).
 
+### Historical layout records (T041)
+
+The records are three appendices in `layouts/`, because they run to about
+3,300 lines; this section states their scope, conventions and results.
+- `layouts/f5-reproduction-1.0.md`: F5 `…-reproduction-1.0` (A2).
+- `layouts/f5-reproduction-1.1.md`: F5 `…-reproduction-1.1` (A2).
+- `layouts/inflation-csv-entries.md`: inflation CSV entries (A3).
+
+Each record was built by reading the writer and every local module it
+imports at each commit (`git cat-file -p <commit>:<path>`), with source
+citations `commit:path:line` on each block. Commits that differ only in
+imported modules were grouped by the blob ids of the writer's transitive
+local-import closure and diffed against an analysed commit; each such group
+either has its own layout group or a recorded reason why no path changes.
+
+**F5 conventions (all F5 records).**
+- (a) An array key `k` gives the path `k`, and its object elements give
+  `k[].<key>`; no bare `k[]` path is listed. A map node at `m` gives
+  `m.<map>…` paths for its values only; no bare `m.<map>`. Arrays whose
+  elements are scalars or arrays (matrices, ray lists) add no path below `k`.
+- (b) In `--keep-details` layouts, the `details[]` element keys that every
+  element carries are required. A file with `details: []` has the path set of
+  the layout with `--keep-details` off and the same other flags, and is
+  matched there. Keys below values that can be `null` or `[]` are optional.
+- (c) `diagnostic.checks` (the Kähler-export diagnostic) is fixed fields, not
+  a map node. `terminal_status_counts` and
+  `schema_metadata.deprecated_aliases` (1.1) are map nodes.
+- (d) An `--h11` value without a Table 1 row writes `paper_targets: null`
+  and drops its children; from `239a3a7`, `population_preflight` is `null`
+  outside h11 ∈ {4, 5}. These give separate layout families.
+- Flags compose: each group records a base R and O and per-flag deltas and
+  interactions, and each flag combination with a distinct path set is one
+  layout, generated mechanically. Combinations no command line can produce
+  (for example `--orientifold-reason-diagnostics` without
+  `--orientifold-audit`, which every parser in the range rejects) are not
+  recorded.
+
+**F5 coverage and counts.**
+
+| Version | Commits | Groups | Layouts per group |
+|---|---|---|---|
+| 1.0 | 9 that change the writer (`ec73c15`–`e7a8f51`), plus 9 import-only commits; all listed | 6 | 5, 8, 8, 16 (8 new; the other 8 equal group 3), 16, 36 |
+| 1.1 | 57 (5 change the writer); all listed | 5 (G1, G2, G2b, G3, G4) | 26, 30, 30, 30, 45 (total 161) |
+
+Within a version, some layouts overlap: a file can match more than one,
+for example when no class was exported or every reason list is empty. A2
+infers a file that matches at least one layout of its version, and all 1.0 and
+1.1 layouts give `:legacy_c_half`, so overlaps do not change a result. Layouts of
+different groups do not overlap except G2 and G2b (one optional path apart).
+
+**F5 K-dependent fields (A2 label meaning, G1 note 1).** At every commit
+with a model stage (from `aee4c1a`):
+- computed by the Julia driver: `model_stage.total_model_count`,
+  `model_stage.model_count_per_record` and every `model_stage.models[].*` field
+  (the set of models, and so their indices, depends on the mass evaluator);
+- derived from them: `claim_status.model_count`, and
+  `model_stage.diagnostic_reason` when there is at least one input record.
+
+`model_stage.convention.prefactor_P` comes from the driver but depends only
+on `gs`; it is K-free. Everything else, including the stored
+`inverse_metric`, is K-free. `ec73c15` has no K-dependent field; per A2 its
+files are still inferred `:legacy_c_half`.
+
+**Inflation CSV entries (A3).** 14 entries, every writer physical:
+scan-prep summary INF-PREP-1 to 4 (contract `1`–`4`; diagnostic `1` from
+PREP-3), shard INF-SHARD-1 and 2 (shard `1`, `2`; the merged CSV of
+`inflation_merge_shards` has the shard header), refinement INF-REF-3 (`point`
+and `summary` rows), flow INF-FLOW-1, and pilot report and shard pairs at
+versions `3`, `4` and `6` (no merged `5`). One further merged writer was found:
+`scripts/run_physical_scale_inflation_pilot_20260825.jl` (`b3719e3`, deleted
+by `bd6807e`) writes the PILOT-6 layouts. The ten distinct headers differ.
+Four pairs share a header: PREP-1 and PREP-2, told apart by `contract_version`,
+and each pilot report and shard pair, told apart by `row_type`. Each pair
+lists the same version columns (A3.2), so no row matches two entries. The A96
+diagnostic row (`inflation_refinement_common.jl`) was persisted only by a test
+(`runtests.jl:3463–3483`) and is not an entry (A3.3).
+
+**Decisions on the records' open points.**
+- JSON with `Infinity` or `NaN` (written by `json.dumps` defaults) is valid
+  input for the T061 readers.
+- A header-only inflation CSV has no rows to infer. Where two entries share
+  its header, both give the same inferred label, so the file-level label is
+  still `:legacy_c_half`.
+- Rows from unmerged code (the deleted runner's copies of earlier files, and
+  the 101-column pilot header that no merged commit defines) match no entry and
+  are rejected (A3.3).
+- PREP-1 and PREP-2 rows mixed in one file (by `--append-summary`) each match
+  one entry; both are physical, so the file is inferred.
+
+T041 has no escalation. Every F5 version has at least one recorded layout for
+each file a merged writer can produce. Every inflation entry has physical
+writers only, and no row can match two entries.
+
 ### R-010 audit
 
 `test/fixtures/scientific_certification` (`backend_probe.jl`, `oracles.jl`,
