@@ -22,7 +22,12 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-MERGE_SCHEMA_VERSION = "cyaxiverse-orientifold-shard-merge-1.0"
+from kinetic_normalization_labels import common_label, f5_reproduction_label
+
+# 1.1 carries the inputs' common kinetic_normalization label (CYAX-0232 R-006:
+# a derived writer; `kaehler_point_export_accepted_count` depends on the mass
+# evaluator in production mode).
+MERGE_SCHEMA_VERSION = "cyaxiverse-orientifold-shard-merge-1.1"
 
 # Population counts that are additive across disjoint polytope shards.
 _ADDITIVE_COUNT_KEYS = (
@@ -67,10 +72,26 @@ def _sum_optional(values: list[Any]) -> Any:
     return int(sum(int(value) for value in present))
 
 
-def merge_shard_summaries(summaries: list[dict[str, Any]]) -> dict[str, Any]:
-    """Merge loaded shard reproduction summaries into one combined summary."""
+def merge_shard_summaries(
+    summaries: list[dict[str, Any]], sources: list[Any] | None = None
+) -> dict[str, Any]:
+    """Merge loaded shard reproduction summaries into one combined summary.
+
+    Every input must pass the F5 label checks and carry the same label; the
+    merge writes that label and ``kinetic_normalization_inferred``
+    (CYAX-0232 R-006, R-007). ``sources`` names the inputs in error messages.
+    """
     if len(summaries) < 2:
         raise ShardMergeError("merging requires at least two shard summaries")
+    if sources is None:
+        sources = [f"shard summary {index}" for index in range(len(summaries))]
+    try:
+        label, inferred = common_label(
+            [f5_reproduction_label(summary, source) for summary, source in zip(summaries, sources)],
+            sources,
+        )
+    except ValueError as error:
+        raise ShardMergeError(str(error)) from error
 
     shard_blocks = []
     for summary in summaries:
@@ -133,6 +154,8 @@ def merge_shard_summaries(summaries: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "schema_version": MERGE_SCHEMA_VERSION,
+        "kinetic_normalization": label,
+        "kinetic_normalization_inferred": inferred,
         "requested_h11": requested_h11,
         "source_commit": next(iter(source_commits)),
         "shard_count": shard_count,
@@ -247,7 +270,9 @@ def main(argv=None) -> None:
     args = parser.parse_args(argv)
     if args.output.exists():
         parser.error(f"refusing to overwrite existing merged output: {args.output}")
-    merged = merge_shard_summaries(_load_summaries(args.shard_outputs))
+    merged = merge_shard_summaries(
+        _load_summaries(args.shard_outputs), [str(path) for path in args.shard_outputs]
+    )
     args.output.write_text(
         json.dumps(merged, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )

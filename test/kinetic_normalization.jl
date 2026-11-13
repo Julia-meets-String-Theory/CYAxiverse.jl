@@ -1046,3 +1046,132 @@ end
         @test startswith(readlines(report)[1], "row_type,schema_version,kinetic_normalization,")
     end
 end
+
+# The Appendix B script defines `main` and `_parse_args`; keep it in its own
+# module, and skip its global `set_theme!` so other plots are unaffected.
+module CYAX0232AppendixB
+using CairoMakie
+Base.include(ex -> (Meta.isexpr(ex, :call) && ex.args[1] === :set_theme!) ? nothing : ex,
+    @__MODULE__, joinpath(@__DIR__, "..", "scripts", "reproduce_appendix_b_spectra.jl"))
+end
+
+@testset "CYAX-0232 derived writers (T037)" begin
+    # Appendix B quantiles from F1 outputs.
+    appendix = CYAX0232AppendixB
+    spectrum = CYAxiverse.structs.PhysicalAxionSpectrum(
+        [1.0, 2.0], [0, 1], zeros(2, 2), [1, -1], [3.0, 4.0],
+        reshape([1, 1, 1, 2], 4, 1), [1], [0.5],
+        reshape([1, 1, 2, 2], 4, 1), [-1], [0.7],
+        -30.0, 200)
+    function f1_files(root, versions)
+        files = Tuple{Int,String}[]
+        for (index, version) in enumerate(versions)
+            geom = CYAxiverse.structs.GeometryIndex(2, index, 1)
+            path = joinpath(root, "h11_002", "np_$(lpad(index, 7, '0'))", "cy_0000001", "cyax.h5")
+            mkpath(dirname(path))
+            h5open(file -> create_group(file, "cytools"), path, "cw")
+            _write_result(path, geom, spectrum; prec=200, threshold_log10=-30.0,
+                quartics=true, runtime_seconds=0.1, provisional=false, fK=[5.0, 6.0])
+            h5open(path, "r+") do file
+                metadata = file["spectrum/physical/metadata"]
+                if version == :legacy
+                    HDF5.delete_object(metadata, "kinetic_normalization")
+                    HDF5.delete_object(metadata, "schema_version")
+                    metadata["schema_version"] = CYAxiverse.read.F1_LEGACY_SCHEMA_VERSION
+                elseif version == :unlabelled
+                    HDF5.delete_object(metadata, "kinetic_normalization")
+                end
+            end
+            push!(files, (2, path))
+        end
+        files
+    end
+    function summary_rows(root, values)
+        masses, fpert, fK, completed, label = values
+        path = joinpath(root, "appendix_b_quantiles.csv")
+        appendix._write_summary(path, [2], masses, fpert, fK, completed, label)
+        lines = readlines(path)
+        header = split(lines[1], ',')
+        [Dict(zip(header, split(line, ','))) for line in lines[2:end]]
+    end
+    mktempdir() do root
+        values = appendix._read_values(f1_files(root, (:current, :current)))
+        @test values[5] == (:sugra_c1, false)
+        row = only(summary_rows(root, values))
+        @test (row["geometries"], row["kinetic_normalization"],
+            row["kinetic_normalization_inferred"]) == ("2", "sugra_c1", "false")
+    end
+    mktempdir() do root
+        values = appendix._read_values(f1_files(root, (:legacy, :legacy)))
+        @test values[5] == (:legacy_c_half, true)
+        row = only(summary_rows(root, values))
+        @test (row["kinetic_normalization"], row["kinetic_normalization_inferred"]) ==
+            ("legacy_c_half", "true")
+    end
+    mktempdir() do root
+        files = f1_files(root, (:current, :legacy))
+        err = try
+            appendix._read_values(files)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("sugra_c1", sprint(showerror, err)) &&
+            occursin("legacy_c_half", sprint(showerror, err))
+    end
+    mktempdir() do root
+        # An R-007 rejection is not skipped.
+        files = f1_files(root, (:current, :unlabelled))
+        @test_throws ArgumentError appendix._read_values(files)
+        # A file without spectrum/physical/m is still skipped.
+        h5open(file -> HDF5.delete_object(file, "spectrum/physical/m"), files[2][2], "r+")
+        @test appendix._read_values(files)[4] == Dict(2 => 1)
+    end
+
+    # Inflation shard merge and pilot report.
+    function shard_with_label(dir, label; frst=1)
+        path = joinpath(dir, "shard_$(frst).csv")
+        inflation_prepare_shard(path)
+        row = (; contract_version=INFLATION_SCAN_CONTRACT_VERSION,
+            diagnostic_schema_version=INFLATION_DIAGNOSTIC_SCHEMA_VERSION,
+            kinetic_normalization=label, h11=2, polytope=1, frst, status=:success,
+            instantons=3, strong_hierarchy=true, leading_log_gap=1.0,
+            log_scale_span=2.0, branch_count=1, candidate_slowroll_saddles=0,
+            total_seconds=0.1, stage_allocated_bytes=10, stage_output_bytes=5)
+        inflation_append_shard_row(path, row; run_id="t037", shard_index=1,
+            shard_count=1, attempt=1, started_unix_s=0.0, finished_unix_s=1.0,
+            data_dir=dir, max_branches=10)
+        path
+    end
+    mktempdir() do root
+        current = shard_with_label(joinpath(root, "a"), "sugra_c1"; frst=1)
+        other = shard_with_label(joinpath(root, "b"), "legacy_c_half"; frst=2)
+        unlabelled = shard_with_label(joinpath(root, "c"), ""; frst=3)
+        merged = joinpath(root, "merged.csv")
+        err = try
+            inflation_merge_shards([current, other], merged)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("sugra_c1", sprint(showerror, err)) &&
+            occursin("legacy_c_half", sprint(showerror, err))
+        @test !isfile(merged)
+        @test_throws ArgumentError inflation_merge_shards([current, unlabelled], merged)
+        @test !isfile(merged)
+
+        rows = _inflation_pilot_terminal_rows(joinpath(root, "a"))
+        @test only(rows).kinetic_normalization == "sugra_c1"
+        reports = _inflation_pilot_report_rows(rows)
+        @test all(report.kinetic_normalization == "sugra_c1" for report in reports)
+        report_path = _inflation_pilot_write_report(joinpath(root, "report.csv"), reports)
+        @test endswith(readlines(report_path)[1], ",kinetic_normalization")
+        @test endswith(readlines(report_path)[2], ",sugra_c1")
+        mixed = vcat(rows, _inflation_pilot_terminal_rows(joinpath(root, "b")))
+        @test_throws ArgumentError _inflation_pilot_report_rows(mixed)
+        @test_throws ArgumentError _inflation_pilot_report_rows(
+            _inflation_pilot_terminal_rows(joinpath(root, "c")))
+    end
+end

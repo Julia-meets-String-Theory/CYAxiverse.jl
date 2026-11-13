@@ -128,6 +128,7 @@ K-dependence chains: **A** `potential_factored().C`; **B** `read.potential().K`;
 | `reproduce_appendix_b_spectra.jl` `_write_summary` (148) | `appendix_b_quantiles.csv` | derived from F1 | none; label column | from F1 | physical |
 | `inflation_reproduction.jl` `write_fixture`/`write_comparison` (113/136) | `.jls` fixture, comparison CSV | reproduction | none; label as a dictionary key / column | `N8_K_RAW`, `N5_K_RAW` | A96 |
 | `author_poly102_reference.py:242` | reference JSON | reproduction | none; top-level key | `K_RAW` | A96 |
+| `scan_fresh_relaxed_qcd_candidates.py` | candidate CSV and JSON | not certified (A6) | unchanged; no label | `kinv` passed to an untracked module | out of scope: CYAX-0232 does not certify its outputs under either convention |
 
 Label form for non-HDF5, non-CSV reproduction outputs: a `:kinetic_normalization`
 key in the serialized dictionary (`.jls`) and a top-level JSON key. Figures
@@ -154,6 +155,42 @@ confirmed); `validate_vacua_stage4_5.jl` stage 4 (Q, L only, 157–190, write
 generators that write the stored `Kinv` and `L` (unchanged by the spec);
 stdout-only scripts (`benchmark_*`, `inflation_scan_contract.jl`,
 `reproduce_2023_n8.jl`, `audit_issue_148_*`, `issue_148_*`); `ext/` and `bin/`.
+
+**Inventory completeness check (T040, at `d7db30e`).** Search: every tracked
+`.jl` or `.py` file under `src/`, `ext/`, `scripts/`, `bin/` and `notebooks/`
+that matches both a K-source pattern (`kinetic_factor`, `kinetic_matrix`,
+`potential_factored`, `read.potential(`, `.potential(`, `oriented_potential`,
+`_canonical_frame`, `leading_axion_reference_data`, `_fuzzy_axion_mass_log10`,
+`[Kk]inv`, `inverse_metric`, `N8_K_RAW`, `N5_K_RAW`, `K_RAW`, `M96`,
+`run_geometry(`, `scan_geometry_for_inflation`, `pq_*spectrum`, `hp_spectrum`,
+`read_axion_photon_result`, `_run_local_scan`, `physical_spectrum`,
+`prepare_geometry_context`) and a persistence pattern (HDF5 or h5py open for
+writing, `open(…, "w"/"a")`, `json.dump`, `write_text(`, `to_csv`,
+`serialize(`, `CSV.write`, `writedlm`, `_write_csv`, `write_csv`). It found 37
+files. 23 are named in this plan, the spec or Clarification A. The other 14 are
+not K-dependent writers:
+- geometry generators that write the stored `Kinv`, `Q` and `L` (the excluded
+  category above): `build_orientifold_axion_database.py`,
+  `generate_geometric_data.py`, `generate_geometric_data_multitriangulation.py`
+  (its `minimum_metric_eigenvalue` is an eigenvalue of the stored `Kinv`, not of
+  K_kin), `generate_h11_491_frsts.py`, `generate_relaxed_qcd_sample.py`,
+  `generate_fresh_relaxed_qcd_sample.py`;
+- `read.potential` used for `Q` and `L` only: `geometries_hilbert.jl`,
+  `hilbert.jl`, `hilbert_minima_compare.jl`, `glsm_v_qprime.jl`;
+- no metric: `glimmers_eft_row_schema.py` (lists `Kinv` among fields that are
+  never persisted) and `mpcp_bounded_analysis.py` (`Kinv` there names a Chow
+  intersection term);
+- tests: `test_reproduce_fuzzy_axions_h11_4.py`, `test_stage2_stage_boundary.py`.
+
+A second pass, files that write and read a labelled family's data (the F1–F6
+paths, the reproduction schema, the shard, contract and diagnostic version
+columns, or mass, `fpert`, coupling, ε or η fields), found no file outside the
+inventory. The R-002 and R-005 harnesses (`r002_invariance_artifacts.jl`,
+`r005_scaling_harness.jl`) are this plan's verification tools (T002, T013):
+their dumps compare conventions on purpose, must stay byte-identical across
+checkouts, and no reader consumes them, so they carry no label.
+`scan_fresh_relaxed_qcd_candidates.py` is recorded in the writer table as not
+certified (A6).
 
 ### Reader and combiner inventory (R-007)
 
@@ -452,6 +489,26 @@ inputs, but `inflation_merge_shards` has no mixed-label check, and the pilot
 report has no label yet. T063: CSV reader inference from the T041 entries.
 T065, T066: resume checks (scan-prep, shards, scale continuation). T062: the
 notebook reader still requires F6 `2.0`.
+
+### Derived-writer labels (T037)
+
+- `reproduce_appendix_b_spectra.jl`: `_read_values` checks each F1 input with
+  `read.f1_label` outside the existing unreadable-file skip, so R-007 errors
+  propagate (this part of T062 is done here); inputs whose labels differ raise
+  an `ArgumentError` naming both; no readable input is an error.
+  `appendix_b_quantiles.csv` gains `kinetic_normalization` and
+  `kinetic_normalization_inferred` columns.
+- `inflation_merge_shards`: every row must carry the same non-empty label.
+- Pilot report (`inflation_scan_pilot.jl`): terminal rows keep the shard label;
+  `_inflation_pilot_report_rows` rejects mixed or empty labels; the report adds
+  a last `kinetic_normalization` column. Its shard inputs pass the exact-header
+  check, so they are never inferred, and no inferred column is needed.
+- `merge_orientifold_shards.py`: `shard-merge-1.1` with
+  `kinetic_normalization` and `kinetic_normalization_inferred`, taken from the
+  inputs through `scripts/kinetic_normalization_labels.py` (standard library
+  only). `…-reproduction-1.2` inputs are inferred `legacy_c_half`; `…-1.0` and
+  `…-1.1` inputs are refused until T061 implements the A2 layout matching
+  (sharding started at `f45ea31`, a 1.1 commit, so such merges exist).
 
 ### R-010 audit
 

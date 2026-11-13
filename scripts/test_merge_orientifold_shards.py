@@ -12,6 +12,8 @@ from merge_orientifold_shards import ShardMergeError, merge_shard_summaries
 
 def _shard_summary(index, count, total_favorable, *, counts, class_funnel, status_counts):
     return {
+        "schema_version": "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.3",
+        "kinetic_normalization": "sugra_c1",
         "input": {
             "requested_h11": 2,
             "shard": {
@@ -122,6 +124,47 @@ class MergeShardSummariesTests(unittest.TestCase):
         shards[1]["run_provenance"]["source_commit"] = "cafef00d"
         with self.assertRaises(ShardMergeError):
             merge_shard_summaries(shards)
+
+    def test_merged_summary_carries_the_common_label(self):
+        merged = merge_shard_summaries(self._two_disjoint_shards())
+        self.assertEqual(merged["schema_version"], "cyaxiverse-orientifold-shard-merge-1.1")
+        self.assertEqual(merged["kinetic_normalization"], "sugra_c1")
+        self.assertFalse(merged["kinetic_normalization_inferred"])
+
+    def test_legacy_inputs_give_an_inferred_legacy_label(self):
+        shards = self._two_disjoint_shards()
+        for shard in shards:
+            shard["schema_version"] = "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.2"
+            del shard["kinetic_normalization"]
+        merged = merge_shard_summaries(shards)
+        self.assertEqual(merged["kinetic_normalization"], "legacy_c_half")
+        self.assertTrue(merged["kinetic_normalization_inferred"])
+
+    def test_mixed_labels_are_rejected(self):
+        shards = self._two_disjoint_shards()
+        shards[1]["schema_version"] = "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.2"
+        del shards[1]["kinetic_normalization"]
+        with self.assertRaisesRegex(ShardMergeError, "sugra_c1.*legacy_c_half"):
+            merge_shard_summaries(shards, ["a.json", "b.json"])
+
+    def test_invalid_input_labels_are_rejected(self):
+        cases = [
+            {"kinetic_normalization": None},
+            {"kinetic_normalization": "legacy_c_half"},
+            {"kinetic_normalization": "bogus"},
+            {"schema_version": "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.2"},
+            {"schema_version": "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.1"},
+            {"schema_version": "cyaxiverse-fuzzy-axions-h11-4-reproduction-9.9"},
+        ]
+        for edit in cases:
+            shards = self._two_disjoint_shards()
+            for key, value in edit.items():
+                if value is None:
+                    del shards[0][key]
+                else:
+                    shards[0][key] = value
+            with self.assertRaisesRegex(ShardMergeError, "a.json"):
+                merge_shard_summaries(shards, ["a.json", "b.json"])
 
     def test_unsharded_input_is_rejected(self):
         shards = self._two_disjoint_shards()

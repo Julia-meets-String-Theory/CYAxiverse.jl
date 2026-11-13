@@ -995,6 +995,12 @@ class ModelStageFileLabelTests(unittest.TestCase):
             with h5py.File(path, "r") as file:
                 return driver.model_stage_output_label(file, path)
 
+    def test_light_label_module_matches_driver(self):
+        import kinetic_normalization_labels as labels
+
+        self.assertEqual(labels.F5_REPRODUCTION_SCHEMA, driver.REPRODUCTION_SCHEMA_VERSION)
+        self.assertEqual(labels.KINETIC_NORMALIZATION, driver.KINETIC_NORMALIZATION)
+
     def test_model_stage_output_label_rules(self):
         legacy = {"total_model_count": 3, "model_mass_reference_log10_ev": [1.0]}
         current = dict(

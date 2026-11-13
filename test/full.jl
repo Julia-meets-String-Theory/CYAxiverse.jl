@@ -140,12 +140,12 @@ end
                 instantons=40, strong_hierarchy=true, leading_log_gap=5.0,
                 log_scale_span=12.0, branch_count=8, candidate_count=2,
                 total_seconds=0.25, allocated_bytes=1000, output_bytes=200,
-                error=""),
+                error="", kinetic_normalization="sugra_c1"),
             (h11=4, polytope=2, frst=1, status=:failed, attempt=2,
                 instantons=42, strong_hierarchy=false, leading_log_gap=2.0,
                 log_scale_span=6.0, branch_count=0, candidate_count=0,
                 total_seconds=0.5, allocated_bytes=0, output_bytes=0,
-                error="synthetic failure")]
+                error="synthetic failure", kinetic_normalization="sugra_c1")]
         reports = _inflation_pilot_report_rows(rows)
         @test length(reports) == 2
         @test sum(report.geometries for report in reports) == 2

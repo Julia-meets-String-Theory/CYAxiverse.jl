@@ -181,9 +181,18 @@ if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
         completed
     end
 
-    """Deterministically concatenate validated shard rows into one CSV."""
+    """
+    Deterministically concatenate validated shard rows into one CSV.
+
+    Every row must carry the same non-empty `kinetic_normalization`; rows whose
+    labels differ are not combined (CYAX-0232 R-007), and the error names both
+    labels and their files.
+    """
     function inflation_merge_shards(paths::AbstractVector{<:AbstractString},
             output::AbstractString; overwrite::Bool=false)
+        label_index = findfirst(==(:kinetic_normalization), INFLATION_SHARD_FIELDS)
+        merged_label = nothing
+        merged_label_path = ""
         normalized = sort!(abspath.(expanduser.(String.(paths))))
         isempty(normalized) && throw(ArgumentError("no inflation shards supplied"))
         all(isfile, normalized) || throw(ArgumentError("an inflation shard is missing"))
@@ -201,10 +210,21 @@ if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
                     open(path, "r") do source
                         readline(source)
                         for line in eachline(source)
-                            isempty(strip(line)) || begin
-                                write(destination, line)
-                                write(destination, '\n')
+                            isempty(strip(line)) && continue
+                            fields = _inflation_shard_csv_fields(line)
+                            label = length(fields) == length(INFLATION_SHARD_FIELDS) ?
+                                fields[label_index] : ""
+                            isempty(label) && throw(ArgumentError(
+                                "inflation shard row has no kinetic_normalization: $path"))
+                            if merged_label === nothing
+                                merged_label, merged_label_path = label, path
+                            elseif label != merged_label
+                                throw(ArgumentError("cannot merge inflation shards with " *
+                                    "kinetic_normalization $(repr(merged_label)) " *
+                                    "($(merged_label_path)) and $(repr(label)) ($(path))"))
                             end
+                            write(destination, line)
+                            write(destination, '\n')
                         end
                     end
                 end
