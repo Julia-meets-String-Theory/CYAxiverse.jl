@@ -363,6 +363,37 @@ N = 3), 4.2e-11 (C2 `pq_spectrum_save`) and 9.2e-11 (C3); normwise R-005
 deviation from 2^{-3/2} after sign alignment 3.8e-16 (C2) and 3.2e-16 (C3);
 minimum adjacent leading-eigenvalue gap 0.93 (C2) and 0.75 (C3).
 
+### F1 and F3 labels (T031, T032)
+
+**F1.** `read.f1_label` applies the R-007 F1 rules; `physical_spectrum` and
+`stored_kinetic_normalization(path; family=:f1)` call it.
+`batch_physical_spectrum.jl` takes its schema version from
+`read.F1_SCHEMA_VERSION`. `_write_result_inplace` deletes the whole
+`spectrum/physical` group before every write, so the forced rewrite and the
+digest-mismatch rewrite of R-007 both start from an empty group. The summary
+`kinetic_normalization` column is the last column. With `--append-summary`,
+`_write_summary_header` refuses any existing header other than
+`SUMMARY_HEADER`, not only one without the label column, because any other
+header would misalign the appended columns.
+
+**F3.** `read.f3_label` applies the R-007 F3 rules and returns the stored
+identity version; `read.f3_identity_label` maps a version to its label for
+in-memory results. `_read_axion_photon_identity` keeps the stored version.
+`read_axion_photon_result` applies `f3_label` before the catch-all group
+validation, so its rejections name the label problem. `write_scan_csv` appends
+`kinetic_normalization` and `kinetic_normalization_inferred` and rejects mixed
+labels (the T064 rule for this combiner).
+
+**Left to later tasks.**
+- T062: `_validate_axion_photon_group` and both `_has_axion_photon` methods
+  still return `false` on an R-007 error. The notebook reader
+  (`orientifold_axiverse_statistics.jl:190–192`) still requires F1 `-3`, so it
+  rejects `-4` outputs until T062.
+- T065: `_has_physical_spectrum` does not yet report a legacy output as
+  `:failed`; a `-3` output has a different configuration digest and is
+  recomputed, as before this change. `run_batch_axion_photon` still skips a
+  version-1 result whose configuration matches.
+
 ### R-010 audit
 
 `test/fixtures/scientific_certification` (`backend_probe.jl`, `oracles.jl`,
@@ -385,6 +416,7 @@ runtests.jl:131–146 with `base_K = 2I` (passes) and `base_K = I`
 | runtests.jl:780 testset comment "K = 1/2 g" | K = g | R-009 |
 | runtests.jl:154 `base_K = I` | `2I` | R-011 |
 | runtests.jl:645–704, full.jl:784 (stored `Kinv = I`) | expected values follow R-005 factors where asserted | R-005 |
+| full.jl:551 `schema_version == "…-3"` | `"…-4"`, plus the label fields | R-006 (T031) |
 
 G1 lists every other changed test with its reason.
 

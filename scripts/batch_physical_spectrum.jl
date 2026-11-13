@@ -9,7 +9,10 @@ using Logging
 using SHA
 
 const GeometryIndex = CYAxiverse.structs.GeometryIndex
-const PHYSICAL_SPECTRUM_SCHEMA_VERSION = "cyaxiverse-physical-spectrum-3"
+# F1 schema and label (CYAX-0232 R-006): `-4` carries
+# `spectrum/physical/metadata/kinetic_normalization = "sugra_c1"`.
+const PHYSICAL_SPECTRUM_SCHEMA_VERSION = CYAxiverse.read.F1_SCHEMA_VERSION
+const PHYSICAL_KINETIC_NORMALIZATION = String(CYAxiverse.KINETIC_NORMALIZATION)
 const PHYSICAL_MASS_LOG10_UNIT = "eV"
 const PHYSICAL_FPERT_LOG10_UNIT = "GeV"
 const PHYSICAL_FPERT_FORMULA =
@@ -222,15 +225,22 @@ function _fpert_log10(masses, lambda_self)
     masses .- 9 .- 0.5 .* lambda_self
 end
 
-"""Write one physical spectrum into an already-open temporary geometry copy."""
+"""
+Write one physical spectrum into an already-open temporary geometry copy.
+
+Any existing `spectrum/physical` group, including its `metadata`, is deleted
+first, so no dataset of an earlier output survives (CYAX-0232 R-007). Other
+children of `spectrum` (F2, F3) are not touched.
+"""
 function _write_result_inplace(path, geom_idx, spectrum; prec, threshold_log10,
         quartics, runtime_seconds, provisional, fK=Float64[],
         log_domain_diagnostics=nothing)
     config = _physical_spectrum_config(; prec, threshold_log10, quartics)
     h5open(path, "r+") do file
         spectrum_group = haskey(file, "spectrum") ? file["spectrum"] : create_group(file, "spectrum")
-        physical = haskey(spectrum_group, "physical") ? spectrum_group["physical"] : create_group(spectrum_group, "physical")
-        metadata = haskey(physical, "metadata") ? physical["metadata"] : create_group(physical, "metadata")
+        haskey(spectrum_group, "physical") && HDF5.delete_object(spectrum_group, "physical")
+        physical = create_group(spectrum_group, "physical")
+        metadata = create_group(physical, "metadata")
         _replace_dataset(metadata, "h11", geom_idx.h11)
         _replace_dataset(metadata, "polytope", geom_idx.polytope)
         _replace_dataset(metadata, "frst", geom_idx.frst)
@@ -240,6 +250,7 @@ function _write_result_inplace(path, geom_idx, spectrum; prec, threshold_log10,
         _replace_dataset(metadata, "provisional", provisional)
         _replace_dataset(metadata, "runtime_seconds", runtime_seconds)
         _replace_dataset(metadata, "schema_version", PHYSICAL_SPECTRUM_SCHEMA_VERSION)
+        _replace_dataset(metadata, "kinetic_normalization", PHYSICAL_KINETIC_NORMALIZATION)
         _replace_dataset(metadata, "mass_log10_unit", PHYSICAL_MASS_LOG10_UNIT)
         _replace_dataset(metadata, "fpert_log10_unit", PHYSICAL_FPERT_LOG10_UNIT)
         _replace_dataset(metadata, "fpert_formula", PHYSICAL_FPERT_FORMULA)
@@ -280,12 +291,6 @@ function _write_result_inplace(path, geom_idx, spectrum; prec, threshold_log10,
             _replace_dataset(physical, "lambda_22_sign", spectrum.λ22sign)
             _replace_dataset(physical, "lambda_22_log10", spectrum.λ22)
             _replace_dataset(physical, "lambda_22_indices", spectrum.λ22_i)
-        else
-            for dataset_name in ("lambda_self_sign", "lambda_self_log10", "fpert_log10",
-                    "lambda_31_sign", "lambda_31_log10", "lambda_31_indices",
-                    "lambda_22_sign", "lambda_22_log10", "lambda_22_indices")
-                haskey(physical, dataset_name) && HDF5.delete_object(physical, dataset_name)
-            end
         end
     end
 end
@@ -313,11 +318,25 @@ function _csv_escape(value)
     occursin(r"[,\"\n]", text) ? string('"', text, '"') : text
 end
 
-const SUMMARY_HEADER = "h11,polytope,frst,status,error,runtime_seconds,prec,threshold_log10,instantons,physical_count,massless_count,min_mass_log10,max_mass_log10,median_mass_log10,quartics,negative_lambda_count,positive_lambda_count,min_fpert_log10,max_fpert_log10,median_fpert_log10,min_fK_log10,max_fK_log10,median_fK_log10,lambda_31_count,lambda_22_count,provisional,output"
+const SUMMARY_HEADER = "h11,polytope,frst,status,error,runtime_seconds,prec,threshold_log10,instantons,physical_count,massless_count,min_mass_log10,max_mass_log10,median_mass_log10,quartics,negative_lambda_count,positive_lambda_count,min_fpert_log10,max_fpert_log10,median_fpert_log10,min_fK_log10,max_fK_log10,median_fK_log10,lambda_31_count,lambda_22_count,provisional,output,kinetic_normalization"
 
-"""Create the batch summary CSV and write its header when needed."""
+"""
+Create the batch summary CSV and write its header when needed.
+
+With `append=true`, an existing non-empty file is kept only if its header is
+`SUMMARY_HEADER`. A file whose header differs, for example a legacy summary
+without the `kinetic_normalization` column, is refused with an
+`ArgumentError` (CYAX-0232 R-007); write to a new summary path instead.
+"""
 function _write_summary_header(path; append=false)
-    append && isfile(path) && return
+    if append && isfile(path) && filesize(path) > 0
+        header = open(readline, path)
+        header == SUMMARY_HEADER && return
+        reason = "kinetic_normalization" in split(header, ',') ?
+            "a different header" : "no kinetic_normalization column"
+        throw(ArgumentError("F1 summary CSV $(path) has $(reason); " *
+            "refusing to append, write a new summary path"))
+    end
     mkpath(dirname(path))
     open(path, "w") do io
         println(io, SUMMARY_HEADER)
@@ -343,7 +362,8 @@ function _append_summary(path, geom_idx; status, error="", runtime_seconds=0.0, 
         quartics, count(<(0), lambda), count(>(0), lambda), isempty(fpert) ? "" : minimum(fpert),
         isempty(fpert) ? "" : maximum(fpert), _median_or_empty(fpert),
         isempty(fK) ? "" : minimum(fK), isempty(fK) ? "" : maximum(fK), _median_or_empty(fK),
-        lambda31_count, lambda22_count, provisional, output)
+        lambda31_count, lambda22_count, provisional, output,
+        PHYSICAL_KINETIC_NORMALIZATION)
     open(path, "a") do io
         println(io, join(_csv_escape.(values), ','))
         flush(io)

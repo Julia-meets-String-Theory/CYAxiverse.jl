@@ -548,7 +548,9 @@ end
         loaded = CYAxiverse.read.physical_spectrum(geom_idx)
         @test loaded.m == spectrum.m
         @test loaded.fpert ≈ [-9.5, -9.0]
-        @test loaded.schema_version == "cyaxiverse-physical-spectrum-3"
+        @test loaded.schema_version == "cyaxiverse-physical-spectrum-4"
+        @test loaded.kinetic_normalization === :sugra_c1
+        @test loaded.kinetic_normalization_inferred === false
         @test loaded.fpert_log10_unit == "GeV"
         @test loaded.fpert_convention == "lambda_self_abs_log10"
         @test loaded.mass_signs_or_inertia == Int[]

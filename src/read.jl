@@ -542,6 +542,22 @@ const KINETIC_NORMALIZATION_LABELS = ("sugra_c1", "p96_reproduction_c_half",
     "a96_reproduction_raw_radian", "legacy_c_half")
 
 """
+    _require_primary_label(label, where_, family)
+
+Throw an `ArgumentError` unless a stored label of a primary physical HDF5
+family (F1–F6, CYAX-0232 R-007) is `"sugra_c1"`. These families never hold
+derived values, so a stored `"legacy_c_half"` is rejected too.
+"""
+function _require_primary_label(label, where_::AbstractString, family::AbstractString)
+    label in KINETIC_NORMALIZATION_LABELS || throw(ArgumentError(
+        "$(where_): kinetic_normalization $(repr(label)) is not an allowed label"))
+    label == "sugra_c1" || throw(ArgumentError(
+        "$(where_): $(family) is a primary physical family and holds only " *
+        "\"sugra_c1\", found $(repr(label))"))
+    nothing
+end
+
+"""
     f2_label(spectrum::HDF5.Group, path)
 
 Return `(kinetic_normalization, kinetic_normalization_inferred, cubic_basis)`
@@ -570,12 +586,8 @@ function f2_label(spectrum::HDF5.Group, path::AbstractString)
             "$(where_): unknown F2 schema_version $(repr(version))"))
         haskey(metadata, "kinetic_normalization") || throw(ArgumentError(
             "$(where_): F2 $(version) has no kinetic_normalization label"))
-        label = _read_dataset(metadata, "kinetic_normalization")
-        label in KINETIC_NORMALIZATION_LABELS || throw(ArgumentError(
-            "$(where_): kinetic_normalization $(repr(label)) is not an allowed label"))
-        label == "sugra_c1" || throw(ArgumentError(
-            "$(where_): F2 is a primary physical family and holds only " *
-            "\"sugra_c1\", found $(repr(label))"))
+        _require_primary_label(_read_dataset(metadata, "kinetic_normalization"),
+            where_, "F2")
         haskey(metadata, "cubic_basis") || throw(ArgumentError(
             "$(where_): F2 $(version) has no cubic_basis"))
         basis = _read_dataset(metadata, "cubic_basis")
@@ -589,18 +601,152 @@ function f2_label(spectrum::HDF5.Group, path::AbstractString)
     throw(ArgumentError("$(where_): no F2 layout is recognized"))
 end
 
+# F1 (`spectrum/physical`) labels, CYAX-0232 R-006 and R-007.
+const F1_SCHEMA_VERSION = "cyaxiverse-physical-spectrum-4"
+const F1_LEGACY_SCHEMA_VERSION = "cyaxiverse-physical-spectrum-3"
+const F1_REQUIRED_DATASETS = ("m", "mode_indices", "fK_log10")
+const F1_REQUIRED_METADATA = ("threshold_log10", "prec", "provisional",
+    "runtime_seconds")
+
+"""
+    f1_label(physical::HDF5.Group, path) -> (label::Symbol, inferred::Bool)
+
+Return the kinetic-normalization label of a geometry's `spectrum/physical`
+group (F1, CYAX-0232 R-007) and whether it was inferred.
+
+- `schema_version == "$(F1_SCHEMA_VERSION)"`: the label
+  `metadata/kinetic_normalization` must be `"sugra_c1"`; returns
+  `(:sugra_c1, false)`.
+- `schema_version == "$(F1_LEGACY_SCHEMA_VERSION)"` with no label:
+  `(:legacy_c_half, true)`.
+- No `schema_version` and no label, with every dataset that
+  [`physical_spectrum`](@ref) requires (`m`, `mode_indices`, `fK_log10` and
+  `metadata/{threshold_log10, prec, provisional, runtime_seconds}`):
+  `(:legacy_c_half, true)`. Optional datasets such as `fpert_log10` do not
+  affect recognition. Data migrated by `migrate_legacy_spectra.jl` from an
+  unversioned source has this layout.
+
+Throws an `ArgumentError` naming `path` for a current-version F1 whose label is
+missing or not `"sugra_c1"`, for a legacy or unversioned F1 that carries a
+label, for an unknown schema version and for an unrecognized layout.
+"""
+function f1_label(physical::HDF5.Group, path::AbstractString)
+    where_ = "F1 spectrum/physical in $(path)"
+    haskey(physical, "metadata") || throw(ArgumentError(
+        "$(where_): no metadata group; no F1 layout is recognized"))
+    metadata = physical["metadata"]::HDF5.Group
+    labelled = haskey(metadata, "kinetic_normalization")
+    if haskey(metadata, "schema_version")
+        version = _read_dataset(metadata, "schema_version")
+        if version == F1_SCHEMA_VERSION
+            labelled || throw(ArgumentError(
+                "$(where_): F1 $(version) has no kinetic_normalization label"))
+            _require_primary_label(_read_dataset(metadata, "kinetic_normalization"),
+                where_, "F1")
+            return (:sugra_c1, false)
+        elseif version == F1_LEGACY_SCHEMA_VERSION
+            labelled && throw(ArgumentError(
+                "$(where_): legacy F1 $(version) carries a kinetic_normalization label"))
+            return (:legacy_c_half, true)
+        end
+        throw(ArgumentError("$(where_): unknown F1 schema_version $(repr(version))"))
+    end
+    labelled && throw(ArgumentError(
+        "$(where_): unversioned F1 carries a kinetic_normalization label"))
+    absent = [name for name in F1_REQUIRED_DATASETS if !haskey(physical, name)]
+    append!(absent, ["metadata/" * name for name in F1_REQUIRED_METADATA
+        if !haskey(metadata, name)])
+    isempty(absent) || throw(ArgumentError(
+        "$(where_): unversioned layout lacks $(join(absent, ", ")); " *
+        "no F1 layout is recognized"))
+    (:legacy_c_half, true)
+end
+
+# F3 (`spectrum/axion_photon`) labels, CYAX-0232 R-006 and R-007.
+const F3_IDENTITY_SCHEMA_VERSION = 2
+const F3_LEGACY_IDENTITY_SCHEMA_VERSION = 1
+
+"""
+    f3_identity_label(schema_version) -> (label::Symbol, inferred::Bool)
+
+Map an F3 identity version to its label (CYAX-0232 R-006): version
+$(F3_IDENTITY_SCHEMA_VERSION) is `(:sugra_c1, false)` and version
+$(F3_LEGACY_IDENTITY_SCHEMA_VERSION) is `(:legacy_c_half, true)`. Consumers of
+an in-memory `axion_photon.AxionPhotonResult` derive its label from
+`identity.schema_version` with this function. Throws an `ArgumentError` for any
+other version.
+"""
+function f3_identity_label(schema_version::Integer)
+    schema_version == F3_IDENTITY_SCHEMA_VERSION && return (:sugra_c1, false)
+    schema_version == F3_LEGACY_IDENTITY_SCHEMA_VERSION && return (:legacy_c_half, true)
+    throw(ArgumentError("unknown F3 identity schema_version $(schema_version)"))
+end
+
+"""
+    f3_label(identity::HDF5.Group, path) -> (label, inferred, schema_version)
+
+Return the kinetic-normalization label of a persisted
+`spectrum/axion_photon/identity` group (F3, CYAX-0232 R-007), whether it was
+inferred, and the stored identity version.
+
+- Identity `schema_version == $(F3_IDENTITY_SCHEMA_VERSION)`: the label
+  `identity/kinetic_normalization` must be `"sugra_c1"`; returns
+  `(:sugra_c1, false, $(F3_IDENTITY_SCHEMA_VERSION))`.
+- Identity `schema_version == $(F3_LEGACY_IDENTITY_SCHEMA_VERSION)` with no
+  label: `(:legacy_c_half, true, $(F3_LEGACY_IDENTITY_SCHEMA_VERSION))`.
+
+Throws an `ArgumentError` naming `path` for a missing or non-integer version, a
+version-$(F3_IDENTITY_SCHEMA_VERSION) identity whose label is missing or not
+`"sugra_c1"`, a version-$(F3_LEGACY_IDENTITY_SCHEMA_VERSION) identity that
+carries a label, and an unknown version.
+"""
+function f3_label(identity::HDF5.Group, path::AbstractString)
+    where_ = "F3 spectrum/axion_photon in $(path)"
+    haskey(identity, "schema_version") || throw(ArgumentError(
+        "$(where_): identity has no schema_version"))
+    version = _read_dataset(identity, "schema_version")
+    version isa Integer || throw(ArgumentError(
+        "$(where_): identity schema_version $(repr(version)) is not an integer"))
+    labelled = haskey(identity, "kinetic_normalization")
+    if version == F3_IDENTITY_SCHEMA_VERSION
+        labelled || throw(ArgumentError(
+            "$(where_): identity version $(version) has no kinetic_normalization label"))
+        _require_primary_label(_read_dataset(identity, "kinetic_normalization"),
+            where_, "F3")
+    elseif version == F3_LEGACY_IDENTITY_SCHEMA_VERSION
+        labelled && throw(ArgumentError(
+            "$(where_): legacy identity version $(version) carries a " *
+            "kinetic_normalization label"))
+    else
+        throw(ArgumentError("$(where_): unknown identity schema_version $(version)"))
+    end
+    (f3_identity_label(version)..., Int(version))
+end
+
 """
     stored_kinetic_normalization(path; family) -> (label::Symbol, inferred::Bool)
 
 Return the kinetic-normalization label of a persisted HDF5 output and whether
 it was inferred from a legacy layout (CYAX-0232 R-006), applying the R-007
-checks of [`f2_label`](@ref). `family` is the output family; `:f2` is
-supported.
+checks of the family's reader. `family` is the output family: `:f1`
+([`f1_label`](@ref)), `:f2` ([`f2_label`](@ref)) or `:f3`
+([`f3_label`](@ref)).
 """
 function stored_kinetic_normalization(path::AbstractString; family::Symbol)
-    family === :f2 || throw(ArgumentError(
+    family in (:f1, :f2, :f3) || throw(ArgumentError(
         "stored_kinetic_normalization: unsupported family $(repr(family))"))
     h5open(path, "r") do file
+        if family === :f1
+            haskey(file, "spectrum/physical") || throw(ArgumentError(
+                "F1 spectrum/physical in $(path): no spectrum/physical group"))
+            return f1_label(file["spectrum/physical"]::HDF5.Group, path)
+        elseif family === :f3
+            haskey(file, "spectrum/axion_photon/identity") || throw(ArgumentError(
+                "F3 spectrum/axion_photon in $(path): no identity group"))
+            label, inferred, _ = f3_label(
+                file["spectrum/axion_photon/identity"]::HDF5.Group, path)
+            return (label, inferred)
+        end
         haskey(file, "spectrum") || throw(ArgumentError(
             "F2 spectrum groups in $(path): no spectrum group"))
         label, inferred, _ = f2_label(file["spectrum"]::HDF5.Group, path)
@@ -774,11 +920,15 @@ end
     physical_spectrum(h11, tri, cy=1)
 
 Read the persisted physical spectrum and its metadata from a geometry's
-`spectrum/physical` HDF5 group.
+`spectrum/physical` HDF5 group (F1), with the label fields
+`kinetic_normalization` and `kinetic_normalization_inferred` (CYAX-0232; see
+[`f1_label`](@ref), which applies the R-007 checks).
 """
 function physical_spectrum(h11::Int, tri::Int, cy::Int=1)
-    h5open(cyax_file(h11, tri, cy), "r") do file
+    path = cyax_file(h11, tri, cy)
+    h5open(path, "r") do file
         physical = file["spectrum/physical"]::HDF5.Group
+        label, inferred = f1_label(physical, path)
         metadata = physical["metadata"]::HDF5.Group
         return (; m = _read_dataset(physical, "m"),
             mode_indices = _read_dataset(physical, "mode_indices"),
@@ -808,7 +958,9 @@ function physical_spectrum(h11::Int, tri::Int, cy::Int=1)
             threshold_log10 = _read_dataset(metadata, "threshold_log10"),
             prec = _read_dataset(metadata, "prec"),
             provisional = _read_dataset(metadata, "provisional"),
-            runtime_seconds = _read_dataset(metadata, "runtime_seconds"))
+            runtime_seconds = _read_dataset(metadata, "runtime_seconds"),
+            kinetic_normalization = label,
+            kinetic_normalization_inferred = inferred)
     end
 end
 

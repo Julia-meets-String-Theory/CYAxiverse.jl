@@ -563,3 +563,243 @@ end
     @test_throws ArgumentError CYAxiverse.read.stored_kinetic_normalization("x.h5";
         family=:f9)
 end
+
+@testset "CYAX-0232 F1 label, rewrite and summary CSV (T031)" begin
+    r = CYAxiverse.read
+    spectrum = CYAxiverse.structs.PhysicalAxionSpectrum(
+        [1.0, 2.0], [0, 1], zeros(2, 2), [1, -1], [3.0, 4.0],
+        reshape([1, 1, 1, 2], 4, 1), [1], [0.5],
+        reshape([1, 1, 2, 2], 4, 1), [-1], [0.7],
+        -30.0, 200)
+    geom_idx = CYAxiverse.structs.GeometryIndex(2, 3, 4)
+    write_f1(path; quartics=true) = _write_result(path, geom_idx, spectrum;
+        prec=200, threshold_log10=-30.0, quartics, runtime_seconds=0.1,
+        provisional=false, fK=[5.0, 6.0])
+    function f1_fixture(f; quartics=true)
+        mktempdir() do root
+            path = joinpath(root, "h11_002", "np_0000003", "cy_0000004", "cyax.h5")
+            mkpath(dirname(path))
+            h5open(file -> create_group(file, "cytools"), path, "cw")
+            write_f1(path; quartics)
+            withenv("CYAXIVERSE_DATA_DIR" => root) do
+                f(path)
+            end
+        end
+    end
+    metadata(file) = file["spectrum/physical/metadata"]
+    set!(name, value) = file -> begin
+        m = metadata(file)
+        haskey(m, name) && HDF5.delete_object(m, name)
+        value === nothing || (m[name] = value)
+    end
+    labels(x) = (x.kinetic_normalization, x.kinetic_normalization_inferred)
+
+    # Round trip of a current output.
+    f1_fixture() do path
+        h5open(path, "r") do file
+            @test read(metadata(file)["schema_version"]) ==
+                "cyaxiverse-physical-spectrum-4"
+            @test read(metadata(file)["kinetic_normalization"]) == "sugra_c1"
+        end
+        loaded = r.physical_spectrum(geom_idx)
+        @test labels(loaded) == (:sugra_c1, false)
+        @test loaded.m == spectrum.m
+        @test loaded.schema_version == r.F1_SCHEMA_VERSION
+        @test r.stored_kinetic_normalization(path; family=:f1) == (:sugra_c1, false)
+
+        # A rewrite deletes the whole spectrum/physical group first; F2 and
+        # F3 siblings are not touched.
+        h5open(path, "r+") do file
+            file["spectrum/physical/stale"] = [1.0]
+            metadata(file)["stale"] = 1
+            file["spectrum/masses/log10"] = [9.0]
+            file["spectrum/axion_photon/identity/schema_version"] = 1
+        end
+        write_f1(path; quartics=false)
+        h5open(path, "r") do file
+            @test !haskey(file, "spectrum/physical/stale")
+            @test !haskey(metadata(file), "stale")
+            @test !haskey(file, "spectrum/physical/fpert_log10")
+            @test read(metadata(file)["kinetic_normalization"]) == "sugra_c1"
+            @test read(file["spectrum/masses/log10"]) == [9.0]
+            @test read(file["spectrum/axion_photon/identity/schema_version"]) == 1
+        end
+    end
+
+    # Inference: "-3" without a label.
+    f1_fixture() do path
+        h5open(path, "r+") do file
+            set!("kinetic_normalization", nothing)(file)
+            set!("schema_version", r.F1_LEGACY_SCHEMA_VERSION)(file)
+        end
+        @test labels(r.physical_spectrum(geom_idx)) == (:legacy_c_half, true)
+        @test r.stored_kinetic_normalization(path; family=:f1) == (:legacy_c_half, true)
+    end
+    # Inference: unversioned complete layout without fpert_log10.
+    f1_fixture(; quartics=false) do path
+        h5open(path, "r+") do file
+            set!("kinetic_normalization", nothing)(file)
+            set!("schema_version", nothing)(file)
+            @test !haskey(file, "spectrum/physical/fpert_log10")
+        end
+        loaded = r.physical_spectrum(geom_idx)
+        @test labels(loaded) == (:legacy_c_half, true)
+        @test loaded.schema_version === nothing
+        @test loaded.fpert == Float64[]
+        @test r.stored_kinetic_normalization(path; family=:f1) == (:legacy_c_half, true)
+    end
+
+    # R-007 rejections, through the reader and stored_kinetic_normalization.
+    function f1_rejected(edits...)
+        f1_fixture() do path
+            h5open(file -> foreach(e -> e(file), edits), path, "r+")
+            reader = try
+                r.physical_spectrum(geom_idx)
+                false
+            catch err
+                message = sprint(showerror, err)
+                err isa ArgumentError && occursin(path, message) && occursin("F1", message)
+            end
+            stored = try
+                r.stored_kinetic_normalization(path; family=:f1)
+                false
+            catch err
+                err isa ArgumentError
+            end
+            reader && stored
+        end
+    end
+    unversioned = (set!("schema_version", nothing), set!("kinetic_normalization", nothing))
+    @test f1_rejected(set!("kinetic_normalization", nothing))
+    @test f1_rejected(set!("kinetic_normalization", "bogus"))
+    @test f1_rejected(set!("kinetic_normalization", "legacy_c_half"))
+    @test f1_rejected(set!("kinetic_normalization", "a96_reproduction_raw_radian"))
+    @test f1_rejected(set!("schema_version", "cyaxiverse-physical-spectrum-5"))
+    @test f1_rejected(set!("schema_version", r.F1_LEGACY_SCHEMA_VERSION))
+    @test f1_rejected(set!("schema_version", nothing))
+    @test f1_rejected(unversioned..., set!("runtime_seconds", nothing))
+    @test f1_rejected(unversioned...,
+        file -> HDF5.delete_object(file["spectrum/physical"], "fK_log10"))
+
+    # Summary CSV: label column, and no append onto a legacy summary.
+    mktempdir() do dir
+        summary = joinpath(dir, "summary.csv")
+        _write_summary_header(summary)
+        _append_summary(summary, geom_idx; status="success", prec=200,
+            threshold_log10=-30.0, spectrum=spectrum, quartics=true)
+        lines = readlines(summary)
+        @test split(lines[1], ',')[end] == "kinetic_normalization"
+        @test split(lines[2], ',')[end] == "sugra_c1"
+        @test length(split(lines[2], ',')) == length(split(lines[1], ','))
+        _write_summary_header(summary; append=true)
+        @test length(readlines(summary)) == 2
+
+        legacy_summary = joinpath(dir, "legacy.csv")
+        write(legacy_summary, replace(SUMMARY_HEADER, ",kinetic_normalization" => "") * "\n")
+        err = try
+            _write_summary_header(legacy_summary; append=true)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("no kinetic_normalization column", sprint(showerror, err))
+        @test length(readlines(legacy_summary)) == 1
+
+        empty_summary = joinpath(dir, "empty.csv")
+        touch(empty_summary)
+        _write_summary_header(empty_summary; append=true)
+        @test readlines(empty_summary) == [SUMMARY_HEADER]
+    end
+end
+
+@testset "CYAX-0232 F3 identity 2, label and CSV (T032)" begin
+    ap = CYAxiverse.axion_photon
+    r = CYAxiverse.read
+    fixture = first(r005_fixtures())
+    identity_path = "spectrum/axion_photon/identity"
+    set!(name, value) = identity -> begin
+        haskey(identity, name) && HDF5.delete_object(identity, name)
+        value === nothing || (identity[name] = value)
+    end
+    r005_with_geometry(fixture, 1) do geom_idx, path, root
+        result = ap._run_local_scan(path)
+        @test result.identity.schema_version == 2
+        ap.write_axion_photon_result(path, result)
+        h5open(path, "r") do file
+            @test read(file[identity_path * "/schema_version"]) == 2
+            @test read(file[identity_path * "/kinetic_normalization"]) == "sugra_c1"
+        end
+        restored = ap.read_axion_photon_result(path)
+        @test restored.identity == result.identity
+        @test r.stored_kinetic_normalization(path; family=:f3) == (:sugra_c1, false)
+        csv = joinpath(root, "scan.csv")
+        ap.write_scan_csv(csv, [restored])
+        lines = readlines(csv)
+        @test endswith(lines[1], ",kinetic_normalization,kinetic_normalization_inferred")
+        @test endswith(lines[2], ",sugra_c1,false")
+        @test length(split(lines[2], ',')) == length(split(lines[1], ','))
+
+        # Legacy identity version 1 without a label: read by inference, and
+        # the stored version is kept.
+        h5open(path, "r+") do file
+            identity = file[identity_path]
+            set!("schema_version", 1)(identity)
+            set!("kinetic_normalization", nothing)(identity)
+        end
+        legacy = ap.read_axion_photon_result(path)
+        @test legacy.identity.schema_version == 1
+        @test r.f3_identity_label(legacy.identity.schema_version) == (:legacy_c_half, true)
+        @test r.stored_kinetic_normalization(path; family=:f3) == (:legacy_c_half, true)
+        ap.write_scan_csv(csv, [legacy])
+        @test endswith(readlines(csv)[2], ",legacy_c_half,true")
+
+        # Mixed labels are not combined into one CSV.
+        err = try
+            ap.write_scan_csv(csv, [restored, legacy])
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("sugra_c1", sprint(showerror, err)) &&
+            occursin("legacy_c_half", sprint(showerror, err))
+
+        # The writer refuses a legacy result read back from the file, and a
+        # current result does not overwrite the legacy group without force.
+        @test_throws ArgumentError ap.write_axion_photon_result(path, legacy; force=true)
+        @test_throws ArgumentError ap.write_axion_photon_result(path, result)
+        @test r.stored_kinetic_normalization(path; family=:f3) == (:legacy_c_half, true)
+        ap.write_axion_photon_result(path, result; force=true)
+        @test r.stored_kinetic_normalization(path; family=:f3) == (:sugra_c1, false)
+    end
+
+    # R-007 rejections, through the reader and stored_kinetic_normalization.
+    function f3_rejected(edits...)
+        r005_with_geometry(fixture, 1) do geom_idx, path, _
+            ap.write_axion_photon_result(path, ap._run_local_scan(path))
+            h5open(file -> foreach(e -> e(file[identity_path]), edits), path, "r+")
+            reader = try
+                ap.read_axion_photon_result(path)
+                false
+            catch err
+                message = sprint(showerror, err)
+                err isa ArgumentError && occursin(path, message) && occursin("F3", message)
+            end
+            stored = try
+                r.stored_kinetic_normalization(path; family=:f3)
+                false
+            catch err
+                err isa ArgumentError
+            end
+            reader && stored
+        end
+    end
+    @test f3_rejected(set!("kinetic_normalization", nothing))
+    @test f3_rejected(set!("kinetic_normalization", "bogus"))
+    @test f3_rejected(set!("kinetic_normalization", "legacy_c_half"))
+    @test f3_rejected(set!("kinetic_normalization", "p96_reproduction_c_half"))
+    @test f3_rejected(set!("schema_version", 1))
+    @test f3_rejected(set!("schema_version", 3))
+    @test f3_rejected(set!("schema_version", "2"))
+end
