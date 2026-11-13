@@ -35,6 +35,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
+env:
+  # CYAX-0230 R-005 (specs/0230-ci-cpu-target/spec.md): build package images
+  # for the one CPU target haswell, so that the images in a restored depot
+  # cache load on the runner CPU models CI gets (spec: Facts, Accepted
+  # limitations). Set here only, never in a job or step.
+  JULIA_CPU_TARGET: 'haswell'
+
 jobs:
   build:
     permissions:
@@ -49,6 +56,24 @@ jobs:
         with:
           version: '1.12'
       - uses: julia-actions/cache@v2
+      - name: Report CPU and restored package images
+        # CYAX-0230 R-001: records the runner CPU and the restored package
+        # images this Julia rejects. Diagnostic only: it must not fail the job.
+        # It loads no package; the last line counts depot entries changed while
+        # it ran (expected 0).
+        continue-on-error: true
+        run: |
+          marker="$(mktemp)"
+          status=0
+          julia --startup-file=no scripts/ci_report_package_images.jl || status=$?
+          depot="${JULIA_DEPOT_PATH%%:*}"
+          depot="${depot:-$HOME/.julia}"
+          if [ -d "$depot" ]; then
+            echo "Depot entries changed while this step ran: $(find "$depot" -newer "$marker" | wc -l) (expected 0)"
+          else
+            echo "No depot found: nothing was restored"
+          fi
+          exit "$status"
       - name: Fetch immutable lifecycle authority
         if: github.event_name == 'workflow_dispatch'
         env:
