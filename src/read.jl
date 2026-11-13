@@ -723,19 +723,103 @@ function f3_label(identity::HDF5.Group, path::AbstractString)
     (f3_identity_label(version)..., Int(version))
 end
 
+# F4 (`fuzzy_axion_model_stage_driver.jl` output HDF5) and the F5 model-stage
+# input HDF5 it reads, CYAX-0232 R-006 and R-007.
+const F4_SCHEMA_VERSION = "cyaxiverse-fuzzy-axion-model-stage-1"
+const F4_LEGACY_REQUIRED_DATASETS = ("total_model_count",
+    "model_mass_reference_log10_ev")
+const F5_MODEL_STAGE_INPUT_SCHEMA = "kaehler-point-provenance-2"
+const F5_LEGACY_MODEL_STAGE_INPUT_SCHEMA = "kaehler-point-provenance-1"
+
+"""
+    f4_label(file::HDF5.File, path) -> (label::Symbol, inferred::Bool)
+
+Return the kinetic-normalization label of a Fuzzy-axion model-stage output
+file (F4, CYAX-0232 R-007) and whether it was inferred.
+
+- Root `schema_version == "$(F4_SCHEMA_VERSION)"`: the root dataset
+  `kinetic_normalization` must be `"sugra_c1"`; returns `(:sugra_c1, false)`.
+- No `schema_version` and no label, with root `total_model_count` and
+  `model_mass_reference_log10_ev`: `(:legacy_c_half, true)`.
+
+Throws an `ArgumentError` naming `path` for a current-version file whose label
+is missing or not `"sugra_c1"`, an unversioned file that carries a label, an
+unknown version and an unrecognized layout.
+"""
+function f4_label(file::HDF5.File, path::AbstractString)
+    where_ = "F4 model-stage output $(path)"
+    labelled = haskey(file, "kinetic_normalization")
+    if haskey(file, "schema_version")
+        version = HDF5.read(file["schema_version"]::HDF5.Dataset)
+        version == F4_SCHEMA_VERSION || throw(ArgumentError(
+            "$(where_): unknown F4 schema_version $(repr(version))"))
+        labelled || throw(ArgumentError(
+            "$(where_): F4 $(version) has no kinetic_normalization label"))
+        _require_primary_label(HDF5.read(file["kinetic_normalization"]::HDF5.Dataset),
+            where_, "F4")
+        return (:sugra_c1, false)
+    end
+    labelled && throw(ArgumentError(
+        "$(where_): unversioned F4 carries a kinetic_normalization label"))
+    absent = [name for name in F4_LEGACY_REQUIRED_DATASETS if !haskey(file, name)]
+    isempty(absent) || throw(ArgumentError(
+        "$(where_): unversioned layout lacks $(join(absent, ", ")); " *
+        "no F4 layout is recognized"))
+    (:legacy_c_half, true)
+end
+
+"""
+    f5_model_stage_input_label(file::HDF5.File, path) -> (label::Symbol, inferred::Bool)
+
+Return the kinetic-normalization label of the model-stage input HDF5 written
+by `reproduce_fuzzy_axions_h11_4.py` `_write_model_stage_input` (F5,
+CYAX-0232 R-006) and whether it was inferred. Its version is the root
+attribute `record_metadata_schema`.
+
+- `"$(F5_MODEL_STAGE_INPUT_SCHEMA)"`: the root dataset
+  `kinetic_normalization` must be `"sugra_c1"`; returns `(:sugra_c1, false)`.
+- `"$(F5_LEGACY_MODEL_STAGE_INPUT_SCHEMA)"` with no label:
+  `(:legacy_c_half, true)`.
+
+Throws an `ArgumentError` naming `path` for a missing or unknown version, a
+current-version file whose label is missing or not `"sugra_c1"`, and a legacy
+file that carries a label.
+"""
+function f5_model_stage_input_label(file::HDF5.File, path::AbstractString)
+    where_ = "F5 model-stage input $(path)"
+    attributes = HDF5.attributes(file)
+    haskey(attributes, "record_metadata_schema") || throw(ArgumentError(
+        "$(where_): no record_metadata_schema attribute"))
+    version = HDF5.read(attributes["record_metadata_schema"])
+    labelled = haskey(file, "kinetic_normalization")
+    if version == F5_MODEL_STAGE_INPUT_SCHEMA
+        labelled || throw(ArgumentError(
+            "$(where_): $(version) has no kinetic_normalization label"))
+        _require_primary_label(HDF5.read(file["kinetic_normalization"]::HDF5.Dataset),
+            where_, "F5")
+        return (:sugra_c1, false)
+    elseif version == F5_LEGACY_MODEL_STAGE_INPUT_SCHEMA
+        labelled && throw(ArgumentError(
+            "$(where_): legacy $(version) carries a kinetic_normalization label"))
+        return (:legacy_c_half, true)
+    end
+    throw(ArgumentError("$(where_): unknown record_metadata_schema $(repr(version))"))
+end
+
 """
     stored_kinetic_normalization(path; family) -> (label::Symbol, inferred::Bool)
 
 Return the kinetic-normalization label of a persisted HDF5 output and whether
 it was inferred from a legacy layout (CYAX-0232 R-006), applying the R-007
 checks of the family's reader. `family` is the output family: `:f1`
-([`f1_label`](@ref)), `:f2` ([`f2_label`](@ref)) or `:f3`
-([`f3_label`](@ref)).
+([`f1_label`](@ref)), `:f2` ([`f2_label`](@ref)), `:f3`
+([`f3_label`](@ref)) or `:f4` ([`f4_label`](@ref)).
 """
 function stored_kinetic_normalization(path::AbstractString; family::Symbol)
-    family in (:f1, :f2, :f3) || throw(ArgumentError(
+    family in (:f1, :f2, :f3, :f4) || throw(ArgumentError(
         "stored_kinetic_normalization: unsupported family $(repr(family))"))
     h5open(path, "r") do file
+        family === :f4 && return f4_label(file, path)
         if family === :f1
             haskey(file, "spectrum/physical") || throw(ArgumentError(
                 "F1 spectrum/physical in $(path): no spectrum/physical group"))

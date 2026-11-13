@@ -803,3 +803,115 @@ end
     @test f3_rejected(set!("schema_version", 3))
     @test f3_rejected(set!("schema_version", "2"))
 end
+
+# The F4 driver defines `main`; keep it in its own module.
+module CYAX0232F4Driver
+include(joinpath(@__DIR__, "..", "scripts", "fuzzy_axion_model_stage_driver.jl"))
+end
+
+@testset "CYAX-0232 F4 driver label and refusal (T033)" begin
+    r = CYAxiverse.read
+    driver = CYAX0232F4Driver
+    # Synthetic record of scripts/test_fuzzy_axion_model_stage_driver.py,
+    # written as h5py would write it (2D datasets transposed).
+    Q = [1 0 1 0 2 1; 0 1 0 1 1 2]
+    tau = [1.5, 2.0, 1.2, 1.8, 3.0, 2.5]
+    Kinv = [2.0 0.3; 0.3 1.5]
+    function write_input(path; schema="kaehler-point-provenance-2", label="sugra_c1")
+        h5open(path, "w") do file
+            file["record_count"] = 1
+            HDF5.attributes(file)["record_metadata_schema"] = schema
+            label === nothing || (file["kinetic_normalization"] = label)
+            group = create_group(create_group(file, "records"), "0")
+            group["Q"] = permutedims(Q)
+            group["tau"] = tau
+            group["cy_volume"] = 5.0
+            group["inverse_metric"] = permutedims(Kinv)
+        end
+    end
+    run_driver(input, output) = redirect_stdout(devnull) do
+        driver.run_model_stage_driver(input, output, 0.5, complex(1.0, 0.0))
+    end
+    refused(f) = try
+        f()
+        false
+    catch err
+        err isa ArgumentError
+    end
+
+    mktempdir() do dir
+        input = joinpath(dir, "input.h5")
+        output = joinpath(dir, "output.h5")
+        write_input(input)
+        @test h5open(file -> r.f5_model_stage_input_label(file, input), input) ==
+            (:sugra_c1, false)
+        run_driver(input, output)
+        h5open(output, "r") do file
+            @test read(file["schema_version"]) == "cyaxiverse-fuzzy-axion-model-stage-1"
+            @test read(file["kinetic_normalization"]) == "sugra_c1"
+            @test read(file["total_model_count"]) == length(read(file["model_record_index"]))
+        end
+        @test r.stored_kinetic_normalization(output; family=:f4) == (:sugra_c1, false)
+        # A current output may be replaced.
+        run_driver(input, output)
+        @test r.stored_kinetic_normalization(output; family=:f4) == (:sugra_c1, false)
+
+        # A legacy (unversioned, unlabelled) output is read by inference and
+        # never overwritten.
+        h5open(output, "r+") do file
+            HDF5.delete_object(file, "schema_version")
+            HDF5.delete_object(file, "kinetic_normalization")
+        end
+        @test r.stored_kinetic_normalization(output; family=:f4) == (:legacy_c_half, true)
+        @test refused(() -> run_driver(input, output))
+        @test r.stored_kinetic_normalization(output; family=:f4) == (:legacy_c_half, true)
+        # Nor is a file that is not an F4 output.
+        other = joinpath(dir, "other.h5")
+        write(other, "not hdf5")
+        @test refused(() -> run_driver(input, other))
+        @test read(other, String) == "not hdf5"
+
+        # Inputs that are legacy, unlabelled or unknown are refused before any
+        # output is written.
+        fresh = joinpath(dir, "fresh.h5")
+        for (schema, label) in (("kaehler-point-provenance-1", nothing),
+                ("kaehler-point-provenance-1", "sugra_c1"),
+                ("kaehler-point-provenance-2", nothing),
+                ("kaehler-point-provenance-2", "legacy_c_half"),
+                ("kaehler-point-provenance-3", "sugra_c1"))
+            write_input(input; schema, label)
+            @test refused(() -> run_driver(input, fresh))
+            @test !isfile(fresh)
+        end
+        write_input(input; schema="kaehler-point-provenance-1", label=nothing)
+        @test h5open(file -> r.f5_model_stage_input_label(file, input), input) ==
+            (:legacy_c_half, true)
+    end
+
+    # R-007 rejections for F4 files, through stored_kinetic_normalization.
+    function f4_rejected(datasets)
+        mktempdir() do dir
+            path = joinpath(dir, "f4.h5")
+            h5open(path, "w") do file
+                for (name, value) in datasets
+                    file[name] = value
+                end
+            end
+            try
+                r.stored_kinetic_normalization(path; family=:f4)
+                false
+            catch err
+                err isa ArgumentError && occursin(path, sprint(showerror, err))
+            end
+        end
+    end
+    legacy = ["total_model_count" => 3, "model_mass_reference_log10_ev" => [1.0]]
+    version = "schema_version" => "cyaxiverse-fuzzy-axion-model-stage-1"
+    @test f4_rejected([legacy; version])
+    @test f4_rejected([legacy; version; "kinetic_normalization" => "legacy_c_half"])
+    @test f4_rejected([legacy; version; "kinetic_normalization" => "bogus"])
+    @test f4_rejected([legacy; "schema_version" => "cyaxiverse-fuzzy-axion-model-stage-2";
+        "kinetic_normalization" => "sugra_c1"])
+    @test f4_rejected([legacy; "kinetic_normalization" => "sugra_c1"])
+    @test f4_rejected(["total_model_count" => 3])
+end

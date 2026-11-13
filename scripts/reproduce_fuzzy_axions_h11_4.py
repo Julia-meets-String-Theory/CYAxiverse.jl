@@ -136,7 +136,12 @@ PAPER_TARGETS_BY_H11 = {
     },
 }
 
-REPRODUCTION_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.2"
+REPRODUCTION_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.3"
+# CYAX-0232 R-006: every versioned output whose content depends on the mass
+# evaluator carries this label (top-level JSON key, root HDF5 dataset).
+KINETIC_NORMALIZATION = "sugra_c1"
+MODEL_STAGE_INPUT_SCHEMA = "kaehler-point-provenance-2"
+MODEL_STAGE_OUTPUT_SCHEMA = "cyaxiverse-fuzzy-axion-model-stage-1"
 DEPRECATED_COUNT_ALIASES = {
     "counts.source_vertex_evidence_inherited_orientifold_cys": (
         "counts.source_evidence_inherited_orientifold_cys"
@@ -1046,7 +1051,7 @@ KAEHLER_DIAGNOSTIC_POLICY = (
 KAEHLER_DIAGNOSTIC_ATTEMPTS = 4
 KAEHLER_OPTIMIZER_POLICY = "diagnostic_only_scipy_slsqp_from_existing_point"
 KAEHLER_PRODUCTION_POLICY = "finite_deterministic_multistart_pairwise_slsqp"
-KAEHLER_PRODUCTION_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-kaehler-production-1.0"
+KAEHLER_PRODUCTION_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-kaehler-production-1.1"
 KAEHLER_PRODUCTION_DEFAULT_SEED = 0
 KAEHLER_PRODUCTION_DEFAULT_STARTS = 8
 KAEHLER_PRODUCTION_MAX_STARTS = 32
@@ -1422,6 +1427,7 @@ def _production_constrained_kaehler_optimizer(
     optimizer_name = str(optimizer).upper()
     result = {
         "schema_version": KAEHLER_PRODUCTION_SCHEMA_VERSION,
+        "kinetic_normalization": KINETIC_NORMALIZATION,
         "mode": "production",
         "statistical_framework": "frequentist",
         "diagnostic_only": False,
@@ -1797,6 +1803,7 @@ def _production_kaehler_search(
     ).upper()
     summary = {
         "schema_version": KAEHLER_PRODUCTION_SCHEMA_VERSION,
+        "kinetic_normalization": KINETIC_NORMALIZATION,
         "mode": "production",
         "statistical_framework": "frequentist",
         "finite_search_status": "not_run",
@@ -2839,11 +2846,17 @@ def _write_model_stage_input(records: list[dict], path: Path) -> None:
     driver is responsible for undoing HDF5.jl's dimension-order reversal on
     read (see its module docstring -- confirmed empirically, not assumed,
     before writing that script).
+
+    The file carries ``record_metadata_schema = MODEL_STAGE_INPUT_SCHEMA`` and
+    the root dataset ``kinetic_normalization`` (CYAX-0232 R-006): in
+    production mode the exported points are optimizer-selected and so depend
+    on the mass evaluator.
     """
 
     with h5py.File(path, "w") as file:
         file.create_dataset("record_count", data=len(records))
-        file.attrs["record_metadata_schema"] = "kaehler-point-provenance-1"
+        file.attrs["record_metadata_schema"] = MODEL_STAGE_INPUT_SCHEMA
+        file.create_dataset("kinetic_normalization", data=KINETIC_NORMALIZATION)
         file.attrs["qcd_divisor_domain"] = (
             str(records[0].get("qcd_divisor_domain", "all_prime"))
             if records
@@ -2891,6 +2904,51 @@ def _write_model_stage_input(records: list[dict], path: Path) -> None:
             group.create_dataset(
                 "inverse_metric", data=np.array(record["inverse_metric"], dtype=np.float64)
             )
+
+
+def model_stage_output_label(file, path) -> tuple[str, bool]:
+    """Return ``(label, inferred)`` for a Julia model-stage output file (F4).
+
+    CYAX-0232 R-007: a root ``schema_version == MODEL_STAGE_OUTPUT_SCHEMA``
+    needs the root label ``"sugra_c1"``; an unversioned, unlabelled file with
+    ``total_model_count`` and ``model_mass_reference_log10_ev`` is the legacy
+    layout, read as ``("legacy_c_half", True)``. Anything else raises a
+    ``ValueError`` naming the file.
+    """
+
+    where = f"F4 model-stage output {path}"
+
+    def scalar(name):
+        value = file[name][()]
+        return value.decode() if isinstance(value, bytes) else value
+
+    labelled = "kinetic_normalization" in file
+    if "schema_version" in file:
+        version = scalar("schema_version")
+        if version != MODEL_STAGE_OUTPUT_SCHEMA:
+            raise ValueError(f"{where}: unknown F4 schema_version {version!r}")
+        if not labelled:
+            raise ValueError(f"{where}: F4 {version} has no kinetic_normalization label")
+        label = scalar("kinetic_normalization")
+        if label != KINETIC_NORMALIZATION:
+            raise ValueError(
+                f"{where}: F4 is a primary physical family and holds only "
+                f"{KINETIC_NORMALIZATION!r}, found {label!r}"
+            )
+        return (label, False)
+    if labelled:
+        raise ValueError(f"{where}: unversioned F4 carries a kinetic_normalization label")
+    absent = [
+        name
+        for name in ("total_model_count", "model_mass_reference_log10_ev")
+        if name not in file
+    ]
+    if absent:
+        raise ValueError(
+            f"{where}: unversioned layout lacks {', '.join(absent)}; "
+            "no F4 layout is recognized"
+        )
+    return ("legacy_c_half", True)
 
 
 def _run_model_stage(records: list[dict], args) -> dict[str, Any]:
@@ -3019,6 +3077,12 @@ def _run_model_stage(records: list[dict], args) -> dict[str, Any]:
         )
 
         with h5py.File(output_path, "r") as file:
+            label, inferred = model_stage_output_label(file, output_path)
+            if (label, inferred) != (KINETIC_NORMALIZATION, False):
+                raise ValueError(
+                    f"model-stage output {output_path} is {label} "
+                    f"(inferred={inferred}), not {KINETIC_NORMALIZATION}"
+                )
             total_model_count = int(file["total_model_count"][()])
             model_count_per_record = np.asarray(file["model_count_per_record"]).tolist()
             prefactor_P = float(file["prefactor_P"][()])
@@ -3551,6 +3615,7 @@ def _legacy_reproduce(args):
 
     summary = {
         "schema_version": REPRODUCTION_SCHEMA_VERSION,
+        "kinetic_normalization": KINETIC_NORMALIZATION,
         "schema_metadata": {
             "deprecated_aliases": DEPRECATED_COUNT_ALIASES,
         },
@@ -3804,6 +3869,7 @@ def _legacy_reproduce(args):
             }
             summary["kaehler_production_search"] = {
                 "schema_version": KAEHLER_PRODUCTION_SCHEMA_VERSION,
+                "kinetic_normalization": KINETIC_NORMALIZATION,
                 "mode": "production",
                 "statistical_framework": "frequentist",
                 "policy": KAEHLER_PRODUCTION_POLICY,

@@ -394,6 +394,35 @@ labels (the T064 rule for this combiner).
   recomputed, as before this change. `run_batch_axion_photon` still skips a
   version-1 result whose configuration matches.
 
+### F4 and F5 labels (T033, T034)
+
+**F4.** `fuzzy_axion_model_stage_driver.jl` writes root `schema_version` and
+`kinetic_normalization`. Its work is now in `run_model_stage_driver`, and the
+command line runs only when the file is the program (`PROGRAM_FILE`), so the
+test suite can include it. Before computing, and again before opening the
+output, it refuses an existing output that is not a current `"sugra_c1"` F4
+file (legacy, unlabelled or not HDF5). It also refuses an F5 model-stage input
+that is not `kaehler-point-provenance-2` with label `"sugra_c1"`: a primary
+writer does not compute from legacy inputs (R-007). `read.f4_label` and
+`read.f5_model_stage_input_label` hold the rules;
+`stored_kinetic_normalization` accepts `:f4`.
+
+**F5.** `REPRODUCTION_SCHEMA_VERSION` is `…-reproduction-1.3` with a top-level
+`kinetic_normalization`. `KAEHLER_PRODUCTION_SCHEMA_VERSION` is
+`…-kaehler-production-1.1`, and each of its three stamped objects carries the
+label next to its `schema_version`. `_write_model_stage_input` writes
+`record_metadata_schema = "kaehler-point-provenance-2"` and a root
+`kinetic_normalization` dataset. `_run_model_stage` checks the F4 output with
+`model_stage_output_label` (the Python F4 rules) and requires `"sugra_c1"`.
+Python tests cover the summary, two of the three kaehler-production objects
+(the optimizer result and the production search summary; the third is the
+literal in `reproduce`), the input file, and the F4 rules. The bridge test
+`test_fuzzy_axion_model_stage_driver.py` runs the Julia driver on a `-2` input.
+
+**Left to later tasks.** `analyze_fuzzy_axions_orientifold_gap.py` still
+requires `…-reproduction-1.1` (T061); `merge_orientifold_shards.py` has no
+label yet (T037).
+
 ### R-010 audit
 
 `test/fixtures/scientific_certification` (`backend_probe.jl`, `oracles.jl`,
