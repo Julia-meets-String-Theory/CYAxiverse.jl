@@ -229,10 +229,12 @@ function _inflation_pilot_terminal_rows(shard_dir::AbstractString)
             (index, field) in enumerate(INFLATION_SHARD_FIELDS))
         open(path, "r") do io
             readline(io)
-            for line in eachline(io)
+            for (line_number, line) in enumerate(eachline(io))
                 isempty(strip(line)) && continue
                 fields = _inflation_shard_csv_fields(line)
-                length(fields) == length(INFLATION_SHARD_FIELDS) || continue
+                # CYAX-0232 R-007: every row passes the label check.
+                inflation_csv_row_label(string.(INFLATION_SHARD_FIELDS), fields;
+                    path, row=line_number + 1)
                 h11 = _inflation_pilot_parse_value(fields, positions, :h11, 0)
                 polytope = _inflation_pilot_parse_value(
                     fields, positions, :polytope, 0)

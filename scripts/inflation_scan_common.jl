@@ -14,6 +14,7 @@ const INFLATION_SCAN_COMMON_LOADED = true
 if !isdefined(@__MODULE__, :INFLATION_DIAGNOSTIC_SCHEMA_VERSION)
     include(joinpath(@__DIR__, "inflation_diagnostics_common.jl"))
 end
+include(joinpath(@__DIR__, "inflation_csv_labels.jl"))
 
 using CYAxiverse
 using LinearAlgebra

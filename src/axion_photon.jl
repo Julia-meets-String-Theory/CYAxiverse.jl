@@ -1606,8 +1606,50 @@ function _read_axion_photon_identity(group::HDF5.Group)
     end
 end
 
-"""Validate the complete persisted axion-photon group."""
+"""
+    _check_axion_photon_label(group::HDF5.Group)
+
+Apply the CYAX-0232 R-007 F3 label checks (`CYAxiverse.read.f3_label`) to
+the `identity` of a persisted axion-photon group. The checks run outside the
+catch-all validation below, so an R-007 `ArgumentError` propagates instead of
+reading as an absent or incomplete result. A group without an `identity`
+group is left to the validation.
+"""
+function _check_axion_photon_label(group::HDF5.Group)
+    haskey(group, "identity") || return nothing
+    identity = group["identity"]
+    try
+        identity isa HDF5.Group && f3_label(identity, HDF5.filename(group))
+    finally
+        close(identity)
+    end
+    nothing
+end
+
+function _check_axion_photon_label(file::HDF5.File)
+    haskey(file, "spectrum") || return nothing
+    spectrum = file["spectrum"]
+    try
+        spectrum isa HDF5.Group || return nothing
+        haskey(spectrum, "axion_photon") || return nothing
+        group = spectrum["axion_photon"]
+        try
+            group isa HDF5.Group && _check_axion_photon_label(group)
+        finally
+            close(group)
+        end
+    finally
+        close(spectrum)
+    end
+    nothing
+end
+
+"""
+Validate the complete persisted axion-photon group. R-007 label errors
+propagate (CYAX-0232); other defects return `false`.
+"""
 function _validate_axion_photon_group(group::HDF5.Group)
+    _check_axion_photon_label(group)
     nested_groups = HDF5.Group[]
     try
         identity = _read_axion_photon_identity(group)
@@ -2058,6 +2100,8 @@ function read_axion_photon_result(index::GeometryIndex;
 end
 
 function _has_axion_photon(file::HDF5.File; expected_index=nothing, path=nothing)
+    # R-007: a legacy or invalid label must not read as an absent result.
+    _check_axion_photon_label(file)
     opened_groups = HDF5.Group[]
     try
         haskey(file, "spectrum") || return false
@@ -2092,6 +2136,18 @@ end
 
 function _has_axion_photon(path::AbstractString; configuration=nothing)
     isfile(path) || return false
+    # R-007: label errors propagate; an unreadable file still reads as absent.
+    labelled_file = try
+        h5open(path, "r")
+    catch err
+        err isa InterruptException && rethrow()
+        nothing
+    end
+    labelled_file === nothing || try
+        _check_axion_photon_label(labelled_file)
+    finally
+        close(labelled_file)
+    end
     expected_index = try
         _index_from_path(path)
     catch

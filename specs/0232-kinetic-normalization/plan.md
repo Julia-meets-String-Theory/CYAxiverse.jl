@@ -648,6 +648,37 @@ and R ∪ O files) and the rejections.
 - `scripts/run_python_regression_tests.py` now also runs
   `test_f5_legacy_layouts.py` and `test_merge_orientifold_shards.py`.
 
+### Error propagation and inflation CSV rows (T062, T063)
+
+**T062.** R-007 label errors are no longer swallowed:
+- `axion_photon.jl`: `_check_axion_photon_label` runs `f3_label` outside the
+  catch-all of `_validate_axion_photon_group` and both `_has_axion_photon`
+  methods. A legacy identity-1 group reads as present (so the writer refusal
+  applies); an invalid label raises; other defects still read as absent or
+  incomplete. `run_batch_axion_photon` calls `_has_axion_photon` outside its
+  per-geometry `try`, so an invalid group currently aborts the batch; T065
+  moves the check inside the `try` and reports `:failed` (approval note 4).
+- `notebooks/orientifold_axiverse_statistics.jl` `read_geometry_row`: the F1
+  and F6 label checks run before the exclusion handler; the stale exact
+  version tests (F1 `-3`, F6 `2.0`) are replaced by the label rules, so
+  current and inferred legacy outputs are read; each row carries both labels,
+  and the pooled rows must share one label per family (T064 rule for this
+  combiner).
+- `reproduce_appendix_b_spectra.jl` was done in T037.
+- Inflation resume readers: below.
+
+**T063.** `scripts/inflation_csv_labels.jl` (included by
+`inflation_scan_common.jl`) holds the 14 recorded legacy entries, generated
+from the historical writer sources of the T041 record, and
+`inflation_csv_row_label(header, fields; path, row)`: a labelled row must
+carry the current version values and an allowed label (`"sugra_c1"`, or
+`"a96_reproduction_raw_radian"` in the per-row-labelled diagnostic family); a
+legacy row must match exactly one recorded entry (A3.3). `_scan_prep_completed`,
+`inflation_completed_shard_geometries` and `_inflation_pilot_terminal_rows`
+call it on every row outside their parse-error handling, so its errors
+propagate, and only `"sugra_c1"` rows count as complete. The scale-continuation
+reader `_pilot_completed_scales` is T066 (A5).
+
 ### R-010 audit
 
 `test/fixtures/scientific_certification` (`backend_probe.jl`, `oracles.jl`,

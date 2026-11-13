@@ -1169,7 +1169,10 @@ end
         report_path = _inflation_pilot_write_report(joinpath(root, "report.csv"), reports)
         @test endswith(readlines(report_path)[1], ",kinetic_normalization")
         @test endswith(readlines(report_path)[2], ",sugra_c1")
-        mixed = vcat(rows, _inflation_pilot_terminal_rows(joinpath(root, "b")))
+        # A current-layout shard row labelled "legacy_c_half" fails the row
+        # check (T063); mixed labels are rejected by the report.
+        @test_throws ArgumentError _inflation_pilot_terminal_rows(joinpath(root, "b"))
+        mixed = vcat(rows, [merge(only(rows), (; kinetic_normalization="legacy_c_half"))])
         @test_throws ArgumentError _inflation_pilot_report_rows(mixed)
         @test_throws ArgumentError _inflation_pilot_report_rows(
             _inflation_pilot_terminal_rows(joinpath(root, "c")))
@@ -1317,5 +1320,172 @@ end
         @test t060_case(:f6; expect=:reject, version=T060_F6 * "2.4", label="p96_reproduction_c_half")
         @test t060_case(:f6; expect=:reject, version=T060_F6 * "2.5", label="sugra_c1")
         @test t060_case(:f6; expect=:reject)
+    end
+end
+
+# The statistics notebook's `read_geometry_row`, evaluated on its own.
+module CYAX0232Notebook
+using CYAxiverse, HDF5
+let source = read(joinpath(@__DIR__, "..", "notebooks", "orientifold_axiverse_statistics.jl"), String)
+    first_line = findfirst("    function read_geometry_row(", source)[1]
+    last_line = findnext("\n    end\n", source, first_line)[end]
+    Base.include_string(@__MODULE__, source[first_line:last_line])
+end
+end
+
+@testset "CYAX-0232 R-007 errors propagate (T062)" begin
+    ap = CYAxiverse.axion_photon
+    fixture = first(r005_fixtures())
+    identity_path = "spectrum/axion_photon/identity"
+    set!(name, value) = identity -> begin
+        haskey(identity, name) && HDF5.delete_object(identity, name)
+        value === nothing || (identity[name] = value)
+    end
+    r005_with_geometry(fixture, 1) do geom_idx, path, _
+        result = ap._run_local_scan(path)
+        ap.write_axion_photon_result(path, result)
+        @test ap._has_axion_photon(path)
+        # Legacy identity 1: present, not absent.
+        h5open(path, "r+") do file
+            set!("schema_version", 1)(file[identity_path])
+            set!("kinetic_normalization", nothing)(file[identity_path])
+        end
+        @test ap._has_axion_photon(path)
+        @test h5open(file -> ap._validate_axion_photon_group(file["spectrum/axion_photon"]),
+            path, "r")
+        @test_throws ArgumentError ap.write_axion_photon_result(path, result)
+        # Identity 2 without a label: every site raises instead of "absent".
+        h5open(file -> set!("schema_version", 2)(file[identity_path]), path, "r+")
+        @test_throws ArgumentError ap._has_axion_photon(path)
+        @test_throws ArgumentError h5open(file -> ap._has_axion_photon(file), path, "r")
+        @test_throws ArgumentError h5open(
+            file -> ap._validate_axion_photon_group(file["spectrum/axion_photon"]), path, "r")
+        @test_throws ArgumentError ap.write_axion_photon_result(path, result)
+        @test_throws ArgumentError ap.read_axion_photon_result(path)
+        # The invalid group was not overwritten.
+        @test h5open(file -> !haskey(file[identity_path], "kinetic_normalization"), path, "r")
+    end
+
+    # Notebook reader: label errors propagate; other defects still exclude.
+    spectrum = CYAxiverse.structs.PhysicalAxionSpectrum(
+        [1.0, 2.0], [0, 1], zeros(2, 2), [1, -1], [3.0, 4.0],
+        reshape([1, 1, 1, 2], 4, 1), [1], [0.5],
+        reshape([1, 1, 2, 2], 4, 1), [-1], [0.7],
+        -30.0, 200)
+    mktempdir() do root
+        path = joinpath(root, "h11_002", "np_0000001", "cy_0000001", "cyax.h5")
+        mkpath(dirname(path))
+        h5open(file -> create_group(file, "cytools"), path, "cw")
+        _write_result(path, CYAxiverse.structs.GeometryIndex(2, 1, 1), spectrum;
+            prec=200, threshold_log10=-30.0, quartics=true, runtime_seconds=0.1,
+            provisional=false, fK=[5.0, 6.0])
+        row = withenv("CYAXIVERSE_DATA_DIR" => root) do
+            CYAX0232Notebook.read_geometry_row(root, 2, 1, 1)
+        end
+        @test row.status == "excluded"                    # no vacua: an ordinary exclusion
+        h5open(file -> HDF5.delete_object(file["spectrum/physical/metadata"],
+            "kinetic_normalization"), path, "r+")
+        @test_throws ArgumentError withenv("CYAXIVERSE_DATA_DIR" => root) do
+            CYAX0232Notebook.read_geometry_row(root, 2, 1, 1)
+        end
+        h5open(path, "r+") do file
+            file["spectrum/physical/metadata/kinetic_normalization"] = "sugra_c1"
+            file["inflation/schema_version"] = "cyaxiverse-phase3-orientifold-inflation-2.4"
+        end
+        @test_throws ArgumentError withenv("CYAXIVERSE_DATA_DIR" => root) do
+            CYAX0232Notebook.read_geometry_row(root, 2, 1, 1)
+        end
+    end
+end
+
+@testset "CYAX-0232 inflation CSV row labels (T063)" begin
+    label(header, values; path="f.csv", row=2) = inflation_csv_row_label(header,
+        [get(values, column, "x") for column in header]; path, row)
+    rejected(header, values) = try
+        label(header, values)
+        false
+    catch err
+        err isa ArgumentError && occursin("f.csv, row 2", sprint(showerror, err))
+    end
+    # The current version values the reader expects are the writers' constants.
+    @test INFLATION_CSV_CURRENT_VERSIONS == Dict(
+        "contract_version" => INFLATION_SCAN_CONTRACT_VERSION,
+        "diagnostic_schema_version" => INFLATION_DIAGNOSTIC_SCHEMA_VERSION,
+        "shard_schema_version" => INFLATION_SHARD_SCHEMA_VERSION)
+    @test INFLATION_CSV_CURRENT_SCHEMA_BY_ROW_TYPE == Dict(
+        "point" => REFINEMENT_SCHEMA_VERSION, "summary" => REFINEMENT_SCHEMA_VERSION,
+        "flow" => FLOW_SCHEMA_VERSION, "scale" => PILOT_SCHEMA_VERSION,
+        "branch" => PILOT_SCHEMA_VERSION)
+
+    # One test per recorded legacy entry (A3.4), and a contradictory version
+    # value under each recorded header.
+    @test length(INFLATION_CSV_LEGACY_ENTRIES) == 14
+    for entry in INFLATION_CSV_LEGACY_ENTRIES
+        header = INFLATION_CSV_LEGACY_HEADERS[entry.header]
+        values = Dict{String, String}(entry.versions)
+        entry.row_types === nothing || (values["row_type"] = first(entry.row_types))
+        @test label(header, values) == ("legacy_c_half", true)
+        for column in keys(entry.versions)
+            @test rejected(header, merge(values, Dict(column => "99")))
+        end
+        entry.row_types === nothing ||
+            @test rejected(header, merge(values, Dict("row_type" => "unknown")))
+    end
+    # Unknown keys: a recorded header with one extra or one missing column.
+    prep = INFLATION_CSV_LEGACY_HEADERS["PREP_C"]
+    prep_values = Dict("contract_version" => "4", "diagnostic_schema_version" => "1")
+    @test rejected([prep; "unrecorded_column"], prep_values)
+    @test rejected(prep[1:end-1], prep_values)
+    @test_throws ArgumentError inflation_csv_row_label(prep, ["4", "1"]; path="f.csv", row=2)
+
+    # Current layouts.
+    scan = string.(SCAN_PREP_FIELDS)
+    current = Dict("contract_version" => "5", "diagnostic_schema_version" => "2",
+        "kinetic_normalization" => "sugra_c1")
+    @test label(scan, current) == ("sugra_c1", false)
+    @test label(scan, merge(current, Dict("kinetic_normalization" =>
+        "a96_reproduction_raw_radian"))) == ("a96_reproduction_raw_radian", false)
+    for bad in (Dict("kinetic_normalization" => ""),
+            Dict("kinetic_normalization" => "legacy_c_half"),
+            Dict("kinetic_normalization" => "bogus"),
+            Dict("contract_version" => "4"), Dict("diagnostic_schema_version" => "1"))
+        @test rejected(scan, merge(current, bad))
+    end
+    shard = string.(INFLATION_SHARD_FIELDS)
+    @test label(shard, merge(current, Dict("shard_schema_version" => "3"))) == ("sugra_c1", false)
+    @test rejected(shard, merge(current, Dict("shard_schema_version" => "2")))
+    for (fields, row_type, version) in ((PILOT_COMMON_FIELDS, "scale", "7"),
+            (PILOT_COMMON_FIELDS, "branch", "7"), (REFINEMENT_FIELDS, "point", "4"),
+            (REFINEMENT_FIELDS, "summary", "4"), (FLOW_FIELDS, "flow", "2"))
+        values = Dict("row_type" => row_type, "schema_version" => version,
+            "kinetic_normalization" => "sugra_c1")
+        @test label(string.(fields), values) == ("sugra_c1", false)
+        @test rejected(string.(fields), merge(values, Dict("schema_version" => "3")))
+        @test rejected(string.(fields), merge(values,
+            Dict("kinetic_normalization" => "a96_reproduction_raw_radian")))
+    end
+    @test rejected(string.(PILOT_COMMON_FIELDS), Dict("row_type" => "other",
+        "schema_version" => "7", "kinetic_normalization" => "sugra_c1"))
+
+    # The resume readers let these errors propagate (T062).
+    mktempdir() do dir
+        summary = joinpath(dir, "prep.csv")
+        _scan_prep_write_header(summary)
+        open(summary, "a") do io
+            values = merge(Dict(string(f) => "1" for f in SCAN_PREP_FIELDS),
+                Dict("contract_version" => "5", "diagnostic_schema_version" => "2",
+                    "kinetic_normalization" => "", "data_dir" => dir, "status" => "success",
+                    "negative_mode_range" => "all"))
+            println(io, join([values[string(f)] for f in SCAN_PREP_FIELDS], ','))
+        end
+        @test_throws ArgumentError _scan_prep_completed(summary; data_dir=dir, max_branches=1)
+        shard = joinpath(dir, "shards", "shard.csv")
+        inflation_prepare_shard(shard)
+        inflation_append_shard_row(shard, (; contract_version="5",
+            diagnostic_schema_version="2", kinetic_normalization="", h11=2, polytope=1,
+            frst=1, status=:success); run_id="t063", shard_index=1, shard_count=1,
+            attempt=1, started_unix_s=0.0, finished_unix_s=1.0, data_dir=dir, max_branches=1)
+        @test_throws ArgumentError inflation_completed_shard_geometries(
+            dirname(shard); data_dir=dir, max_branches=1)
     end
 end

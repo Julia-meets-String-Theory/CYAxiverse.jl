@@ -177,6 +177,15 @@ begin
         ENV["CYAXIVERSE_DATA_DIR"] = root
         path = CYAxiverse.filestructure.cyax_file(h11, tri, cy)
         isfile(path) || return (; status="excluded", reason="missing_file", row=nothing)
+        # CYAX-0232 R-007: the F1 and F6 label checks run outside the
+        # exclusion handler below, so an invalid label raises instead of
+        # excluding the file. Current and inferred legacy outputs are read.
+        labels = HDF5.h5open(path, "r") do file
+            (; f1 = haskey(file, "spectrum/physical") ?
+                    CYAxiverse.read.f1_label(file["spectrum/physical"], path) : nothing,
+               f6 = haskey(file, "inflation") ?
+                    CYAxiverse.read.f6_label(file["inflation"], path) : nothing)
+        end
         try
             spectrum = CYAxiverse.read.physical_spectrum(h11, tri, cy)
             vacua = CYAxiverse.read.pipeline_vacua(h11, tri, cy)
@@ -187,15 +196,9 @@ begin
             extra = HDF5.h5open(path, "r") do file
                 physical = file["spectrum/physical"]
                 physical_metadata = file["spectrum/physical/metadata"]
-                String(HDF5.read(physical_metadata, "schema_version")) ==
-                    "cyaxiverse-physical-spectrum-3" ||
-                    error("stale physical-spectrum schema")
                 String(HDF5.read(physical_metadata, "fpert_formula")) ==
                     "log10(fpert/GeV)=log10(m/eV)-9-0.5*log10(abs(lambda_self))" ||
                     error("unverified fpert convention")
-                String(HDF5.read(file["inflation/schema_version"])) ==
-                    "cyaxiverse-phase3-orientifold-inflation-2.0" ||
-                    error("stale inflation schema")
                 String(HDF5.read(file["inflation/scale_status"])) == "homotopy_only" ||
                     error("unverified inflation scale status")
                 catastrophes = file["inflation/catastrophes"]
@@ -243,6 +246,8 @@ begin
                 n_qualified_efolds = extra.n_qualified_efolds,
                 h11_minus = extra.h11_minus,
                 qcd_divisor_volume = extra.qcd_divisor_volume,
+                kinetic_normalization_f1 = labels.f1,
+                kinetic_normalization_f6 = labels.f6,
             ))
         catch error
             @warn "Could not read a geometry file; skipping it" h11 tri cy path error
@@ -266,6 +271,13 @@ begin
     loaded_records = [read_geometry_row(db_root_value, h, tri, cy)
         for (h, tri, cy) in all_geometries]
     rows = [record.row for record in loaded_records if record.status == "included"]
+    # CYAX-0232 R-007 combination: pooled rows must share one F1 and one F6
+    # label (stored or inferred).
+    for field in (:kinetic_normalization_f1, :kinetic_normalization_f6)
+        pooled_labels = unique(getproperty(row, field) for row in rows)
+        length(pooled_labels) <= 1 || throw(ArgumentError(
+            "cannot pool geometries with $(field) $(pooled_labels[1]) and $(pooled_labels[2])"))
+    end
     excluded_records = filter(record -> record.status == "excluded", loaded_records)
     skipped_count = length(excluded_records)
     exclusion_reasons = Dict{String,Int}()

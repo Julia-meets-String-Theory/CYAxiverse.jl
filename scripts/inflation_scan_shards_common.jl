@@ -154,10 +154,13 @@ if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
                 throw(ArgumentError("inflation shard is missing resume fields: $path"))
             open(path, "r") do io
                 readline(io)
-                for line in eachline(io)
+                for (line_number, line) in enumerate(eachline(io))
                     isempty(strip(line)) && continue
                     fields = _inflation_shard_csv_fields(line)
-                    length(fields) == length(INFLATION_SHARD_FIELDS) || continue
+                    # CYAX-0232 R-007: checked outside the parse-error skip.
+                    label, _ = inflation_csv_row_label(string.(INFLATION_SHARD_FIELDS),
+                        fields; path, row=line_number + 1)
+                    label == "sugra_c1" || continue
                     fields[positions[:contract_version]] == contract_version || continue
                     fields[positions[:data_dir]] == data_dir || continue
                     try
