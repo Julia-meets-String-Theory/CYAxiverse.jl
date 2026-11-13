@@ -7,6 +7,7 @@ CurrentModule = CYAxiverse
 ```@docs
 CYAxiverse.CYAxiverse
 CYAxiverse.greet_CYAxiverse
+CYAxiverse.KINETIC_NORMALIZATION
 ```
 
 ## `CYAxiverse.filestructure`
@@ -15,10 +16,8 @@ Modules = [CYAxiverse.filestructure]
 Pages = ["filestructure.jl"]
 ```
 ## `CYAxiverse.generate`
-```@autodocs
-Modules = [CYAxiverse.generate]
-Pages = ["generate.jl"]
-```
+Documented on its own page, [`CYAxiverse.generate`](api_generate.md), to keep
+this page within the HTML size threshold set in `docs/make.jl`.
 
 ## `CYAxiverse.structs`
 ```@autodocs

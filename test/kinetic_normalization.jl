@@ -299,3 +299,39 @@ end
         @test r005_offset(key, -R005_H)
     end
 end
+
+@testset "CYAX-0232 R-001 K-argument docstrings (T020)" begin
+    _doc(m, s) = string(Base.Docs.doc(Base.Docs.Binding(m, s)))
+    gen = CYAxiverse.generate
+    # Every API that takes K (approval note 1 included) states the contract.
+    k_apis = [(gen, s) for s in (:hp_spectrum, :leading_hessian_matrix_float64,
+        :leading_hessian_matrix_float64_scaled, :high_precision_leading_hessian,
+        :mass_basis_accuracy, :instanton_hierarchy_diagnostics,
+        :leading_hessian_mass_basis, :leading_hessian_mass_basis_float64,
+        :pq_spectrum, :pq_physical_spectrum, :pq_hybrid_physical_spectrum,
+        :pq_window_spectrum, :pq_physical_mode_count,
+        :physical_mode_inertia_count, :confirm_physical_mode_count,
+        :pq_schur_admissible, :pq_hp_alignment)]
+    append!(k_apis, [(CYAxiverse.inflation_points, :prepare_context),
+        (CYAxiverse.inflation_points, :compare_precision),
+        (CYAxiverse.paper_benchmarks,
+            :local_catastrophe_diagnostic)])
+    for (m, s) in k_apis
+        @test occursin("K-argument", _doc(m, s))
+    end
+    # APIs that take a canonical factor C state its contract.
+    for s in (:leading_hessian_matrix_float64, :leading_hessian_matrix_float64_scaled,
+            :high_precision_leading_hessian, :mass_basis_accuracy,
+            :instanton_hierarchy_diagnostics, :leading_hessian_mass_basis,
+            :leading_hessian_mass_basis_float64, :physical_mode_inertia_count,
+            :confirm_physical_mode_count)
+        @test occursin("Canonical-factor contract", _doc(gen, s))
+    end
+    # read.K is kept, documented as unlabelled and not the physical accessor.
+    k_doc = _doc(CYAxiverse.read, :K)
+    @test occursin("not the physical kinetic-matrix accessor", k_doc)
+    @test occursin("kinetic_matrix", k_doc)
+    for s in (:potential, :oriented_potential)
+        @test occursin("2 Kinv⁻¹", _doc(CYAxiverse.read, s))
+    end
+end

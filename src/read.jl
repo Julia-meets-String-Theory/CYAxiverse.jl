@@ -274,6 +274,10 @@ Read the signed, log-scaled instanton potential and kinetic matrix for one
 geometry. The returned `AxionPotential` preserves the raw HDF5 orientation;
 use [`oriented_potential`](@ref) when a canonical axion-by-instanton layout
 is required.
+
+The returned `K` is the physical kinetic matrix `kinetic_matrix(Kinv) = 2 Kinv⁻¹`
+(c = 1, CYAX-0232) built from the stored `cytools/geometric/Kinv`, so it can be
+passed to any API that takes K under the K-argument contract.
 """
 function potential(geom_idx::GeometryIndex; hilbert = false, validate::Bool = true)
     if hilbert
@@ -436,6 +440,10 @@ The helper accepts the two matrix orientations emitted by older geometry
 files, validates dimensions and finite kinetic/log-scale data, and owns the
 normalization used by numerical screening callers. It does not apply scan
 thresholds or candidate policy.
+
+`K` is the physical kinetic matrix `2 Kinv⁻¹` (c = 1, CYAX-0232) from
+[`potential`](@ref), suitable for any API that takes K under the K-argument
+contract.
 """
 function oriented_potential(geom_idx::GeometryIndex;
         canonicalize_charge_rows::Bool=true)
@@ -478,6 +486,20 @@ function Q(h11::Int,tri::Int,cy::Int=1; hilbert = false)
     return Q
 end
 
+"""
+    K(h11, tri, cy=1; hilbert=false)
+
+Read the dataset `cytools/potential/K` and return it symmetrized as a
+`Hermitian` matrix.
+
+!!! warning
+    This is not the physical kinetic-matrix accessor. No repository writer
+    produces `cytools/potential/K`, and its normalization is not recorded
+    (unlabelled). The physical kinetic matrix at c = 1 (CYAX-0232) is
+    [`kinetic_matrix`](@ref) applied to the stored inverse metric
+    `cytools/geometric/Kinv`, as returned in `potential(geom_idx).K`. The
+    `hilbert` keyword is accepted but ignored.
+"""
 function K(h11::Int,tri::Int,cy::Int=1; hilbert = false)
     K::Matrix{Float64} = h5open(cyax_file(h11,tri,cy), "r") do file
         HDF5.read(file, "cytools/potential/K")

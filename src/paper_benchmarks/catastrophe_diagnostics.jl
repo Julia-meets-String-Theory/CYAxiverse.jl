@@ -216,6 +216,11 @@ Classify a stationary point using the canonical near-null direction and its
 projected second, third, and fourth derivatives.  `Q` has axions in rows and
 instantons in columns; `amplitudes` are the signed coefficients in
 `sum(amplitude * (1 - cos(argument_scale * Q' * theta + phase)))`.
+
+`metric` is a K-argument (CYAX-0232): the kinetic matrix `K` in
+`-(1/2) M_pl² K ∂θ ∂θ` for the coordinates `theta`, used as given and never
+rescaled. With `argument_scale = 1` (period-one θ) and stored CYTools data at
+c = 1, it is `CYAxiverse.kinetic_matrix(Kinv)`, which is `2 Kinv⁻¹`.
 """
 function local_catastrophe_diagnostic(theta::AbstractVector, Q::AbstractMatrix,
         amplitudes::AbstractVector, metric::AbstractMatrix;
