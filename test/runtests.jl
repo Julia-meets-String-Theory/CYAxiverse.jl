@@ -403,7 +403,9 @@ end
     mktempdir() do root
         path = joinpath(root, "report.csv")
         pilot_prepare_csv(path, PILOT_SUMMARY_FIELDS)
-        pilot_append_csv(path, (; row_type=:scale, h11=8, polytope=1,
+        # CYAX-0232 A5: completed rows carry the current version and label.
+        pilot_append_csv(path, (; row_type=:scale, schema_version=PILOT_SCHEMA_VERSION,
+            kinetic_normalization="sugra_c1", h11=8, polytope=1,
             frst=1, sampled_scale=1.0), PILOT_SUMMARY_FIELDS)
         @test length(readlines(path)) == 2
         @test _pilot_completed_scales(path) == Set([(8, 1, 1, 1.0)])

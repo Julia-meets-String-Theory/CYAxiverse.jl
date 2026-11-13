@@ -189,9 +189,29 @@ end
 """Hash a configuration using the persisted Julia representation."""
 _physical_spectrum_config_digest(config) = bytes2hex(sha256(repr(config)))
 
-"""Return whether an HDF5 file contains a complete matching physical spectrum."""
+"""
+    _existing_physical_label(path) -> Union{Nothing, Tuple{Symbol, Bool}}
+
+Return the label of an existing `spectrum/physical` group (CYAX-0232 R-007,
+`CYAxiverse.read.f1_label`), or `nothing` when there is none. R-007 errors
+propagate.
+"""
+function _existing_physical_label(path)
+    isfile(path) || return nothing
+    h5open(path, "r") do file
+        haskey(file, "spectrum/physical") || return nothing
+        CYAxiverse.read.f1_label(file["spectrum/physical"], path)
+    end
+end
+
+"""
+Return whether an HDF5 file contains a complete matching physical spectrum.
+An output labelled or inferred other than `:sugra_c1` is never complete
+(CYAX-0232 R-007).
+"""
 function _has_physical_spectrum(path; config=nothing)
     isfile(path) || return false
+    _existing_physical_label(path) == (:sugra_c1, false) || return false
     h5open(path, "r") do file
         haskey(file, "spectrum/physical/m") || return false
         haskey(file, "spectrum/physical/mode_indices") || return false
@@ -393,13 +413,21 @@ function run_batch(options)
     for (index, geom_idx) in enumerate(geoms)
         path = _output_path(root, geom_idx)
         @printf("[%d/%d] h11=%d polytope=%d frst=%d ", index, length(geoms), geom_idx.h11, geom_idx.polytope, geom_idx.frst)
-        if _has_physical_spectrum(path; config=spectrum_config) && !options[:force]
-            println("skipped")
-            _append_summary(summary, geom_idx; status="skipped", prec=options[:prec], threshold_log10=threshold, quartics=options[:quartics], output=path)
-            continue
-        end
         started = time()
         try
+            # CYAX-0232 R-007 batch resume, inside the per-geometry `try`: an
+            # output labelled or inferred other than :sugra_c1 is not complete;
+            # it is recomputed only with --force, otherwise reported as failed.
+            existing = _existing_physical_label(path)
+            if existing !== nothing && existing != (:sugra_c1, false) && !options[:force]
+                throw(ArgumentError("existing spectrum/physical has kinetic_normalization " *
+                    "$(existing[1]) (inferred=$(existing[2])); pass --force to recompute"))
+            end
+            if _has_physical_spectrum(path; config=spectrum_config) && !options[:force]
+                println("skipped")
+                _append_summary(summary, geom_idx; status="skipped", prec=options[:prec], threshold_log10=threshold, quartics=options[:quartics], output=path)
+                continue
+            end
             potential = CYAxiverse.read.potential(geom_idx)
             warning_messages = String[]
             spectrum = Logging.with_logger(_BatchWarningLogger(warning_messages)) do

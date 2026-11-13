@@ -11,9 +11,21 @@ function option_value(name, default)
     ARGS[index + 1]
 end
 
-"""Copy one legacy physical spectrum into its corresponding `cyax.h5` file."""
+"""
+Copy one legacy physical spectrum into its corresponding `cyax.h5` file.
+
+A layout migration (CYAX-0232 R-007): it copies values and metadata as they
+are, adds no `kinetic_normalization` label and no `schema_version`, and
+refuses a target whose `spectrum/physical` is a current-version (`-4`)
+output. A target that already holds a legacy spectrum is skipped.
+"""
 function migrate_file!(legacy_path, target_path)
     h5open(target_path, "r+") do target
+        if haskey(target, "spectrum/physical")
+            label, _ = CYAxiverse.read.f1_label(target["spectrum/physical"], target_path)
+            label === :sugra_c1 && throw(ArgumentError(
+                "refusing to migrate into the current-version spectrum/physical of $(target_path)"))
+        end
         haskey(target, "spectrum/physical/m") && return false
         h5open(legacy_path, "r") do legacy
             spectrum = haskey(target, "spectrum") ? target["spectrum"] : create_group(target, "spectrum")
@@ -78,4 +90,6 @@ function main()
     return 0
 end
 
-exit(main())
+if abspath(PROGRAM_FILE) == @__FILE__
+    exit(main())
+end

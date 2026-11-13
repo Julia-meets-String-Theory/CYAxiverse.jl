@@ -2198,28 +2198,39 @@ function run_batch_axion_photon(; data_dir=nothing,
         status::Symbol, error::String}}()
     for index in indices
         path = geometry_path(index; data_dir=root)
-        if skip_complete && !force && _has_axion_photon(path)
-            stored_configuration = h5open(path, "r") do file
-                ap = file["spectrum/axion_photon"]::HDF5.Group
-                try
-                    _read_axion_photon_identity(ap).configuration
-                finally
-                    close(ap)
+        try
+            # CYAX-0232 R-007 batch resume, inside the per-geometry `try`
+            # (approval note 4): an R-007 rejection, a legacy result or a
+            # configuration mismatch records :failed and the batch continues.
+            if skip_complete && !force && _has_axion_photon(path)
+                stored_identity = h5open(path, "r") do file
+                    ap = file["spectrum/axion_photon"]::HDF5.Group
+                    try
+                        _read_axion_photon_identity(ap)
+                    finally
+                        close(ap)
+                    end
                 end
-            end
-            if _configuration_matches_request(
-                    stored_configuration, requested_configuration)
-                verbose && println("skip $path (axion_photon exists)")
-                push!(summaries, (index=index, path=path, status=:skipped, error=""))
+                if stored_identity.schema_version != _AXION_PHOTON_IDENTITY_SCHEMA_VERSION
+                    label, inferred = f3_identity_label(stored_identity.schema_version)
+                    message = "existing axion-photon result has kinetic_normalization " *
+                        "$(label) (inferred=$(inferred)); use force=true to recompute"
+                    verbose && println(message)
+                    push!(summaries, (index=index, path=path, status=:failed, error=message))
+                    continue
+                end
+                if _configuration_matches_request(
+                        stored_identity.configuration, requested_configuration)
+                    verbose && println("skip $path (axion_photon exists)")
+                    push!(summaries, (index=index, path=path, status=:skipped, error=""))
+                    continue
+                end
+                message = "valid axion-photon result has a different configuration; " *
+                    "use force=true to recompute"
+                verbose && println(message)
+                push!(summaries, (index=index, path=path, status=:failed, error=message))
                 continue
             end
-            message = "valid axion-photon result has a different configuration; " *
-                "use force=true to recompute"
-            verbose && println(message)
-            push!(summaries, (index=index, path=path, status=:failed, error=message))
-            continue
-        end
-        try
             result = _run_local_scan(path; T=T,
                 em_divisor_index=em_divisor_index,
                 light_threshold_eV=light_threshold_eV,

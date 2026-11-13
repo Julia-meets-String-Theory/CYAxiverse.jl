@@ -311,6 +311,10 @@ function _quartic_examine(path, geom_idx)
     h5open(path, "r") do file
         haskey(file, "spectrum") || return nothing
         spectrum = file["spectrum"]
+        # CYAX-0232 R-007: a layout migration refuses a current-version F2
+        # target (`spectrum/metadata`, written in the current index order).
+        haskey(spectrum, "metadata") && throw(ArgumentError(
+            "refusing to migrate a current-version F2 spectrum group in $(path)"))
         for kind in QUARTIC_KINDS
             name = String(kind)
             haskey(spectrum, name) || continue

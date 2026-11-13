@@ -679,6 +679,44 @@ call it on every row outside their parse-error handling, so its errors
 propagate, and only `"sugra_c1"` rows count as complete. The scale-continuation
 reader `_pilot_completed_scales` is T066 (A5).
 
+### Combination, resume and migrations (T064–T067)
+
+**T064.** Every combiner in the reader inventory rejects mixed labels with an
+`ArgumentError` naming both: `write_scan_csv` (T032), Appendix B,
+`inflation_merge_shards`, the pilot report and `merge_orientifold_shards.py`
+(T037), the gap analysis (T061), and the notebook's pooled rows, now
+`check_pooled_labels` (tested by extracting it from the notebook). The
+inflation resume readers do not combine values: after T063 their rows are
+`sugra_c1` or filtered out.
+
+**T065.** Batch resume, one test per runner with a legacy output with and
+without the overwrite option:
+- `batch_physical_spectrum.jl` `run_batch`: the existence and label checks
+  run inside the per-geometry `try`; a legacy or non-`sugra_c1` output records
+  `"failed"` with the stored label unless `--force`, which rewrites it;
+  `_has_physical_spectrum` is false for such outputs.
+- `run_batch_axion_photon`: existence, label and configuration checks inside
+  the per-geometry `try`; a legacy result or an R-007 rejection records
+  `:failed` and the batch continues (approval note 4); `force=true` recomputes.
+- `build_orientifold_vacua_inflation.jl`: `_has_inflation_group` is false for
+  a non-`sugra_c1` group; `run_pipeline2` keeps `:blocked` and its
+  `vacua_error` names the stored F6 label; the CLI accepts `--force`.
+- `inflation_scan_prep.jl`: legacy rows are not complete (T063), and
+  `--append-summary` and shard append refuse a legacy header (existing exact
+  header checks).
+
+**T066 (A5).** `_pilot_completed_scales` raises on a missing required
+column, a field-count mismatch and a parse error, checks every row's label,
+and counts only `sugra_c1` rows. `_pilot_resume_label_check` runs on the
+report and the shard file before either `pilot_prepare_csv` header check and
+refuses `--resume` with the stored or inferred label (a header-only legacy
+file is named by its header).
+
+**T067.** `migrate_legacy_spectra.jl` (now guarded by `PROGRAM_FILE`) adds no
+label or version, keeps a copied version, skips a legacy target and refuses a
+current-version target; `migrate_quartic_index_ordering.jl` refuses a
+current-version F2 group.
+
 ### R-010 audit
 
 `test/fixtures/scientific_certification` (`backend_probe.jl`, `oracles.jl`,
@@ -703,6 +741,7 @@ runtests.jl:131–146 with `base_K = 2I` (passes) and `base_K = I`
 | runtests.jl:645–704, full.jl:784 (stored `Kinv = I`) | expected values follow R-005 factors where asserted | R-005 |
 | full.jl:551 `schema_version == "…-3"` | `"…-4"`, plus the label fields | R-006 (T031) |
 | full.jl:451 `inflation/schema_version == "…-2.3"` | `"…-2.4"`, plus the label | R-006 (T035) |
+| runtests.jl:405 pilot report row | the appended `scale` row carries `schema_version` and `kinetic_normalization` | A5: unlabelled rows now raise (T066) |
 
 G1 lists every other changed test with its reason.
 

@@ -173,6 +173,22 @@ begin
     inclusion/exclusion record when a file is missing or cannot be read, so
     exclusions are counted rather than silently dropped.
     """
+    """
+        check_pooled_labels(rows)
+
+    CYAX-0232 R-007 combination: pooled rows must share one F1 and one F6
+    label (stored or inferred). Throw an `ArgumentError` naming both labels
+    otherwise; return `rows`.
+    """
+    function check_pooled_labels(rows)
+        for field in (:kinetic_normalization_f1, :kinetic_normalization_f6)
+            pooled_labels = unique(getproperty(row, field) for row in rows)
+            length(pooled_labels) <= 1 || throw(ArgumentError(
+                "cannot pool geometries with $(field) $(pooled_labels[1]) and $(pooled_labels[2])"))
+        end
+        rows
+    end
+
     function read_geometry_row(root::AbstractString, h11::Int, tri::Int, cy::Int)
         ENV["CYAXIVERSE_DATA_DIR"] = root
         path = CYAxiverse.filestructure.cyax_file(h11, tri, cy)
@@ -270,14 +286,8 @@ begin
     all_geometries = reduce(vcat, (geometry_index[h] for h in h11_levels); init = NTuple{3,Int}[])
     loaded_records = [read_geometry_row(db_root_value, h, tri, cy)
         for (h, tri, cy) in all_geometries]
-    rows = [record.row for record in loaded_records if record.status == "included"]
-    # CYAX-0232 R-007 combination: pooled rows must share one F1 and one F6
-    # label (stored or inferred).
-    for field in (:kinetic_normalization_f1, :kinetic_normalization_f6)
-        pooled_labels = unique(getproperty(row, field) for row in rows)
-        length(pooled_labels) <= 1 || throw(ArgumentError(
-            "cannot pool geometries with $(field) $(pooled_labels[1]) and $(pooled_labels[2])"))
-    end
+    rows = check_pooled_labels([record.row for record in loaded_records
+        if record.status == "included"])
     excluded_records = filter(record -> record.status == "excluded", loaded_records)
     skipped_count = length(excluded_records)
     exclusion_reasons = Dict{String,Int}()

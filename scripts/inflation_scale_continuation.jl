@@ -1473,6 +1473,15 @@ function pilot_append_csv(path::AbstractString, row, fields)
     end
 end
 
+"""
+    _pilot_completed_scales(path)
+
+Return the `(h11, polytope, frst, sampled_scale)` keys of completed `scale`
+rows. CYAX-0232 A5: every row passes `inflation_csv_row_label`; a row
+labelled or inferred other than `"sugra_c1"` is not complete; a missing
+required column, a field-count mismatch and a parse error raise instead of
+being skipped.
+"""
 function _pilot_completed_scales(path::AbstractString)
     completed = Set{Tuple{Int, Int, Int, Float64}}()
     isfile(path) || return completed
@@ -1481,21 +1490,54 @@ function _pilot_completed_scales(path::AbstractString)
     header = _pilot_csv_fields(lines[1])
     positions = Dict(Symbol(name) => index for (index, name) in enumerate(header))
     required = (:row_type, :h11, :polytope, :frst, :sampled_scale)
-    all(name -> haskey(positions, name), required) || return completed
-    for line in @view lines[2:end]
+    missing_columns = [name for name in required if !haskey(positions, name)]
+    isempty(missing_columns) || throw(ArgumentError(
+        "pilot CSV $(path) lacks resume columns $(join(missing_columns, ", "))"))
+    for (line_number, line) in enumerate(lines)
+        line_number == 1 && continue
         isempty(strip(line)) && continue
         fields = _pilot_csv_fields(line)
-        length(fields) == length(header) || continue
+        label, _ = inflation_csv_row_label(header, fields; path, row=line_number)
+        label == "sugra_c1" || continue
         fields[positions[:row_type]] == "scale" || continue
-        try
-            push!(completed, (parse(Int, fields[positions[:h11]]),
-                parse(Int, fields[positions[:polytope]]),
-                parse(Int, fields[positions[:frst]]),
-                parse(Float64, fields[positions[:sampled_scale]])))
-        catch
-        end
+        push!(completed, (parse(Int, fields[positions[:h11]]),
+            parse(Int, fields[positions[:polytope]]),
+            parse(Int, fields[positions[:frst]]),
+            parse(Float64, fields[positions[:sampled_scale]])))
     end
     completed
+end
+
+"""
+    _pilot_resume_label_check(path)
+
+CYAX-0232 A5: refuse `--resume` on a report or shard file holding a row
+labelled or inferred other than `"sugra_c1"`, naming the label. A legacy file
+without rows is named by its header. Runs before the header comparison in
+`pilot_prepare_csv`; the remedy is a new report path and shard directory.
+"""
+function _pilot_resume_label_check(path::AbstractString)
+    isfile(path) || return nothing
+    lines = readlines(path)
+    isempty(lines) && return nothing
+    header = _pilot_csv_fields(lines[1])
+    refuse(label, inferred, where_) = throw(ArgumentError(
+        "--resume refused: $(where_) has kinetic_normalization $(label) " *
+        "(inferred=$(inferred)); use a new report path and shard directory"))
+    if length(lines) == 1
+        "kinetic_normalization" in header && return nothing
+        any(==(header), values(INFLATION_CSV_LEGACY_HEADERS)) &&
+            refuse("legacy_c_half", true, path)
+        return nothing
+    end
+    for (line_number, line) in enumerate(lines)
+        line_number == 1 && continue
+        isempty(strip(line)) && continue
+        label, inferred = inflation_csv_row_label(header, _pilot_csv_fields(line);
+            path, row=line_number)
+        label == "sugra_c1" || refuse(label, inferred, "$(path), row $(line_number)")
+    end
+    nothing
 end
 
 function _pilot_empty_classification()
@@ -2038,6 +2080,11 @@ function run_scale_continuation(options)
     if options[:resume]
         isfile(report) || throw(ArgumentError("--resume requires an existing report: $report"))
         isfile(shard_path) || throw(ArgumentError("--resume requires an existing shard: $shard_path"))
+    end
+    if options[:resume]
+        # CYAX-0232 A5: label checks on both files before either header check.
+        _pilot_resume_label_check(report)
+        _pilot_resume_label_check(shard_path)
     end
     pilot_prepare_csv(report, PILOT_SUMMARY_FIELDS; append=options[:resume])
     pilot_prepare_csv(shard_path, PILOT_BRANCH_FIELDS; append=options[:resume])

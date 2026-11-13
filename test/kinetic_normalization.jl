@@ -1327,8 +1327,9 @@ end
 module CYAX0232Notebook
 using CYAxiverse, HDF5
 let source = read(joinpath(@__DIR__, "..", "notebooks", "orientifold_axiverse_statistics.jl"), String)
-    first_line = findfirst("    function read_geometry_row(", source)[1]
-    last_line = findnext("\n    end\n", source, first_line)[end]
+    first_line = findfirst("    function check_pooled_labels(", source)[1]
+    last_line = findnext("\n    end\n", source,
+        findfirst("    function read_geometry_row(", source)[1])[end]
     Base.include_string(@__MODULE__, source[first_line:last_line])
 end
 end
@@ -1487,5 +1488,251 @@ end
             attempt=1, started_unix_s=0.0, finished_unix_s=1.0, data_dir=dir, max_branches=1)
         @test_throws ArgumentError inflation_completed_shard_geometries(
             dirname(shard); data_dir=dir, max_branches=1)
+    end
+end
+
+@testset "CYAX-0232 combination rule (T064)" begin
+    # Every combiner in the reader inventory rejects mixed labels with an
+    # ArgumentError naming both; the others are tested with their writers:
+    # write_scan_csv (T032), appendix B, inflation_merge_shards and the pilot
+    # report (T037), the gap analysis and both shard merges (Python, T037/T061).
+    row(f1, f6) = (; kinetic_normalization_f1=f1, kinetic_normalization_f6=f6)
+    rows = [row((:sugra_c1, false), (:sugra_c1, false)),
+        row((:sugra_c1, false), (:sugra_c1, false))]
+    @test CYAX0232Notebook.check_pooled_labels(rows) === rows
+    for mixed in ([rows[1], row((:legacy_c_half, true), (:sugra_c1, false))],
+            [rows[1], row((:sugra_c1, false), (:legacy_c_half, true))])
+        err = try
+            CYAX0232Notebook.check_pooled_labels(mixed)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("sugra_c1", sprint(showerror, err)) &&
+            occursin("legacy_c_half", sprint(showerror, err))
+    end
+end
+
+@testset "CYAX-0232 batch resume (T065)" begin
+    fixture = first(r005_fixtures())
+
+    # F1: run_batch.
+    r005_with_geometry(fixture, 1) do geom_idx, path, root
+        summary = joinpath(root, "summary.csv")
+        options(force) = (data_dir=root, h11=nothing, limit=nothing, offset=0,
+            geometries=[geom_idx], prec=200, threshold_log10=nothing, quartics=false,
+            force, summary, append_summary=false, hilbert=false)
+        run(force) = redirect_stdout(devnull) do
+            run_batch(options(force))
+        end
+        last_row() = Dict(zip(split(readlines(summary)[1], ','),
+            split(readlines(summary)[end], ',')))
+        @test run(false)
+        @test run(false)                                   # complete: skipped
+        @test last_row()["status"] == "skipped"
+        h5open(path, "r+") do file
+            metadata = file["spectrum/physical/metadata"]
+            HDF5.delete_object(metadata, "kinetic_normalization")
+            HDF5.delete_object(metadata, "schema_version")
+            metadata["schema_version"] = "cyaxiverse-physical-spectrum-3"
+        end
+        @test !run(false)                                  # legacy, no --force
+        @test last_row()["status"] == "failed"
+        @test occursin("legacy_c_half", readlines(summary)[end])
+        @test CYAxiverse.read.stored_kinetic_normalization(path; family=:f1) ==
+            (:legacy_c_half, true)
+        @test run(true)                                    # --force rewrites
+        @test CYAxiverse.read.stored_kinetic_normalization(path; family=:f1) ==
+            (:sugra_c1, false)
+        h5open(file -> HDF5.delete_object(file["spectrum/physical/metadata"],
+            "kinetic_normalization"), path, "r+")
+        @test !run(false)                                  # invalid: failed, no crash
+        @test last_row()["status"] == "failed"
+    end
+
+    # F3: run_batch_axion_photon.
+    ap = CYAxiverse.axion_photon
+    identity_path = "spectrum/axion_photon/identity"
+    r005_with_geometry(fixture, 1) do geom_idx, path, root
+        batch(force) = only(ap.run_batch_axion_photon(data_dir=root, h11s=(fixture.h11,),
+            limit_per_h11=10, require_complete=false, force=force))
+        @test batch(false).status == :written
+        @test batch(false).status == :skipped
+        h5open(path, "r+") do file
+            identity = file[identity_path]
+            HDF5.delete_object(identity, "schema_version")
+            identity["schema_version"] = 1
+            HDF5.delete_object(identity, "kinetic_normalization")
+        end
+        legacy = batch(false)
+        @test legacy.status == :failed && occursin("legacy_c_half", legacy.error)
+        @test batch(true).status == :written
+        @test CYAxiverse.read.stored_kinetic_normalization(path; family=:f3) ==
+            (:sugra_c1, false)
+        h5open(file -> HDF5.delete_object(file[identity_path], "kinetic_normalization"),
+            path, "r+")
+        invalid = batch(false)
+        @test invalid.status == :failed && occursin("kinetic_normalization", invalid.error)
+    end
+
+    # F6: _has_inflation_group and run_pipeline2's :blocked message.
+    r005_with_geometry(T035_INFL, 1) do geom_idx, path, root
+        write_inflation_group!(geom_idx,
+            (; status=:success, result=run_geometry(geom_idx; max_branches=1_000)),
+            (; status=:not_run, message="T065"); catastrophe_settings=(; max_branches=1_000),
+            efold_settings=(; precision_bits=128), force=true,
+            pipeline_config_digest="t065")
+        @test _existing_inflation_label(path) == (:sugra_c1, false)
+        h5open(path, "r+") do file
+            inflation = file["inflation"]
+            HDF5.delete_object(inflation, "kinetic_normalization")
+            HDF5.delete_object(inflation, "schema_version")
+            inflation["schema_version"] = "cyaxiverse-phase3-orientifold-inflation-2.3"
+        end
+        @test _existing_inflation_label(path) == (:legacy_c_half, true)
+        @test !_has_inflation_group(path)
+        blocked = redirect_stdout(devnull) do
+            only(run_pipeline2(root; h11=T035_INFL.h11))
+        end
+        @test blocked.vacua_status == :blocked
+        @test occursin("legacy_c_half", blocked.vacua_error)
+        @test _phase3_cli_data_dir(["--force", root]) == _phase3_cli_data_dir([root])
+    end
+
+    # Scan-prep: legacy rows are not complete; no append onto a legacy summary.
+    mktempdir() do dir
+        header = INFLATION_CSV_LEGACY_HEADERS["PREP_C"]
+        values = merge(Dict(c => "1" for c in header), Dict("contract_version" => "4",
+            "diagnostic_schema_version" => "1", "data_dir" => dir, "status" => "success",
+            "negative_mode_range" => "all", "max_branches" => "1"))
+        legacy = joinpath(dir, "legacy.csv")
+        write(legacy, join(header, ',') * "\n" * join([values[c] for c in header], ',') * "\n")
+        @test isempty(_scan_prep_completed(legacy; data_dir=dir, max_branches=1))
+        @test_throws ArgumentError _scan_prep_write_header(legacy; append=true)
+    end
+end
+
+@testset "CYAX-0232 scale-continuation resume (T066)" begin
+    r005_with_geometry(T035_INFL, 1) do geom_idx, path, root
+        report = joinpath(root, "pilot", "report.csv")
+        shards = joinpath(root, "pilot", "shards")
+        args(extra...) = _pilot_parse_args(["--data-dir", root, "--geometry",
+            "$(geom_idx.h11),$(geom_idx.polytope),$(geom_idx.frst)",
+            "--scale-grid", "1.0", "--scale-status", "homotopy_only",
+            "--report", report, "--shard-dir", shards, "--run-id", "t066", extra...])
+        redirect_stdout(devnull) do
+            run_scale_continuation(args())
+        end
+        completed = _pilot_completed_scales(report)
+        @test (geom_idx.h11, geom_idx.polytope, geom_idx.frst, 1.0) in completed
+        redirect_stdout(devnull) do                       # current files resume
+            run_scale_continuation(args("--resume"))
+        end
+
+        # A legacy report (pilot 6) is refused by label, before the header check.
+        legacy_header = INFLATION_CSV_LEGACY_HEADERS["PILOT_6"]
+        legacy_row = [c == "row_type" ? "scale" : c == "schema_version" ? "6" :
+            c in ("h11", "polytope", "frst") ? "1" : c == "sampled_scale" ? "1.0" : ""
+            for c in legacy_header]
+        cp(report, report * ".current"; force=true)
+        write(report, join(legacy_header, ',') * "\n" * join(legacy_row, ',') * "\n")
+        err = try
+            run_scale_continuation(args("--resume"))
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("legacy_c_half", sprint(showerror, err))
+        @test !occursin("schema mismatch", sprint(showerror, err))
+        write(report, join(legacy_header, ',') * "\n")       # header-only legacy file
+        @test_throws ArgumentError _pilot_resume_label_check(report)
+        @test isempty(_pilot_completed_scales(report))
+        write(report, join(legacy_header, ',') * "\n" * join(legacy_row, ',') * "\n")
+        @test isempty(_pilot_completed_scales(report))       # legacy rows: not complete
+
+        # The three former silent skips now raise.
+        current = readlines(report * ".current")
+        header = current[1]
+        write(report, replace(header, "sampled_scale" => "other_scale") * "\n" * current[2] * "\n")
+        @test_throws ArgumentError _pilot_completed_scales(report)   # missing column
+        write(report, header * "\n" * current[2] * ",extra\n")
+        @test_throws ArgumentError _pilot_completed_scales(report)   # field count
+        columns = _pilot_csv_fields(header)
+        fields = _pilot_csv_fields(current[2])
+        fields[findfirst(==("h11"), columns)] = "not-an-int"
+        write(report, header * "\n" * join(fields, ',') * "\n")
+        @test_throws ArgumentError _pilot_completed_scales(report)   # parse error
+    end
+end
+
+# The legacy-spectrum migration defines `main`; keep it in its own module.
+module CYAX0232Migrate
+include(joinpath(@__DIR__, "..", "scripts", "migrate_legacy_spectra.jl"))
+end
+
+@testset "CYAX-0232 layout migrations (T067)" begin
+    r = CYAxiverse.read
+    function legacy_source(path; version=nothing)
+        h5open(path, "w") do file
+            physical = create_group(create_group(create_group(file, "cytools"),
+                "spectrum"), "physical")
+            physical["m"] = [1.0]
+            physical["mode_indices"] = [1]
+            physical["fK_log10"] = [2.0]
+            metadata = create_group(file, "metadata")
+            for name in ("threshold_log10", "prec", "provisional", "runtime_seconds")
+                metadata[name] = 1
+            end
+            version === nothing || (metadata["schema_version"] = version)
+        end
+        path
+    end
+    mktempdir() do dir
+        source = legacy_source(joinpath(dir, "legacy.h5"))
+        target = joinpath(dir, "cyax.h5")
+        h5open(file -> create_group(file, "cytools"), target, "w")
+        @test CYAX0232Migrate.migrate_file!(source, target)
+        h5open(target, "r") do file
+            metadata = file["spectrum/physical/metadata"]
+            @test !haskey(metadata, "kinetic_normalization")      # no label added
+            @test !haskey(metadata, "schema_version")             # no version added
+        end
+        @test r.stored_kinetic_normalization(target; family=:f1) == (:legacy_c_half, true)
+        @test !CYAX0232Migrate.migrate_file!(source, target)      # legacy target: skipped
+
+        # A versioned source keeps its version.
+        versioned = legacy_source(joinpath(dir, "legacy3.h5");
+            version="cyaxiverse-physical-spectrum-3")
+        target3 = joinpath(dir, "cyax3.h5")
+        h5open(file -> create_group(file, "cytools"), target3, "w")
+        @test CYAX0232Migrate.migrate_file!(versioned, target3)
+        @test h5open(file -> read(file["spectrum/physical/metadata/schema_version"]),
+            target3) == "cyaxiverse-physical-spectrum-3"
+
+        # A current-version target is refused.
+        current = joinpath(dir, "cyax4.h5")
+        h5open(file -> create_group(file, "cytools"), current, "w")
+        spectrum = CYAxiverse.structs.PhysicalAxionSpectrum(
+            [1.0, 2.0], [0, 1], zeros(2, 2), [1, -1], [3.0, 4.0],
+            reshape([1, 1, 1, 2], 4, 1), [1], [0.5],
+            reshape([1, 1, 2, 2], 4, 1), [-1], [0.7], -30.0, 200)
+        _write_result(current, CYAxiverse.structs.GeometryIndex(2, 1, 1), spectrum;
+            prec=200, threshold_log10=-30.0, quartics=false, runtime_seconds=0.1,
+            provisional=false, fK=[5.0, 6.0])
+        @test_throws ArgumentError CYAX0232Migrate.migrate_file!(source, current)
+
+        # Quartic-index migration: a current-version F2 group is refused.
+        f2 = joinpath(dir, "f2.h5")
+        h5open(f2, "w") do file
+            spectrum_group = create_group(file, "spectrum")
+            spectrum_group["quart31/index"] = reshape([1, 1, 1, 2], 4, 1)
+            spectrum_group["metadata/schema_version"] = "cyaxiverse-spectrum-groups-1"
+        end
+        @test_throws ArgumentError _quartic_examine(f2, CYAxiverse.structs.GeometryIndex(2, 1, 1))
+        h5open(file -> HDF5.delete_object(file["spectrum"], "metadata"), f2, "r+")
+        records, _ = _quartic_examine(f2, CYAxiverse.structs.GeometryIndex(2, 1, 1))
+        @test !isempty(records)
     end
 end
