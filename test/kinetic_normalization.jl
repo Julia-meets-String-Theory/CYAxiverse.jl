@@ -1789,8 +1789,10 @@ end
         @test labelled(ai.n8_hilltop_probe(1e-7; sample_count=2), A96)
         @test labelled(ai.n8_slow_roll_trajectory(1e-7; max_efolds=1e-3,
             sample_count=1), A96)
+        # Explicit tolerances: the precision-derived defaults (reltol 1e-32 at
+        # 64 bits) are below the Rodas5P error floor and never converge.
         short = ai.n8_author_trajectory(1e-7; precision_bits=64, max_time=1e-6,
-            sample_count=1)
+            sample_count=1, reltol=1e-8, abstol=1e-10, maxiters=10_000)
         @test labelled(short, A96)
         # The full equation-(19) path uses N8_K_RAW; the default path is K-free.
         @test labelled(ai.n8_full_derivatives(critical.theta, k), A96)
