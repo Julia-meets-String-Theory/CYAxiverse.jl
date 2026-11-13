@@ -1,23 +1,17 @@
 # CYAX-0232: the c = 1 supergravity axion kinetic normalization.
 # R-003 (named source reproduction), R-004 (factor contract and orientation)
-# and the R-005 c = 1/2 comparison for the routes these fixtures exercise.
+# and R-005 (scaling contract against a c = 1/2 evaluation of the same inputs).
 # Fixture inputs are pinned in specs/0232-kinetic-normalization/plan.md.
 
 using LinearAlgebra
 
-# Eq. 3.18 instanton scales, as `leading_axion_reference_data` builds them
-# (fuzzy_axions_model_stage.jl): log10[τ e^{-2πτ}] plus the constant
-# prefactor log10(8π sqrt(P) m_{3/2} / V), with m_{3/2} in Planck units.
-function _cyax0232_eq318_log10_lambda4(tau, cy_volume, gs, w0)
-    PB = CYAxiverse.paper_benchmarks
-    prefactor = PB.fuzzy_axion_prefactor_P(gs)
-    gravitino = PB.fuzzy_axion_gravitino_mass(prefactor,
-        PB.fuzzy_axion_kahler_potential(cy_volume), w0; mplanck_ev=1.0)
-    L = PB.instanton_scales(Float64.(tau), 1.0)
-    L[2, :] .+= log10(8π) + 0.5 * log10(Float64(prefactor)) +
-        log10(Float64(gravitino)) - log10(Float64(cy_volume))
-    (; L, prefactor, gravitino)
-end
+# The R-005 comparison harness (T013): `r005_route_outputs(; kinv_scale)` and
+# the Eq. 3.18 helper `r005_eq318`. It needs `run_batch`, `run_geometry` and
+# `write_inflation_group!`, which runtests.jl includes from scripts/.
+include(joinpath(@__DIR__, "..", "scripts", "r005_scaling_routes.jl"))
+
+_cyax0232_eq318_log10_lambda4(tau, cy_volume, gs, w0) =
+    r005_eq318(tau, cy_volume; gs, w0)
 
 @testset "CYAX-0232 R-004 kinetic factor contract and orientation" begin
     read_api = CYAxiverse.read
@@ -142,4 +136,166 @@ end
     @test !within(c_half.f_qcd, 3.2e15, 0.20)
     @test !within(c_half.f_fuzzy, 1.2e16, 0.20)
     @test !within(c_half.m_qcd, 1.8e-9, 0.05)
+end
+
+# R-005 rows (T014–T016). One c = 1 and one c = 1/2 evaluation of every route;
+# `h = ½ log10 2`. Log10 fields are compared by offset (1e-10 absolute),
+# linear fields by ratio (1e-10 relative, normwise). Counts and
+# classifications marked "reported" in the spec are reported by
+# `scripts/r005_scaling_harness.jl report`, not asserted here.
+const R005_H = 0.5 * log10(2.0)
+const R005_C1 = r005_route_outputs(; kinv_scale=1)
+const R005_CHALF = r005_route_outputs(; kinv_scale=2)
+
+r005_array(x) = x isa Number ? [Float64(x)] : Float64.(x)
+
+function r005_offset(key, offset; c1=R005_C1, chalf=R005_CHALF)
+    a, b = r005_array(c1[key]), r005_array(chalf[key])
+    size(a) == size(b) || return false
+    finite = isfinite.(a)
+    finite == isfinite.(b) || return false
+    a[.!finite] == b[.!finite] || return false
+    any(finite) || return false
+    maximum(abs.(a[finite] .- b[finite] .- offset)) <= 1e-10
+end
+
+function r005_ratio(key, ratio; c1=R005_C1, chalf=R005_CHALF)
+    a, b = r005_array(c1[key]), r005_array(chalf[key])
+    size(a) == size(b) || return false
+    norm(a .- ratio .* b) <= 1e-10 * norm(ratio .* b)
+end
+
+r005_same(key) = R005_C1[key] == R005_CHALF[key]
+
+@testset "CYAX-0232 R-005 harness" begin
+    # No route fails except the A1 cubic assertion of hp_spectrum_save on the
+    # R-003 charges (N > h11), which T030 fixes; it fails the same way in both
+    # conventions.
+    errors = sort([k for k in keys(R005_C1) if endswith(k, "/error")])
+    @test errors == ["r003/F2_hp/error"]
+    @test r005_same("r003/F2_hp/error")
+    @test Set(keys(R005_C1)) == Set(keys(R005_CHALF))
+end
+
+@testset "CYAX-0232 R-005 spectrum, F1 and F2 (T014)" begin
+    for fixture in ("r004", "r003", "infl")
+        # F1: physical-spectrum batch runner. The threshold-filtered mode set
+        # is the same in both conventions for these fixtures.
+        @test r005_same("$fixture/F1/mode_indices")
+        @test r005_offset("$fixture/F1/m", -R005_H)
+        @test r005_offset("$fixture/F1/fK_log10", R005_H)
+        @test r005_offset("$fixture/F1/fpert_log10", R005_H)
+        for name in ("lambda_self", "lambda_31", "lambda_22")
+            @test r005_offset("$fixture/F1/$(name)_log10", -4R005_H)
+            @test r005_same("$fixture/F1/$(name)_sign")
+        end
+
+        # F2 in memory: hp_spectrum and pq_spectrum.
+        for route in ("F2_hp_memory", "F2_pq_memory")
+            @test r005_offset("$fixture/$route/m", -R005_H)
+            @test r005_offset("$fixture/$route/fK", R005_H)
+            for name in ("λself", "λ31", "λ22")
+                @test r005_offset("$fixture/$route/$name", -4R005_H)
+                @test r005_same("$fixture/$route/$(name)sign")
+            end
+        end
+        @test r005_offset("$fixture/F2_hp_memory/fpert", R005_H)
+        @test r005_offset("$fixture/F2_pq_memory/f", R005_H)
+
+        # F2 persisted: pq_spectrum_save (all fixtures) and hp_spectrum_save.
+        @test r005_offset("$fixture/F2_pq/masses/log10", -R005_H)
+        @test r005_offset("$fixture/F2_pq/decay/fK", R005_H)
+        @test r005_offset("$fixture/F2_pq/decay/fpert", R005_H)
+        fixture == "r003" && continue
+        @test r005_offset("$fixture/F2_hp/masses/log10", -R005_H)
+        @test r005_offset("$fixture/F2_hp/decay/fK", R005_H)
+        @test r005_offset("$fixture/F2_hp/decay/fpert", R005_H)
+        for group in ("quartdiag", "quart31", "quart22")
+            @test r005_offset("$fixture/F2_hp/$group/log10", -4R005_H)
+            @test r005_same("$fixture/F2_hp/$group/sign")
+        end
+        # The hp_spectrum_save cubic is in the ϑ/charge basis: factor 1.
+        @test r005_same("$fixture/F2_hp/cubic/tensor")
+        # The pq_spectrum_save cubic (factor 2^{-3/2}) is asserted by T030 on
+        # the A1.4 cubic fixtures, after the A1 orientation fix.
+    end
+end
+
+@testset "CYAX-0232 R-005 fuzzy-axion model stage, F4 (T014)" begin
+    for fixture in ("r004", "r003")
+        @test r005_same("$fixture/F4/divisor_index")
+        @test r005_offset("$fixture/F4/mass_log10_ev_reference", -R005_H)
+    end
+end
+
+@testset "CYAX-0232 R-005 axion–photon, F3 (T015)" begin
+    for (fixture, policy) in (("r004", "electron_proxy"),
+            ("r004", "divisor_instanton"), ("r003", "electron_proxy"))
+        prefix = "$fixture/F3_$policy"
+        @test r005_offset("$prefix/log10_f_GeV", R005_H)
+        @test r005_offset("$prefix/log10_mass_eV", -R005_H)
+        @test r005_ratio("$prefix/mixing_theta", 1.0)
+        @test r005_ratio("$prefix/q", 1 / sqrt(2))
+        @test r005_ratio("$prefix/theta_from_canonical", 1 / sqrt(2))
+        @test r005_offset("$prefix/log10_g_GeVinv", -R005_H)
+        @test r005_offset("$prefix/log10_quartic_width_GeV", -9R005_H)
+        # Persisted hierarchy datasets (axion_photon.jl:1382–1385).
+        @test r005_ratio("$prefix/persisted/q", 1 / sqrt(2))
+        @test r005_ratio("$prefix/persisted/theta_from_canonical", 1 / sqrt(2))
+        @test r005_offset("$prefix/persisted/log10_f_GeV", R005_H)
+        @test r005_offset("$prefix/persisted/log10_mass_eV", -R005_H)
+    end
+
+    # :divisor_instanton: the threshold moves with the QED kinetic norm, so
+    # every mode keeps its side and g_eff, widths and light-mode count follow
+    # the all-mode factors.
+    prefix = "r004/F3_divisor_instanton"
+    @test r005_offset("$prefix/log10_light_threshold_eV", -R005_H)
+    @test r005_offset("$prefix/log10_g_effective_GeVinv", -R005_H)
+    @test r005_offset("$prefix/log10_photon_width_GeV", -5R005_H)
+    @test r005_same("$prefix/light_mode_count")
+    @test R005_C1["$prefix/light_mode_count"] == 1
+
+    # :electron_proxy: the threshold is the electron mass in both
+    # conventions; light and heavy modes take different factors. Modes that
+    # cross the threshold are reported (none for these fixtures).
+    for fixture in ("r004", "r003")
+        prefix = "$fixture/F3_electron_proxy"
+        @test r005_offset("$prefix/log10_light_threshold_eV", 0.0)
+        threshold = R005_C1["$prefix/log10_light_threshold_eV"]
+        light_c1 = R005_C1["$prefix/log10_mass_eV"] .<= threshold
+        light_chalf = R005_CHALF["$prefix/log10_mass_eV"] .<= threshold
+        @test light_c1 == light_chalf
+        @test r005_same("$prefix/light_mode_count")
+        expected_g = ifelse.(light_c1, -3R005_H, -R005_H)
+        expected_width = ifelse.(light_c1, -9R005_H, -5R005_H)
+        g1, gh = R005_C1["$prefix/log10_g_effective_GeVinv"],
+            R005_CHALF["$prefix/log10_g_effective_GeVinv"]
+        w1, wh = R005_C1["$prefix/log10_photon_width_GeV"],
+            R005_CHALF["$prefix/log10_photon_width_GeV"]
+        @test maximum(abs.(g1 .- gh .- expected_g)) <= 1e-10
+        @test maximum(abs.(w1 .- wh .- expected_width)) <= 1e-10
+    end
+    # The R-004 F3 fixture has one mode on each side of the electron mass.
+    @test R005_C1["r004/F3_electron_proxy/light_mode_count"] == 1
+    @test R005_C1["r003/F3_electron_proxy/light_mode_count"] == 2
+end
+
+@testset "CYAX-0232 R-005 inflation and F6 (T016)" begin
+    for point in 1:3
+        prefix = "infl/inflation/point$point"
+        # Non-stationary evaluation points.
+        @test R005_C1["$prefix/gradient_norm"] > 1e-3
+        @test r005_ratio("$prefix/value", 1.0)
+        @test r005_ratio("$prefix/epsilon", 0.5)
+        @test r005_ratio("$prefix/eta", 0.5)
+        @test r005_ratio("$prefix/eigenvalues", 0.5)
+    end
+    # Diagnostic CSV row fields from run_geometry and the F6 catastrophes
+    # group written by write_inflation_group!.
+    for key in ("infl/inflation/run_geometry/mass_min",
+            "infl/inflation/run_geometry/mass_max",
+            "infl/F6/mass_min", "infl/F6/mass_max")
+        @test r005_offset(key, -R005_H)
+    end
 end

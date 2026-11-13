@@ -315,6 +315,26 @@ Reproduction functions not named in the spec: `n8_g3_control.jl` (P96),
 | F4, F5 masses | runtests.jl:1692 and 2017; new direct Python test of `_fuzzy_axion_mass_log10` with the R-004 pins (its superpotential adds Σe^{−2πτ}, line 1107) | Python test |
 | F6 | full.jl:784–840 through `write_inflation_group!` | as inflation |
 
+**Harness (T013).** `scripts/r005_scaling_routes.jl` evaluates every route
+above with the stored inverse metric `kinv_scale · Kinv`;
+`scripts/r005_scaling_harness.jl` dumps the outputs bitwise (`dump`) or writes
+the R-005 count report (`report`). Fixtures: `r004` and `r003` (spectrum, F3,
+model stage) and `infl` (`Q = [1 0 1; 0 1 1]`, `L = (−1, −2, −3)`,
+`Kinv = [3 1; 1 2]`; spectrum, inflation, F6). The R-004 fixture is not used
+for inflation: its leading scales differ by 50 decades, and the Float64 eigen
+route of `run_geometry` returns a roundoff light mass in both conventions.
+`oriented_potential` rejects the R-003 charge layout.
+
+T013 verification (macOS arm64, Julia 1.12, one machine): `dump` at the base
+`10aa3dc` with `kinv_scale = 1` and at the candidate `9058e4f` + harness with
+`kinv_scale = 2` are byte-identical (233 outputs, sha256
+`bb53463d754e78d609d21044f37e018e4748d9d76a07b23d164aebcdad4eef51`). The
+candidate dump with `kinv_scale = 1` differs in 136 of the 233 outputs; the
+other 97 are K-independent. The one recorded route error is the A1 cubic
+assertion of `hp_spectrum_save` on the R-003 charges, identical in both
+conventions. After T030 changes the cubic routes, base and candidate dumps
+are no longer comparable for those keys.
+
 ### Cubic fixtures (A1.4)
 
 Every potential coefficient |Λₐ| (10 to the instanton's log10 column) lies

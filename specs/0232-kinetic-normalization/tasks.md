@@ -46,7 +46,8 @@ follow `clarification-a.md`, approved at `1ada61d` (Issue #232 comment
   - Escalate if: either gate fails.
 
 - [ ] **T013 [R-005] Comparison harness**
-  - Output: helper that evaluates each route with `2·Kinv` in place of `Kinv`.
+  - Output: helper that evaluates each route with `2·Kinv` in place of `Kinv`
+    (`scripts/r005_scaling_routes.jl`, `scripts/r005_scaling_harness.jl`).
   - Verify: harness reproduces current (c = ½) outputs bitwise on the base.
 
 - [ ] **T014 [R-005] Spectrum and F4/F5 rows**
