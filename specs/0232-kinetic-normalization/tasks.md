@@ -210,14 +210,14 @@ follow `clarification-a.md`, approved at `1ada61d` (Issue #232 comment
 - [x] **T081 [R-010] Certification audit note**
   - Output: the `plan.md` R-010 audit restated in the PR.
 
-- [ ] **T090 [R-002, G1] Bitwise comparison at the implementation SHA**
+- [x] **T090 [R-002, G1] Bitwise comparison at the implementation SHA**
   - Escalate if: any artifact differs.
 
-- [ ] **T091 [G1] Evidence bundle**
+- [ ] **T091 (CI evidence done at `90f6f43`; docs build, CYTools Python tests and R-005 report need an owner-local run) [G1] Evidence bundle**
   - Output: fast and full suites, Python regressions, docs, `agent_verify.py` at
     the exact SHA; changed-test list with reasons; R-005 count report.
 
-- [ ] **T092 [G1] Spec ↔ plan ↔ tasks ↔ code convergence**
+- [x] **T092 (gaps listed in plan.md *G1 evidence*) [G1] Spec ↔ plan ↔ tasks ↔ code convergence**
   - Verify: every R-001..R-011 has evidence on the candidate SHA.
 
 ## Phase 7 — Independent verification

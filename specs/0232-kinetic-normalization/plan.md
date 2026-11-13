@@ -936,6 +936,48 @@ hang and is untested at the default 100 bits. Changing the defaults changes a
 reproduction path's numerics, which the spec's non-scope excludes, so it is
 left for the owner.
 
+## G1 evidence (T090–T092)
+
+Code candidate: `90f6f43`. Later commits on the branch change only
+`specs/0232-kinetic-normalization/`. Base: `10aa3dc`.
+
+| Check | Command or run | Result at `90f6f43` |
+|---|---|---|
+| R-002 bitwise (T090) | `R002Invariance.yml` run 43519251792 (push), base and candidate in one job | PASS: all 8 hashes equal between base and candidate and equal to the pinned hashes in *Baseline* |
+| Full suite, including fast (`CYAXIVERSE_TEST_FULL=1`) | `CI.yml` run 43519257038 (workflow_dispatch), job *Full test suite* | PASS ("CYAxiverse tests passed"); one existing skip: Pipeline 2 real-data round trip (data not on the runner) |
+| Certification (R-010) | same run, *Process-isolated scientific qualification* (watchdog self-test, fast and public suites) | PASS |
+| Portable Python tests | same run, *Python tests*; and `python3 scripts/run_python_regression_tests.py` in a cloud container (41 tests, 1 module skipped for CYTools) | PASS |
+| `agent_verify.py` | `snapshot`, `diff-check` (clean tree), `python-regressions`; `package` is covered by the CI full suite | PASS |
+| CYTools Python tests | `scripts/test_reproduce_fuzzy_axions_h11_4.py` and the other CYTools-gated modules | not run at `90f6f43`; owner-local run at `602a8b6`/`5b5c4c0` reported 105 passed. No Python file changed after `602a8b6` |
+| Docs build | `julia --project=docs/ docs/make.jl` | not run at `90f6f43`; owner-local pass reported at `602a8b6`/`5b5c4c0`. `90f6f43` adds one export (documented by the `read.jl` autodocs block) and one sentence on the conventions page |
+| R-005 count report | `julia --project=. scripts/r005_scaling_harness.jl report` | not run at `90f6f43` |
+
+Changed tests: *Tests expected to change* (all rows, including the G1
+additions). The R-005 rows at runtests.jl:645–704 and full.jl:784–840 did
+not change: their assertions do not depend on K, and the full suite passes.
+
+**Convergence (T092).** A requirement-by-requirement audit at `5b5c4c0`
+found two gaps, both fixed in `90f6f43`: `stored_kinetic_normalization` was
+not exported (spec *Interfaces*), and T050's `base_K = I` case had no test.
+Remaining partial or unmet items, none declared complete:
+- R-008 / T071: the `write_comparison` CSV is unlabelled (G1-3); the
+  committed `validation/` files carry no label (G1-4).
+- R-005: the inflation and F6 rows use the `infl` fixture instead of the
+  R-004/R-003 pins (*R-005 row map*). This deviation was made in the plan,
+  not by a spec amendment.
+- R-005 F4: the persisted `model_mass_reference_log10_ev` is checked only
+  through the in-memory route.
+- No test: the A5 shard-file refusal (the report refusal is tested); the
+  label columns of `analyze_inflation_candidates.jl` and
+  `compare_reduction_inflation_scan.jl`; the A7 physical-consumer rejection
+  (no physical consumer exists).
+- The R-001 F5 evaluator equivalence test is in a CYTools-gated module and
+  skips in CI, although it needs only NumPy.
+- `run_pipeline2` catches the R-007 `ArgumentError` from `f6_note` into
+  `vacua_error`; the geometry stays `:blocked`, so nothing is skipped silently.
+- The *Left to later tasks* notes under T030–T037 record the state at those
+  tasks; T037 and T061–T066 closed them.
+
 ## Task decomposition
 
 T001–T002 gate everything. T010 precedes all label work. Family tasks
