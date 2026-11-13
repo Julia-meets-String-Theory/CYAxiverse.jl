@@ -197,7 +197,8 @@ a CSV column on every row, or a top-level JSON key. Its values:
 | Inflation CSV families | `kinetic_normalization` column, per row | diagnostic 2, contract 5, shard 3, refinement 4, flow 2, pilot 7 (each one lower before) |
 | Derived outputs (`appendix_b_quantiles.csv`, merged shard CSVs, the pilot report, `merge_orientifold_shards.py` merges) | the inputs' common label, with `kinetic_normalization_inferred` where the input label was inferred | `shard-merge-1.1` (1.0) for the orientifold merge |
 
-`CYAxiverse.read.stored_kinetic_normalization(path; family)` returns
+The exported `stored_kinetic_normalization(path; family)` (defined as
+`CYAxiverse.read.stored_kinetic_normalization`) returns
 `(label, inferred)` for the HDF5 families F1, F2, F3, F4 and F6; readers that
 return a `NamedTuple` (`physical_spectrum`, `read.pq_spectrum`,
 `read.hp_spectrum`, `read.cubic_tensor`) carry the fields

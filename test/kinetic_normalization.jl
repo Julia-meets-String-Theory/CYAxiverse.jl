@@ -18,6 +18,9 @@ _cyax0232_eq318_log10_lambda4(tau, cy_volume, gs, w0) =
     @test CYAxiverse.KINETIC_NORMALIZATION === :sugra_c1
     @test kinetic_factor === read_api.kinetic_factor
     @test kinetic_matrix === read_api.kinetic_matrix
+    # Spec Interfaces: stored_kinetic_normalization is a public export.
+    @test stored_kinetic_normalization === read_api.stored_kinetic_normalization
+    @test :stored_kinetic_normalization in names(CYAxiverse)
 
     # Factor identities on the non-diagonal fixture.
     Kinv = [3.0 1.0; 1.0 2.0]

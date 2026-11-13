@@ -53,9 +53,10 @@ if haskey(ENV, "SLURM_JOB_ID")
     include("slurm.jl")
 end
 
-using .read: kinetic_factor, kinetic_matrix
+using .read: kinetic_factor, kinetic_matrix, stored_kinetic_normalization
 
-export greet_CYAxiverse, KINETIC_NORMALIZATION, kinetic_factor, kinetic_matrix
+export greet_CYAxiverse, KINETIC_NORMALIZATION, kinetic_factor, kinetic_matrix,
+    stored_kinetic_normalization
 
 """
     greet_CYAxiverse()

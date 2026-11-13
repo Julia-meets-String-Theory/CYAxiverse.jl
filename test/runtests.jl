@@ -289,6 +289,12 @@ end
     bad_certificate = pilot_physical_domain_certificate(base_geometry, base_Q,
         base_L, bad_K, scale)
     @test bad_certificate.status == :domain_failure
+    # CYAX-0232 R-011 (T050): the c = ½ relation K = Kinv⁻¹ (here I, symmetric
+    # positive definite) fails the K * Kinv = 2I reciprocity check.
+    half_certificate = pilot_physical_domain_certificate(base_geometry, base_Q,
+        base_L, Matrix{BigFloat}(I, 2, 2), scale)
+    @test half_certificate.status == :domain_failure
+    @test occursin("K * Kinv = 2I", half_certificate.physical_scaling_gate_reason)
     empty_evidence = merge(base_geometry, (; curve_volumes=BigFloat[]))
     @test pilot_physical_domain_certificate(empty_evidence, base_Q, base_L,
         base_K, scale).status == :missing_evidence

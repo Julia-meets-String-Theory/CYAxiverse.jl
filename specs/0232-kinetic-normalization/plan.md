@@ -73,7 +73,7 @@ supported physical kinetic-matrix accessor and points to `kinetic_matrix`.
 | R-003 | Testset on the h11 = 2 literals (runtests.jl:2017–2050), QCD first. | T012. |
 | R-004 | Non-diagonal fixture with the pins below; orientation guard; scalar fixture; unchanged "HP spectrum: one-axion analytic mass" (runtests.jl:2052). | T011. |
 | R-005 | c = ½ comparison harness passes `2·Kinv` where `Kinv` is expected (the F5 evaluator, model stage and HDF5 routes use `Kinv` only for the factorization). One test per row of the *R-005 row map*. | T013, T014, T015, T016. |
-| R-006 | Labels and versions per the writer inventory; `KINETIC_NORMALIZATION`; reader fields; `stored_kinetic_normalization`. | T030–T045 round trips. |
+| R-006 | Labels and versions per the writer inventory; `KINETIC_NORMALIZATION`; reader fields; `stored_kinetic_normalization`. | T030–T041 round trips. |
 | R-007 | Reader inventory duties; batch-resume behaviour; error propagation; writer refusals; layout migrations. | T060–T067. |
 | R-008 | Labels on reproduction structs and `NamedTuple`s; docstrings for bare arrays; search record below. | T070–T072. |
 | R-009 | `docs/src/conventions/kinetic_normalization.md`; README and axion–photon page pointers. | T080, docs build. |
@@ -803,6 +803,12 @@ runtests.jl:131–146 with `base_K = 2I` (passes) and `base_K = I`
 | full.jl:551 `schema_version == "…-3"` | `"…-4"`, plus the label fields | R-006 (T031) |
 | full.jl:451 `inflation/schema_version == "…-2.3"` | `"…-2.4"`, plus the label | R-006 (T035) |
 | runtests.jl:405 pilot report row | the appended `scale` row carries `schema_version` and `kinetic_normalization` | A5: unlabelled rows now raise (T066) |
+| axion_photon.jl:38 one-axion canonical charge | `3/2` → `3·sqrt(0.25/2)` | R-001 (factor `sqrt(Kinv/2)`) |
+| axion_photon.jl:83 QED threshold | `+ 0.5·log10(0.5)` | R-001 (QED norm `qᵀ(Kinv/2)q`) |
+| axion_photon.jl:128 rank-certificate hand case | `q`, `theta_from_canonical` divided by √2 | R-001 |
+| runtests.jl:739 `oriented.K` | `I` → `2I` | R-001 |
+| full.jl:140 inflation pilot rows | rows carry `kinetic_normalization` | R-006 (T037) |
+| runtests.jl:705–711, 3489–3505 | label and version assertions added; no expected value changed | R-006 (T036) |
 
 G1 lists every other changed test with its reason.
 
@@ -933,5 +939,5 @@ left for the owner.
 ## Task decomposition
 
 T001–T002 gate everything. T010 precedes all label work. Family tasks
-(T030–T045) are independent of one another after T010. T041 precedes T061
+(T030–T041) are independent of one another after T010. T041 precedes T061
 and T063.
