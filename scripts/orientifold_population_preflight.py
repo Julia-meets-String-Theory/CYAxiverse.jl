@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from kinetic_normalization_labels import shard_merge_label
+
 
 class PopulationPreflightError(RuntimeError):
     """Raise when the required higher-h11 run evidence is unavailable."""
@@ -350,6 +352,13 @@ def _verify_artifacts(repo_root: Path, h11: int) -> dict[str, Any]:
     merged_path = data_dir / spec["merged"]
     gap_path = data_dir / spec["gap_analysis"]
     merged = _read_zstd_json(merged_path)
+    # CYAX-0232 R-007: apply the label checks to the merge before using it. The
+    # preflight uses only population counts, which do not depend on the kinetic
+    # matrix, so an inferred legacy merge is accepted.
+    try:
+        merged_label = shard_merge_label(merged, merged_path)
+    except ValueError as error:
+        raise PopulationPreflightError(str(error)) from error
     gap_analysis = _read_zstd_json(gap_path)
     expected = spec["expected"]
     counts = merged.get("counts")
@@ -390,6 +399,8 @@ def _verify_artifacts(repo_root: Path, h11: int) -> dict[str, Any]:
             },
         },
         "metadata": checks,
+        "merged_kinetic_normalization": merged_label[0],
+        "merged_kinetic_normalization_inferred": merged_label[1],
         "population_complete": True,
     }
 

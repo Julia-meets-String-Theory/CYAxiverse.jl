@@ -1175,3 +1175,147 @@ end
             _inflation_pilot_terminal_rows(joinpath(root, "c")))
     end
 end
+
+# CYAX-0232 T060: the R-007 inference and rejection matrix for the HDF5
+# families F1–F4 and F6, one case per row, on minimal synthetic layouts and
+# through `stored_kinetic_normalization`. F5 is covered by the Python tests
+# (T061). Every rejection must be an ArgumentError naming the file.
+const T060_F1_CURRENT = "cyaxiverse-physical-spectrum-4"
+const T060_F1_LEGACY = "cyaxiverse-physical-spectrum-3"
+const T060_F6 = "cyaxiverse-phase3-orientifold-inflation-"
+
+function t060_build(family, file; version=nothing, label=nothing, extra=Dict())
+    put!(group, name, value) = value === nothing || (group[name] = value)
+    if family === :f1
+        physical = create_group(create_group(file, "spectrum"), "physical")
+        metadata = create_group(physical, "metadata")
+        for name in ("m", "fK_log10")
+            get(extra, "drop", "") == name || (physical[name] = [1.0])
+        end
+        physical["mode_indices"] = [1]
+        for name in ("threshold_log10", "prec", "provisional", "runtime_seconds")
+            get(extra, "drop", "") == name || (metadata[name] = 1)
+        end
+        put!(metadata, "schema_version", version)
+        put!(metadata, "kinetic_normalization", label)
+    elseif family === :f2
+        spectrum = create_group(file, "spectrum")
+        get(extra, "legacy_masses", true) && (spectrum["masses/log10"] = [1.0])
+        if get(extra, "metadata", false)
+            metadata = create_group(spectrum, "metadata")
+            put!(metadata, "schema_version", version)
+            put!(metadata, "kinetic_normalization", label)
+            put!(metadata, "cubic_basis", get(extra, "cubic_basis", nothing))
+        end
+    elseif family === :f3
+        identity = create_group(create_group(create_group(file, "spectrum"),
+            "axion_photon"), "identity")
+        put!(identity, "schema_version", version)
+        put!(identity, "kinetic_normalization", label)
+    elseif family === :f4
+        get(extra, "drop", "") == "total_model_count" || (file["total_model_count"] = 1)
+        file["model_mass_reference_log10_ev"] = [1.0]
+        put!(file, "schema_version", version)
+        put!(file, "kinetic_normalization", label)
+    elseif family === :f6
+        inflation = create_group(file, "inflation")
+        put!(inflation, "schema_version", version)
+        put!(inflation, "kinetic_normalization", label)
+        inflation["catastrophes/legacy_v1/schema_version"] = T060_F6 * "1.0"
+    end
+end
+
+function t060_case(family; expect, kwargs...)
+    mktempdir() do dir
+        path = joinpath(dir, "t060.h5")
+        h5open(file -> t060_build(family, file; kwargs...), path, "w")
+        if expect === :reject
+            try
+                CYAxiverse.read.stored_kinetic_normalization(path; family)
+                false
+            catch err
+                err isa ArgumentError && occursin(path, sprint(showerror, err))
+            end
+        else
+            CYAxiverse.read.stored_kinetic_normalization(path; family) == expect
+        end
+    end
+end
+
+@testset "CYAX-0232 R-007 inference and rejection matrix (T060)" begin
+    current = (:sugra_c1, false)
+    legacy = (:legacy_c_half, true)
+    @testset "F1" begin
+        @test t060_case(:f1; expect=current, version=T060_F1_CURRENT, label="sugra_c1")
+        @test t060_case(:f1; expect=legacy, version=T060_F1_LEGACY)
+        @test t060_case(:f1; expect=legacy)                                   # unversioned, complete
+        @test t060_case(:f1; expect=:reject, version=T060_F1_CURRENT)         # current, no label
+        @test t060_case(:f1; expect=:reject, version=T060_F1_CURRENT, label="bogus")
+        @test t060_case(:f1; expect=:reject, version=T060_F1_CURRENT, label="legacy_c_half")
+        @test t060_case(:f1; expect=:reject, version=T060_F1_CURRENT, label="p96_reproduction_c_half")
+        @test t060_case(:f1; expect=:reject, version=T060_F1_LEGACY, label="sugra_c1")
+        @test t060_case(:f1; expect=:reject, label="sugra_c1")                # unversioned, labelled
+        @test t060_case(:f1; expect=:reject, extra=Dict("drop" => "runtime_seconds"))
+        @test t060_case(:f1; expect=:reject, extra=Dict("drop" => "fK_log10"))
+        @test t060_case(:f1; expect=:reject, version="cyaxiverse-physical-spectrum-5",
+            label="sugra_c1")
+    end
+    @testset "F2" begin
+        meta = Dict("metadata" => true, "cubic_basis" => "charge_basis")
+        version = "cyaxiverse-spectrum-groups-1"
+        @test t060_case(:f2; expect=current, version, label="sugra_c1", extra=meta)
+        @test t060_case(:f2; expect=current, version, label="sugra_c1",
+            extra=Dict("metadata" => true, "cubic_basis" => "canonical_mass_basis"))
+        @test t060_case(:f2; expect=legacy)
+        @test t060_case(:f2; expect=:reject, version, extra=meta)
+        @test t060_case(:f2; expect=:reject, version, label="bogus", extra=meta)
+        @test t060_case(:f2; expect=:reject, version, label="legacy_c_half", extra=meta)
+        @test t060_case(:f2; expect=:reject, version, label="a96_reproduction_raw_radian", extra=meta)
+        @test t060_case(:f2; expect=:reject, version, label="sugra_c1",
+            extra=Dict("metadata" => true))                                   # no cubic_basis
+        @test t060_case(:f2; expect=:reject, version, label="sugra_c1",
+            extra=Dict("metadata" => true, "cubic_basis" => "mass_basis"))
+        @test t060_case(:f2; expect=:reject, label="sugra_c1", extra=meta)     # no version
+        @test t060_case(:f2; expect=:reject, version="cyaxiverse-spectrum-groups-2",
+            label="sugra_c1", extra=meta)
+        @test t060_case(:f2; expect=:reject, extra=Dict("legacy_masses" => false))
+    end
+    @testset "F3" begin
+        @test t060_case(:f3; expect=current, version=2, label="sugra_c1")
+        @test t060_case(:f3; expect=legacy, version=1)
+        @test t060_case(:f3; expect=:reject, version=2)
+        @test t060_case(:f3; expect=:reject, version=2, label="bogus")
+        @test t060_case(:f3; expect=:reject, version=2, label="legacy_c_half")
+        @test t060_case(:f3; expect=:reject, version=2, label="p96_reproduction_c_half")
+        @test t060_case(:f3; expect=:reject, version=1, label="sugra_c1")
+        @test t060_case(:f3; expect=:reject, version=3, label="sugra_c1")
+        @test t060_case(:f3; expect=:reject, version="2", label="sugra_c1")
+        @test t060_case(:f3; expect=:reject)                                   # no version
+    end
+    @testset "F4" begin
+        version = "cyaxiverse-fuzzy-axion-model-stage-1"
+        @test t060_case(:f4; expect=current, version, label="sugra_c1")
+        @test t060_case(:f4; expect=legacy)
+        @test t060_case(:f4; expect=:reject, version)
+        @test t060_case(:f4; expect=:reject, version, label="bogus")
+        @test t060_case(:f4; expect=:reject, version, label="legacy_c_half")
+        @test t060_case(:f4; expect=:reject, version, label="a96_reproduction_raw_radian")
+        @test t060_case(:f4; expect=:reject, label="sugra_c1")
+        @test t060_case(:f4; expect=:reject, extra=Dict("drop" => "total_model_count"))
+        @test t060_case(:f4; expect=:reject, version="cyaxiverse-fuzzy-axion-model-stage-2",
+            label="sugra_c1")
+    end
+    @testset "F6" begin
+        @test t060_case(:f6; expect=current, version=T060_F6 * "2.4", label="sugra_c1")
+        for v in ("2.3", "2.2", "2.1", "2.0", "1.0")
+            @test t060_case(:f6; expect=legacy, version=T060_F6 * v)
+            @test t060_case(:f6; expect=:reject, version=T060_F6 * v, label="sugra_c1")
+        end
+        @test t060_case(:f6; expect=:reject, version=T060_F6 * "2.4")
+        @test t060_case(:f6; expect=:reject, version=T060_F6 * "2.4", label="bogus")
+        @test t060_case(:f6; expect=:reject, version=T060_F6 * "2.4", label="legacy_c_half")
+        @test t060_case(:f6; expect=:reject, version=T060_F6 * "2.4", label="p96_reproduction_c_half")
+        @test t060_case(:f6; expect=:reject, version=T060_F6 * "2.5", label="sugra_c1")
+        @test t060_case(:f6; expect=:reject)
+    end
+end

@@ -166,6 +166,29 @@ class MergeShardSummariesTests(unittest.TestCase):
             with self.assertRaisesRegex(ShardMergeError, "a.json"):
                 merge_shard_summaries(shards, ["a.json", "b.json"])
 
+    def test_merge_label_round_trip_and_rules(self):
+        from kinetic_normalization_labels import shard_merge_label
+
+        merged = merge_shard_summaries(self._two_disjoint_shards())
+        self.assertEqual(shard_merge_label(merged, "m.json"), ("sugra_c1", False))
+        legacy = {"schema_version": "cyaxiverse-orientifold-shard-merge-1.0"}
+        self.assertEqual(shard_merge_label(legacy, "m.json"), ("legacy_c_half", True))
+        derived = dict(merged, kinetic_normalization="legacy_c_half",
+                       kinetic_normalization_inferred=True)
+        self.assertEqual(shard_merge_label(derived, "m.json"), ("legacy_c_half", True))
+        rejected = [
+            dict(legacy, kinetic_normalization="sugra_c1"),
+            {k: v for k, v in merged.items() if k != "kinetic_normalization"},
+            {k: v for k, v in merged.items() if k != "kinetic_normalization_inferred"},
+            dict(merged, kinetic_normalization="legacy_c_half"),
+            dict(merged, kinetic_normalization="sugra_c1", kinetic_normalization_inferred=True),
+            dict(merged, kinetic_normalization="a96_reproduction_raw_radian"),
+            dict(merged, schema_version="cyaxiverse-orientifold-shard-merge-9.9"),
+        ]
+        for value in rejected:
+            with self.assertRaisesRegex(ValueError, "m.json"):
+                shard_merge_label(value, "m.json")
+
     def test_unsharded_input_is_rejected(self):
         shards = self._two_disjoint_shards()
         shards[0]["input"]["shard"]["is_sharded"] = False

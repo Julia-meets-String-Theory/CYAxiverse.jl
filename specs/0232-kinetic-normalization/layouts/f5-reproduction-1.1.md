@@ -39,7 +39,7 @@ The commit grouping, the commit table, the function-level module diffs and the c
 - A parent object path is listed as a path, e.g. `counts` and `counts.favorable_polytopes`.
 - An array key is listed bare (`a`). Its object elements contribute `a[].k`. No bare `a[]` entry is listed.
 - A map node is listed bare (`m`) and in the map-node list. Object values contribute `m.<map>.k`. A nested map is declared as map node `m.<map>`. Scalar values add nothing below `m`.
-- Arrays of arrays of objects use `a[][]`.
+- A list of lists normalizes its inner lists under a further `[]`. A list of lists of objects therefore gives `a[][].k`; a list of lists of scalars adds nothing.
 
 **`[enc]` paths.** These are `.numerator` / `.denominator` paths under a value written by `_fraction_to_json` / `_phase_json`, which can be an int or `{numerator, denominator}`.
 - Most are reachable.
@@ -706,58 +706,58 @@ New map nodes under K (all `chart.cox_coordinates`, GL:1072-1074):
 | 3 | 31cf465 | K2 | G2 | yes |
 | 4 | 06f86be | K2 | G2 |  |
 | 5 | d3cebea | K2 | G2 |  |
-| 6 | 2ae6bc8 | K3 | G3 |  |
-| 7 | f45ea31 | K4 | G4 | yes |
-| 8 | 68df2a2 | K5 | G4 | yes |
-| 9 | b1aa7e4 | K6 | G4 |  |
-| 10 | b50ca89 | K6 | G4 |  |
-| 11 | 5388755 | K6 | G4 |  |
-| 12 | a2018d9 | K6 | G4 |  |
-| 13 | 64c8450 | K6 | G4 |  |
-| 14 | d151bb7 | K6 | G4 |  |
-| 15 | f83f509 | K6 | G4 |  |
-| 16 | 9f31d71 | K6 | G4 |  |
-| 17 | 5081059 | K7 | G4 |  |
-| 18 | fdaeaad | K7 | G4 |  |
-| 19 | 4119b0d | K7 | G4 |  |
-| 20 | c396ea2 | K7 | G4 |  |
-| 21 | 7709dff | K7 | G4 |  |
-| 22 | 925a8c1 | K7 | G4 |  |
-| 23 | d633127 | K8 | G4 |  |
-| 24 | 6bb9ffc | K8 | G4 |  |
-| 25 | 2dfa8f3 | K8 | G4 |  |
-| 26 | ee569fa | K8 | G4 |  |
-| 27 | 82d8b1d | K8 | G4 |  |
-| 28 | 239a3a7 | K9 | G5 | yes |
-| 29 | a59a14c | K10 | G5 |  |
-| 30 | 8a758cc | K10 | G5 |  |
-| 31 | 6a610b6 | K10 | G5 |  |
-| 32 | b3719e3 | K6 | G4 |  |
-| 33 | b829190 | K6 | G4 |  |
-| 34 | 1ea31f5 | K10 | G5 |  |
-| 35 | 563a367 | K10 | G5 |  |
-| 36 | 2ea2e10 | K10 | G5 |  |
-| 37 | 85cb6e1 | K10 | G5 |  |
-| 38 | 20f0084 | K10 | G5 |  |
-| 39 | 1342592 | K10 | G5 |  |
-| 40 | c0d05c0 | K10 | G5 |  |
-| 41 | 2162e81 | K10 | G5 |  |
-| 42 | 78cb603 | K10 | G5 |  |
-| 43 | 07552d0 | K10 | G5 |  |
-| 44 | d12b97d | K11 | G5 |  |
-| 45 | ef3643f | K12 | G5 |  |
-| 46 | de0762f | K11 | G5 |  |
-| 47 | 417accf | K12 | G5 |  |
-| 48 | d082e96 | K12 | G5 |  |
-| 49 | ec7ca38 | K12 | G5 |  |
-| 50 | df0b114 | K12 | G5 |  |
-| 51 | fd14677 | K12 | G5 |  |
-| 52 | d72ec45 | K12 | G5 |  |
-| 53 | ce6d9f4 | K12 | G5 |  |
-| 54 | 975f8c8 | K12 | G5 |  |
-| 55 | 931d40c | K12 | G5 |  |
-| 56 | 49fc6b4 | K12 | G5 |  |
-| 57 | be6714b | K12 | G5 |  |
+| 6 | 2ae6bc8 | K3 | G2b |  |
+| 7 | f45ea31 | K4 | G3 | yes |
+| 8 | 68df2a2 | K5 | G3 | yes |
+| 9 | b1aa7e4 | K6 | G3 |  |
+| 10 | b50ca89 | K6 | G3 |  |
+| 11 | 5388755 | K6 | G3 |  |
+| 12 | a2018d9 | K6 | G3 |  |
+| 13 | 64c8450 | K6 | G3 |  |
+| 14 | d151bb7 | K6 | G3 |  |
+| 15 | f83f509 | K6 | G3 |  |
+| 16 | 9f31d71 | K6 | G3 |  |
+| 17 | 5081059 | K7 | G3 |  |
+| 18 | fdaeaad | K7 | G3 |  |
+| 19 | 4119b0d | K7 | G3 |  |
+| 20 | c396ea2 | K7 | G3 |  |
+| 21 | 7709dff | K7 | G3 |  |
+| 22 | 925a8c1 | K7 | G3 |  |
+| 23 | d633127 | K8 | G3 |  |
+| 24 | 6bb9ffc | K8 | G3 |  |
+| 25 | 2dfa8f3 | K8 | G3 |  |
+| 26 | ee569fa | K8 | G3 |  |
+| 27 | 82d8b1d | K8 | G3 |  |
+| 28 | 239a3a7 | K9 | G4 | yes |
+| 29 | a59a14c | K10 | G4 |  |
+| 30 | 8a758cc | K10 | G4 |  |
+| 31 | 6a610b6 | K10 | G4 |  |
+| 32 | b3719e3 | K6 | G3 |  |
+| 33 | b829190 | K6 | G3 |  |
+| 34 | 1ea31f5 | K10 | G4 |  |
+| 35 | 563a367 | K10 | G4 |  |
+| 36 | 2ea2e10 | K10 | G4 |  |
+| 37 | 85cb6e1 | K10 | G4 |  |
+| 38 | 20f0084 | K10 | G4 |  |
+| 39 | 1342592 | K10 | G4 |  |
+| 40 | c0d05c0 | K10 | G4 |  |
+| 41 | 2162e81 | K10 | G4 |  |
+| 42 | 78cb603 | K10 | G4 |  |
+| 43 | 07552d0 | K10 | G4 |  |
+| 44 | d12b97d | K11 | G4 |  |
+| 45 | ef3643f | K12 | G4 |  |
+| 46 | de0762f | K11 | G4 |  |
+| 47 | 417accf | K12 | G4 |  |
+| 48 | d082e96 | K12 | G4 |  |
+| 49 | ec7ca38 | K12 | G4 |  |
+| 50 | df0b114 | K12 | G4 |  |
+| 51 | fd14677 | K12 | G4 |  |
+| 52 | d72ec45 | K12 | G4 |  |
+| 53 | ce6d9f4 | K12 | G4 |  |
+| 54 | 975f8c8 | K12 | G4 |  |
+| 55 | 931d40c | K12 | G4 |  |
+| 56 | 49fc6b4 | K12 | G4 |  |
+| 57 | be6714b | K12 | G4 |  |
 
 ---
 

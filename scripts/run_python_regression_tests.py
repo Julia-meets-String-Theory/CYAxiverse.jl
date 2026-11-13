@@ -25,6 +25,8 @@ DEFAULT_TESTS = (
     "test_build_orientifold_axion_database.py",
     "test_qed_divisor_assignment.py",
     "test_orientifold_population_preflight.py",
+    "test_f5_legacy_layouts.py",
+    "test_merge_orientifold_shards.py",
 )
 
 _CHILD = """\

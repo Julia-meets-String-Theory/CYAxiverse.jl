@@ -827,7 +827,9 @@ Normalization rules: Clarification A2.
 
 - A path is dot-joined object keys. `[]` is attached to the key whose value
   is an array (`details[].polytope_index`). `<map>` is the key level of a map
-  node (`orientifold_reason_diagnostics.reason_counts.<map>`).
+  node. It appears only as a prefix of the paths of the map's values, and in
+  the name of a nested map node
+  (`orientifold_reason_diagnostics.reason_counts_by_h11.<map>`).
 - Every object key gives a path, at every depth, including the parent
   (`counts` and `counts.raw_frsts`). A key whose value is `null` gives a path.
 - A `[]` level never gives a path of its own. An array value gives only the
@@ -835,9 +837,17 @@ Normalization rules: Clarification A2.
   object elements give `key[].k`. Arrays of scalars, arrays of arrays of
   scalars (for example `inverse_metric`, `lattice_matrix`, `sigma_rays`),
   empty arrays and `null` elements add nothing below the key.
-- A `<map>` level gives a path (`X.<map>`) when the map has at least one key.
-  It follows the A2 map-node example `....reason_counts_by_polytope.<map>.<map>`.
-  An empty map `{}` gives only `X`.
+- A `<map>` level never gives a path of its own (revision 3, the T061 API
+  convention of `f5_legacy_layout_api.normalize`). A map node `X` gives the path of
+  its key `X`, and the values of the map are normalized under `X.<map>`. In
+  this range every map has scalar values, except `reason_counts_by_h11`, whose
+  values are maps of scalars. So no path below a map node exists, and the
+  inner level `reason_counts_by_h11.<map>` is itself listed as a map node.
+  Revision 1 and revision 2 emitted a bare `X.<map>` for non-empty maps. Those
+  paths are removed.
+- Encoding: `scripts/f5_legacy_layouts_v10b.py` (T061) builds these layouts by composition. Its
+  self-check confirms, for every layout, that R and O are disjoint and that
+  `normalize(synthesize(S), map_nodes) == S` for S = R and S = R ∪ O.
 - R = paths present in every file of the layout. O = paths that a file of the
   layout may or may not contain. A file matches when R ⊆ S ⊆ R ∪ O.
 - **R convention for `details[]` (revision 2, aligned with the other 1.0
@@ -1510,7 +1520,10 @@ Present only with D, all under `orientifold_reason_diagnostics`
 - `reason_counts` (`:957`, `:964`) and `unresolved_candidate_reason_counts`
   (`:974-976`) are keyed by reason code.
 - `reason_counts_by_h11` (`:965`) is keyed by `str(h11)`. Its single value is
-  the `reason_counts` map, so `reason_counts_by_h11.<map>` is a map node too.
+  the `reason_counts` map, so the inner level `reason_counts_by_h11.<map>` is
+  a map node too (nested map).
+- Under the API convention (revision 3), none of these maps gives any path
+  below its own key: all their values are scalars, or maps of scalars.
 - `reason_counts_by_polytope` (`:966-968`) is keyed by polytope index.
   `reason_counts_by_frst_class` (`:969-971`) by `"poly:class"`.
   `reason_counts_by_matrix` (`:972`, key from `:943-944`) by
@@ -1540,11 +1553,12 @@ lines:
 
 They add the same path lists as in group 1, plus the new delta below.
 
-**ΔD: `--orientifold-reason-diagnostics`.** Adds to R (17 paths;
-`e7a8f51:REPRO:958-981`). `reason_counts_by_h11.<map>` is in R because that map
-always has exactly the one key `str(h11)` (`:965`). With D but without A, the
-three row lists are `[]` and all other maps are `{}` (`:1009-1011` are never
-extended without A, `:1078`):
+**ΔD: `--orientifold-reason-diagnostics`.** Adds to R (16 paths;
+`e7a8f51:REPRO:958-981`). Revision 3 removed the bare
+`reason_counts_by_h11.<map>` path, which revision 2 had in R. With D but
+without A, the three row lists are `[]`, and all maps other than
+`reason_counts_by_h11` are `{}` (`:1009-1011` are never extended without A,
+`:1078`):
 - `orientifold_reason_diagnostics.schema_version`
 - `orientifold_reason_diagnostics.h11`
 - `orientifold_reason_diagnostics.surface_attempt_count`
@@ -1552,7 +1566,6 @@ extended without A, `:1078`):
 - `orientifold_reason_diagnostics.certified_surface_count`
 - `orientifold_reason_diagnostics.reason_counts`
 - `orientifold_reason_diagnostics.reason_counts_by_h11`
-- `orientifold_reason_diagnostics.reason_counts_by_h11.<map>`
 - `orientifold_reason_diagnostics.reason_counts_by_polytope`
 - `orientifold_reason_diagnostics.reason_counts_by_frst_class`
 - `orientifold_reason_diagnostics.reason_counts_by_matrix`
@@ -1568,8 +1581,10 @@ extended without A, `:1078`):
 The group 1 interactions apply unchanged: I1 = K ∧ A, I2 = K ∧ E′, I3 = K ∧ M,
 M ⇒ E′. New in group 2:
 
-- **I4 = D ∧ A.** Adds to O the map levels and the row element paths of the
-  top-level summary (7 + 127 paths). All are optional:
+- **I4 = D ∧ A.** Adds to O the row element paths of the top-level summary
+  (127 paths). Revision 3 dropped the 7 bare `….<map>` entries that revision 2
+  listed here: maps can now be non-empty without adding a path. All are
+  optional:
   the row lists are empty when no non-identity involution reaches the
   general-L surface computation (`e7a8f51:IOC:2320-2339`), and maps are `{}`
   when there are no skipped rows.
@@ -1588,13 +1603,6 @@ M ⇒ E′. New in group 2:
   - Rows of `unresolved_components[]` are built at `e7a8f51:REPRO:628-644`. All
     UC keys are written in every row. `fixed_component` has the 8
     `_fixed_component_records` keys (`e7a8f51:IOC:408-423`).
-- `orientifold_reason_diagnostics.reason_counts.<map>`
-- `orientifold_reason_diagnostics.reason_counts_by_h11.<map>.<map>`
-- `orientifold_reason_diagnostics.reason_counts_by_polytope.<map>`
-- `orientifold_reason_diagnostics.reason_counts_by_frst_class.<map>`
-- `orientifold_reason_diagnostics.reason_counts_by_matrix.<map>`
-- `orientifold_reason_diagnostics.reason_counts_by_fixed_component.<map>`
-- `orientifold_reason_diagnostics.unresolved_candidate_reason_counts.<map>`
 - `orientifold_reason_diagnostics.surface_attempts[].polytope_index`
 - `orientifold_reason_diagnostics.surface_attempts[].frst_class_index`
 - `orientifold_reason_diagnostics.surface_attempts[].matrix_id`
@@ -1894,41 +1902,46 @@ layout is the group 1 formula with these additions:
 | # | `--h11` has target | `--keep-details` | export (none / `--export-kaehler-points` / `--model-stage`) | `--orientifold-audit` | `--orientifold-reason-diagnostics` | \|R\| | \|O\| |
 |---|---|---|---|---|---|---|---|
 | 2.1 | yes | off | none or E only | any | off | 40 | 0 |
-| 2.2 | yes | off | none or E only | off | on | 57 | 0 |
-| 2.3 | yes | off | none or E only | on | on | 57 | 134 |
+| 2.2 | yes | off | none or E only | off | on | 56 | 0 |
+| 2.3 | yes | off | none or E only | on | on | 56 | 127 |
 | 2.4 | yes | off | M (E any) | any | off | 53 | 1 |
-| 2.5 | yes | off | M (E any) | off | on | 70 | 1 |
-| 2.6 | yes | off | M (E any) | on | on | 70 | 135 |
+| 2.5 | yes | off | M (E any) | off | on | 69 | 1 |
+| 2.6 | yes | off | M (E any) | on | on | 69 | 128 |
 | 2.7 | yes | on | none | off | off | 65 | 33 |
-| 2.8 | yes | on | none | off | on | 82 | 33 |
+| 2.8 | yes | on | none | off | on | 81 | 33 |
 | 2.9 | yes | on | none | on | off | 68 | 33 |
-| 2.10 | yes | on | none | on | on | 90 | 294 |
+| 2.10 | yes | on | none | on | on | 89 | 287 |
 | 2.11 | yes | on | E only | off | off | 65 | 83 |
-| 2.12 | yes | on | E only | off | on | 82 | 83 |
+| 2.12 | yes | on | E only | off | on | 81 | 83 |
 | 2.13 | yes | on | E only | on | off | 68 | 83 |
-| 2.14 | yes | on | E only | on | on | 90 | 344 |
+| 2.14 | yes | on | E only | on | on | 89 | 337 |
 | 2.15 | yes | on | M (E any) | off | off | 78 | 90 |
-| 2.16 | yes | on | M (E any) | off | on | 95 | 90 |
+| 2.16 | yes | on | M (E any) | off | on | 94 | 90 |
 | 2.17 | yes | on | M (E any) | on | off | 81 | 90 |
-| 2.18 | yes | on | M (E any) | on | on | 103 | 351 |
+| 2.18 | yes | on | M (E any) | on | on | 102 | 344 |
 | 2.19 | no | off | none or E only | any | off | 34 | 0 |
-| 2.20 | no | off | none or E only | off | on | 51 | 0 |
-| 2.21 | no | off | none or E only | on | on | 51 | 134 |
+| 2.20 | no | off | none or E only | off | on | 50 | 0 |
+| 2.21 | no | off | none or E only | on | on | 50 | 127 |
 | 2.22 | no | off | M (E any) | any | off | 47 | 1 |
-| 2.23 | no | off | M (E any) | off | on | 64 | 1 |
-| 2.24 | no | off | M (E any) | on | on | 64 | 135 |
+| 2.23 | no | off | M (E any) | off | on | 63 | 1 |
+| 2.24 | no | off | M (E any) | on | on | 63 | 128 |
 | 2.25 | no | on | none | off | off | 59 | 33 |
-| 2.26 | no | on | none | off | on | 76 | 33 |
+| 2.26 | no | on | none | off | on | 75 | 33 |
 | 2.27 | no | on | none | on | off | 62 | 33 |
-| 2.28 | no | on | none | on | on | 84 | 294 |
+| 2.28 | no | on | none | on | on | 83 | 287 |
 | 2.29 | no | on | E only | off | off | 59 | 83 |
-| 2.30 | no | on | E only | off | on | 76 | 83 |
+| 2.30 | no | on | E only | off | on | 75 | 83 |
 | 2.31 | no | on | E only | on | off | 62 | 83 |
-| 2.32 | no | on | E only | on | on | 84 | 344 |
+| 2.32 | no | on | E only | on | on | 83 | 337 |
 | 2.33 | no | on | M (E any) | off | off | 72 | 90 |
-| 2.34 | no | on | M (E any) | off | on | 89 | 90 |
+| 2.34 | no | on | M (E any) | off | on | 88 | 90 |
 | 2.35 | no | on | M (E any) | on | off | 75 | 90 |
-| 2.36 | no | on | M (E any) | on | on | 97 | 351 |
+| 2.36 | no | on | M (E any) | on | on | 96 | 344 |
+
+Row 2.N is layout `1.0-G6-LNN` in `scripts/f5_legacy_layouts_v10b.py` (row 1.N in group 5 is
+`1.0-G5-LNN`). Revision 3 changed only the D-on rows: |R| is 1 lower (no
+`reason_counts_by_h11.<map>`), and |O| is 7 lower when A is also on (no bare
+map levels). The layout count, 36, is unchanged.
 
 Empty-details coverage, checked mechanically: a K-on file with `details: []`
 matches these layouts:
@@ -1948,10 +1961,13 @@ matches these layouts:
    non-empty arrays (or for all arrays), add that path wherever the record has
    `key[].…`, and make it optional where `key` can be `[]` or `null`. Whichever
    choice is made, use it for all F5 records.
-2. **Is `<map>` a path level of its own?** Following the A2 map-node example, this
-   record emits `X.<map>` when the map is non-empty. That is not symmetric with
-   `[]` in point 1. A reader that treats both the same way must change the
-   `<map>` paths to match.
+2. **Is `<map>` a path level of its own?** Resolved in revision 3: no.
+   - This follows the T061 API `normalize`. Revisions 1 and 2 emitted
+     `X.<map>` for non-empty maps; revision 3 drops those paths (1 in R, 7 in
+     O) and lists `reason_counts_by_h11.<map>` as a nested map node.
+   - The layout counts (16, 36) and the overlapping pairs in point 5 are
+     unchanged.
+   - D ∧ ¬A and D ∧ A (K off) still differ by the 127 row paths in O.
 3. **`diagnostic.checks` keys.** The check names in
    `details[].kaehler_point_export_per_class[].diagnostic.checks` are fixed
    names from code (`fc66261:GEN:1524-1526`, `:1581-1636`), so this record
@@ -1978,8 +1994,9 @@ matches these layouts:
      - group 2: 2.7~2.11, 2.8~2.12, 2.9~2.13, 2.10~2.14 and 2.25~2.29 …
        2.28~2.32. These are the same K-on export pairs.
      - group 2: 2.2~2.3, 2.5~2.6, 2.20~2.21, 2.23~2.24. These are K-off
-       D ∧ ¬A vs D ∧ A: a file whose reason lists and maps are all empty
-       matches both.
+       D ∧ ¬A vs D ∧ A: a file whose reason lists are all empty matches both.
+       Under revision 3, map contents never add paths. Rechecked on the
+       `scripts/f5_legacy_layouts_v10b.py` encoding; the pairs are the same.
    - Each empty-`details` K-on file matches the K-off layout(s) listed under
      the tables. That is intended under the R convention.
    - A ∧ K vs ¬A ∧ K no longer overlap: `details[].orientifold_action_audit.*`

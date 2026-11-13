@@ -528,8 +528,13 @@ either has its own layout group or a recorded reason why no path changes.
 **F5 conventions (all F5 records).**
 - (a) An array key `k` gives the path `k`, and its object elements give
   `k[].<key>`; no bare `k[]` path is listed. A map node at `m` gives
-  `m.<map>…` paths for its values only; no bare `m.<map>`. Arrays whose
-  elements are scalars or arrays (matrices, ray lists) add no path below `k`.
+  `m.<map>…` paths for its values only; no bare `m.<map>`. An array of
+  scalars adds no path below `k`; a list of lists normalizes its inner lists
+  under a further `[]` (a list of lists of objects gives `k[][].<key>`; a
+  matrix or ray list adds nothing). `scripts/f5_legacy_layout_api.py`
+  `normalize` is the reference implementation, and the encoded layouts
+  (`scripts/f5_legacy_layouts_v10a.py`, `_v10b.py`, `_v11.py`) are checked
+  against it (T061).
 - (b) In `--keep-details` layouts, the `details[]` element keys that every
   element carries are required. A file with `details: []` has the path set of
   the layout with `--keep-details` off and the same other flags, and is
@@ -602,6 +607,46 @@ diagnostic row (`inflation_refinement_common.jl`) was persisted only by a test
 T041 has no escalation. Every F5 version has at least one recorded layout for
 each file a merged writer can produce. Every inflation entry has physical
 writers only, and no row can match two entries.
+
+### Readers: inference matrix and F5 readers (T060, T061)
+
+**T060.** `test/kinetic_normalization.jl` (*R-007 inference and rejection
+matrix*) runs every R-007 case for F1–F4 and F6 on minimal synthetic files
+through `stored_kinetic_normalization`, one `@test` per case: each inference,
+and the current version with a missing, unknown, legacy or reproduction
+label, a legacy or unversioned file with a label, a missing version, an
+unknown version and an unrecognized layout (plus F2 `cubic_basis` and the F6
+nested marker). F5 is covered by the Python tests below.
+
+**T061, encoded layouts.** The T041 records are encoded in
+`scripts/f5_legacy_layouts_v10a.py`, `_v10b.py` and `_v11.py` (250 layouts:
+37, 52 and 161), built by composition from each record's named path sets.
+`scripts/f5_legacy_layout_api.py` holds the A2 normalizer and a synthesizer;
+each module's self-check confirms that a file holding exactly R, and one
+holding R ∪ O, normalize back to those sets. `kinetic_normalization_labels.py`
+matches a 1.0 or 1.1 file against the layouts of its version (R ⊆ paths ⊆
+R ∪ O, normalized against each layout's map nodes) and infers
+`legacy_c_half` on any match; otherwise it raises, naming the unrecorded
+paths. `scripts/test_f5_legacy_layouts.py` has one subtest per layout (R-only
+and R ∪ O files) and the rejections.
+
+**T061, readers.**
+- `analyze_fuzzy_axions_orientifold_gap.py`: keeps its 1.1-only scope;
+  single and sharded artifacts pass the F5 checks, and shard labels are
+  combined with the R-007 rule. Its outputs hold no K-dependent field, so they
+  carry no label. Its shard test fixtures are now built on recorded layout
+  `1.1-G3-L03` with the 1.1 provenance shape.
+- `trace_lost_h11_3_fixed_components.py`: `_load_pre_summary` applies the F5
+  checks; it reads only K-free candidate details.
+- `orientifold_population_preflight.py`: applies `shard_merge_label` to the
+  merged artifact. This departs from the plan's wording "accept only labelled
+  merge output": the preflight reads only population counts, which are
+  K-free, and the existing h11 = 4/5 merges are `shard-merge-1.0`, which R-007
+  reads as an inferred legacy derived output. Requiring a label would block
+  every h11 = 4/5 run on its existing evidence. The label is returned in the
+  preflight result.
+- `scripts/run_python_regression_tests.py` now also runs
+  `test_f5_legacy_layouts.py` and `test_merge_orientifold_shards.py`.
 
 ### R-010 audit
 
