@@ -332,8 +332,9 @@ T013 verification (macOS arm64, Julia 1.12, one machine): `dump` at the base
 candidate dump with `kinv_scale = 1` differs in 136 of the 233 outputs; the
 other 97 are K-independent. The one recorded route error is the A1 cubic
 assertion of `hp_spectrum_save` on the R-003 charges, identical in both
-conventions. After T030 changes the cubic routes, base and candidate dumps
-are no longer comparable for those keys.
+conventions. T030 changes the F2 cubic routes (A1 orientation fix, under
+which the R-003 route no longer fails) and adds the F2 `metadata` keys, so
+base and candidate dumps are no longer comparable for those keys.
 
 ### Cubic fixtures (A1.4)
 
@@ -355,6 +356,12 @@ comparison is normwise (Frobenius) after per-mode sign alignment, relative
 tolerance 1e-10. Non-degeneracy is asserted as (λ_{k+1} − λ_k)/λ_{k+1} ≥ 0.5 for
 adjacent ascending leading Hessian eigenvalues. T030 asserts the `Canonicalα` branch
 for C2-hp.
+
+T030 measurements (macOS arm64, Julia 1.12): finite-difference deviation,
+relative to max|tensor|, 1.5e-11 (C2 and C2-hp `hp_spectrum_save`, N = 2 and
+N = 3), 4.2e-11 (C2 `pq_spectrum_save`) and 9.2e-11 (C3); normwise R-005
+deviation from 2^{-3/2} after sign alignment 3.8e-16 (C2) and 3.2e-16 (C3);
+minimum adjacent leading-eigenvalue gap 0.93 (C2) and 0.75 (C3).
 
 ### R-010 audit
 

@@ -168,13 +168,18 @@ end
 r005_same(key) = R005_C1[key] == R005_CHALF[key]
 
 @testset "CYAX-0232 R-005 harness" begin
-    # No route fails except the A1 cubic assertion of hp_spectrum_save on the
-    # R-003 charges (N > h11), which T030 fixes; it fails the same way in both
-    # conventions.
-    errors = sort([k for k in keys(R005_C1) if endswith(k, "/error")])
-    @test errors == ["r003/F2_hp/error"]
-    @test r005_same("r003/F2_hp/error")
+    # No route fails. (Before the A1 orientation fix, T030, hp_spectrum_save
+    # failed on the R-003 charges, where :hp_effective keeps N > h11.)
+    @test isempty([k for k in keys(R005_C1) if endswith(k, "/error")])
+    @test isempty([k for k in keys(R005_CHALF) if endswith(k, "/error")])
     @test Set(keys(R005_C1)) == Set(keys(R005_CHALF))
+    # Both F2 writers label their output (R-006).
+    for fixture in ("r004", "r003", "infl"), route in ("F2_hp", "F2_pq")
+        @test R005_C1["$fixture/$route/metadata/schema_version"] ==
+            "cyaxiverse-spectrum-groups-1"
+        @test R005_C1["$fixture/$route/metadata/kinetic_normalization"] == "sugra_c1"
+        @test r005_same("$fixture/$route/metadata/kinetic_normalization")
+    end
 end
 
 @testset "CYAX-0232 R-005 spectrum, F1 and F2 (T014)" begin
@@ -206,7 +211,6 @@ end
         @test r005_offset("$fixture/F2_pq/masses/log10", -R005_H)
         @test r005_offset("$fixture/F2_pq/decay/fK", R005_H)
         @test r005_offset("$fixture/F2_pq/decay/fpert", R005_H)
-        fixture == "r003" && continue
         @test r005_offset("$fixture/F2_hp/masses/log10", -R005_H)
         @test r005_offset("$fixture/F2_hp/decay/fK", R005_H)
         @test r005_offset("$fixture/F2_hp/decay/fpert", R005_H)
@@ -214,10 +218,9 @@ end
             @test r005_offset("$fixture/F2_hp/$group/log10", -4R005_H)
             @test r005_same("$fixture/F2_hp/$group/sign")
         end
-        # The hp_spectrum_save cubic is in the ϑ/charge basis: factor 1.
+        # The hp_spectrum_save cubic is in the ϑ/charge basis: factor 1. The
+        # R-005 cubic rows are asserted on the A1.4 cubic fixtures (T030).
         @test r005_same("$fixture/F2_hp/cubic/tensor")
-        # The pq_spectrum_save cubic (factor 2^{-3/2}) is asserted by T030 on
-        # the A1.4 cubic fixtures, after the A1 orientation fix.
     end
 end
 
@@ -334,4 +337,229 @@ end
     for s in (:potential, :oriented_potential)
         @test occursin("2 Kinv⁻¹", _doc(CYAxiverse.read, s))
     end
+end
+
+# A1.4 cubic fixtures (plan.md, Cubic fixtures). L columns are (sign, log10 Λ).
+const A1_FIXTURES = (
+    (name="C2", h11=2, np=21, Q=Int[1 1 0; 0 1 1], L=Float64[1 1 1; 0 -0.5 -1.0],
+     Kinv=Float64[3 1; 1 2], theta0=[0.1, 0.05], tau=ones(3), cy_volume=10.0,
+     visible=nothing, writers=(:hp, :pq), hp_count=2),
+    (name="C2-hp", h11=2, np=22, Q=Int[1 1 0; 0 1 1], L=Float64[1 1 1; 0 -0.5 -0.7],
+     Kinv=Float64[3 1; 1 2], theta0=[0.1, 0.05], tau=ones(3), cy_volume=10.0,
+     visible=nothing, writers=(:hp,), hp_count=3),
+    (name="C3", h11=3, np=23, Q=Int[1 0 0 1; 0 1 0 1; 0 0 1 1],
+     L=Float64[1 1 1 1; 0 -0.4 -0.9 -1.5],
+     Kinv=Float64[3 1 0; 1 2 0.5; 0 0.5 1.5], theta0=[0.1, 0.05, 0.02],
+     tau=ones(4), cy_volume=10.0, visible=nothing, writers=(:pq,), hp_count=0),
+)
+
+# Hessian of V(x) = Σₐ Λₐ (1 - cos(Qrows[a, :]·x)), independent of generate.
+a1_hessian(x, Λ, Qrows) = sum(Λ[a] * cos(dot(Qrows[a, :], x)) *
+    (Qrows[a, :] * Qrows[a, :]') for a in eachindex(Λ))
+
+function a1_fd_cubic(x, Λ, Qrows; h=1e-5)
+    n = length(x)
+    T = zeros(n, n, n)
+    for k in 1:n
+        e = zeros(n)
+        e[k] = h
+        T[:, :, k] = (a1_hessian(x .+ e, Λ, Qrows) .- a1_hessian(x .- e, Λ, Qrows)) ./ (2h)
+    end
+    T
+end
+
+a1_close(stored, reference) =
+    maximum(abs.(stored .- reference)) <= 1e-6 * maximum(abs.(stored))
+
+function a1_save(fixture, writer, kinv_scale)
+    r005_with_geometry(fixture, kinv_scale) do geom_idx, path, _
+        save = writer === :hp ? CYAxiverse.generate.hp_spectrum_save :
+            CYAxiverse.generate.pq_spectrum_save
+        save(fixture.h11, fixture.np, 1; phase=fixture.theta0)
+        h5open(path, "r") do file
+            metadata = file["spectrum/metadata"]
+            (; tensor=read(file["spectrum/cubic/tensor"]),
+                phase=read(file["spectrum/cubic/phase"]),
+                metadata=Dict(k => read(metadata[k]) for k in keys(metadata)),
+                cubic=CYAxiverse.read.cubic_tensor(geom_idx),
+                masses=CYAxiverse.read.pq_spectrum(fixture.h11, fixture.np, 1),
+                hp=writer === :hp ?
+                    CYAxiverse.read.hp_spectrum(fixture.h11, fixture.np, 1) : nothing)
+        end
+    end
+end
+
+# Mass-basis data of pq_spectrum_save, rebuilt from the stored inverse metric.
+function a1_mass_frame(fixture, kinv_scale)
+    C = Matrix(kinetic_factor(kinv_scale .* fixture.Kinv))
+    selected = CYAxiverse.generate.LQtilde(fixture.Q, fixture.L)
+    _, _, basis = CYAxiverse.generate.leading_hessian_mass_basis_float64(C,
+        selected.Ltilde, selected.Qtilde)
+    (; C, basis, Ltilde=selected.Ltilde, Qtilde=selected.Qtilde,
+        Qmass=(Matrix(selected.Qtilde') * C) * basis)
+end
+
+@testset "CYAX-0232 A1 F2 cubic tensor (T030)" begin
+    for fixture in A1_FIXTURES
+        # A1.4: every |Λₐ| within 10^1.5 of the others.
+        @test maximum(fixture.L[2, :]) - minimum(fixture.L[2, :]) <= 1.5
+        @test all(==(1), fixture.L[1, :])
+        if :hp in fixture.writers
+            out = a1_save(fixture, :hp, 1)
+            Lsel, Qsel = CYAxiverse.generate._hp_selected_potential(fixture.L,
+                fixture.Q, :hp_effective)
+            @test size(Qsel, 2) == fixture.hp_count
+            if fixture.name == "C2-hp"
+                canonical = CYAxiverse.generate.αmatrix(
+                    CYAxiverse.generate.LQtilde(fixture.Q, fixture.L))
+                @test canonical isa CYAxiverse.structs.Canonicalα
+                @test size(Qsel, 2) > fixture.h11
+            end
+            @test out.phase == fixture.theta0
+            @test out.metadata == Dict("schema_version" => "cyaxiverse-spectrum-groups-1",
+                "kinetic_normalization" => "sugra_c1", "cubic_basis" => "charge_basis")
+            @test out.cubic.cubic_basis === :charge_basis
+            @test out.cubic.kinetic_normalization === :sugra_c1
+            @test out.cubic.kinetic_normalization_inferred === false
+            @test out.hp.kinetic_normalization === :sugra_c1
+            @test out.masses.kinetic_normalization_inferred === false
+            Λ = Lsel[1, :] .* 10 .^ Lsel[2, :]
+            @test maximum(abs.(out.tensor)) > 0
+            @test a1_close(out.tensor, a1_fd_cubic(fixture.theta0, Λ, Matrix(Qsel')))
+
+            # R-005: the charge-basis cubic does not depend on K.
+            half = a1_save(fixture, :hp, 2)
+            @test norm(out.tensor .- half.tensor) <= 1e-10 * norm(half.tensor)
+        end
+        if :pq in fixture.writers
+            out = a1_save(fixture, :pq, 1)
+            frame = a1_mass_frame(fixture, 1)
+            # Non-degenerate leading masses.
+            W = CYAxiverse.generate.leading_hessian_matrix_float64(frame.C,
+                frame.Ltilde, frame.Qtilde)
+            λ = sort(eigvals(W))
+            @test all(>(0), λ)
+            @test all((λ[k + 1] - λ[k]) / λ[k + 1] >= 0.5 for k in 1:length(λ) - 1)
+
+            @test out.phase == fixture.theta0
+            @test out.metadata["cubic_basis"] == "canonical_mass_basis"
+            @test out.metadata["kinetic_normalization"] == "sugra_c1"
+            @test out.cubic.cubic_basis === :canonical_mass_basis
+            # x₀ from the stored ϑ₀, and Qmass·x₀ = Q̃ᵀ·ϑ₀ (A1.2).
+            x0 = frame.basis' * (frame.C \ out.phase)
+            @test frame.Qmass * x0 ≈ frame.Qtilde' * fixture.theta0 rtol=1e-12
+            Λ = frame.Ltilde[1, :] .* 10 .^ frame.Ltilde[2, :]
+            @test maximum(abs.(out.tensor)) > 0
+            @test a1_close(out.tensor, a1_fd_cubic(x0, Λ, frame.Qmass))
+
+            # R-005: mass-basis cubic ×2^{-3/2} after per-mode sign alignment.
+            half = a1_save(fixture, :pq, 2)
+            frame_half = a1_mass_frame(fixture, 2)
+            signs = sign.(diag(frame.basis' * frame_half.basis))
+            @test all(!iszero, signs)
+            aligned = [signs[i] * signs[j] * signs[k] * half.tensor[i, j, k]
+                for i in axes(half.tensor, 1), j in axes(half.tensor, 2),
+                    k in axes(half.tensor, 3)]
+            expected = 2.0^(-1.5) .* aligned
+            @test norm(out.tensor .- expected) <= 1e-10 * norm(expected)
+        end
+    end
+end
+
+@testset "CYAX-0232 F2 labels, replace and refusal (T030)" begin
+    fixture = A1_FIXTURES[1]
+    f2_label = CYAxiverse.read.f2_label
+    function legacy_f2!(path)
+        h5open(path, "r+") do file
+            spectrum = create_group(file, "spectrum")
+            spectrum["masses/log10"] = [1.0, 2.0]
+            spectrum["masses/sign"] = [1, 1]
+            spectrum["decay/fK"] = [3.0, 4.0]
+            spectrum["decay/fpert"] = [3.0, 4.0]
+            spectrum["cubic/tensor"] = zeros(2, 2, 2)
+            spectrum["cubic/phase"] = [0.3, 0.0]
+            spectrum["physical/m"] = [5.0]
+            spectrum["axion_photon/identity/schema_version"] = 1
+        end
+    end
+    r005_with_geometry(fixture, 1) do geom_idx, path, _
+        legacy_f2!(path)
+        # Legacy F2: inferred :legacy_c_half, cubic basis unknown.
+        @test CYAxiverse.read.stored_kinetic_normalization(path; family=:f2) ==
+            (:legacy_c_half, true)
+        cubic = CYAxiverse.read.cubic_tensor(geom_idx)
+        @test cubic.cubic_basis === :unknown
+        @test cubic.kinetic_normalization === :legacy_c_half
+        @test cubic.kinetic_normalization_inferred === true
+        @test_throws ArgumentError CYAxiverse.read.require_cubic_basis(cubic)
+        legacy = CYAxiverse.read.pq_spectrum(fixture.h11, fixture.np, 1)
+        @test (legacy.kinetic_normalization, legacy.kinetic_normalization_inferred) ==
+            (:legacy_c_half, true)
+
+        # Both writers refuse legacy F2 groups without replace.
+        @test_throws ArgumentError CYAxiverse.generate.pq_spectrum_save(fixture.h11,
+            fixture.np, 1; phase=fixture.theta0)
+        @test_throws ArgumentError CYAxiverse.generate.hp_spectrum_save(fixture.h11,
+            fixture.np, 1; phase=fixture.theta0)
+        @test h5open(file -> read(file["spectrum/masses/log10"]), path) == [1.0, 2.0]
+
+        # replace=true removes only the F2 groups; F1 and F3 are intact.
+        CYAxiverse.generate.pq_spectrum_save(fixture.h11, fixture.np, 1;
+            phase=fixture.theta0, replace=true)
+        h5open(path, "r") do file
+            @test read(file["spectrum/physical/m"]) == [5.0]
+            @test read(file["spectrum/axion_photon/identity/schema_version"]) == 1
+            @test f2_label(file["spectrum"], path) == (:sugra_c1, false,
+                :canonical_mass_basis)
+        end
+        # A current "sugra_c1" output is replaced without the option, and no
+        # dataset of the earlier writer survives.
+        CYAxiverse.generate.hp_spectrum_save(fixture.h11, fixture.np, 1;
+            phase=fixture.theta0)
+        CYAxiverse.generate.pq_spectrum_save(fixture.h11, fixture.np, 1;
+            phase=fixture.theta0)
+        h5open(path, "r") do file
+            spectrum = file["spectrum"]
+            @test !haskey(spectrum, "quartdiag")
+            @test sort(collect(keys(spectrum))) ==
+                ["axion_photon", "cubic", "decay", "masses", "metadata", "physical"]
+        end
+    end
+
+    # R-007 rejections for a current-version F2.
+    function rejected(edit!)
+        r005_with_geometry(fixture, 1) do geom_idx, path, _
+            CYAxiverse.generate.pq_spectrum_save(fixture.h11, fixture.np, 1;
+                phase=fixture.theta0)
+            h5open(edit!, path, "r+")
+            reader = try
+                CYAxiverse.read.cubic_tensor(geom_idx)
+                false
+            catch err
+                err isa ArgumentError && occursin(path, sprint(showerror, err))
+            end
+            writer = try
+                CYAxiverse.generate.pq_spectrum_save(fixture.h11, fixture.np, 1;
+                    phase=fixture.theta0)
+                false
+            catch err
+                err isa ArgumentError && occursin("replace=true", sprint(showerror, err))
+            end
+            reader && writer
+        end
+    end
+    set!(name, value) = file -> begin
+        metadata = file["spectrum/metadata"]
+        HDF5.delete_object(metadata, name)
+        value === nothing || (metadata[name] = value)
+    end
+    @test rejected(set!("kinetic_normalization", nothing))
+    @test rejected(set!("kinetic_normalization", "bogus"))
+    @test rejected(set!("kinetic_normalization", "legacy_c_half"))
+    @test rejected(set!("kinetic_normalization", "p96_reproduction_c_half"))
+    @test rejected(set!("cubic_basis", nothing))
+    @test rejected(set!("cubic_basis", "mass_basis"))
+    @test rejected(set!("schema_version", "cyaxiverse-spectrum-groups-2"))
+    @test_throws ArgumentError CYAxiverse.read.stored_kinetic_normalization("x.h5";
+        family=:f9)
 end

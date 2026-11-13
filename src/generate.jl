@@ -14,7 +14,8 @@ using Random
 using TimerOutputs
 
 using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
-using ..read: potential, potential_factored, vacua_jlm
+using ..read: potential, potential_factored, vacua_jlm, f2_label,
+    F2_SCHEMA_VERSION, F2_CHILD_GROUPS
 using ..minimizer: minimize, subspace_minimize, critical_points, minima_lattice
 
 using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, PhysicalAxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, MassBasisDiagnostics, InstantonScaleBlock, PerturbativeSplitDiagnostics, InstantonHierarchyDiagnostics, SpectrumWindowDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
@@ -1061,52 +1062,111 @@ end
 
 
 """
+    _f2_group!(file, path; replace) -> HDF5.Group
+
+Prepare a geometry's `spectrum` group for an F2 write (CYAX-0232 R-007) and
+return it. Existing F2 child groups (`$(join(F2_CHILD_GROUPS, ", "))`) and
+`spectrum/metadata` are removed before the write, so no dataset of an earlier
+output survives. A current `"sugra_c1"` F2 output is replaced. Legacy or
+unlabelled F2 groups, or groups that fail the R-007 checks, are replaced only
+with `replace=true`; otherwise an `ArgumentError` names the file. F1
+(`spectrum/physical`), F3 (`spectrum/axion_photon`) and every other child of
+`spectrum` are never touched.
+"""
+function _f2_group!(file::HDF5.File, path::AbstractString; replace::Bool)
+    spectrum = haskey(file, "spectrum") ? file["spectrum"]::HDF5.Group :
+        create_group(file, "spectrum")
+    present = [name for name in (F2_CHILD_GROUPS..., "metadata")
+        if haskey(spectrum, name)]
+    if !isempty(present) && !replace
+        label, inferred = try
+            f2_label(spectrum, path)
+        catch err
+            err isa ArgumentError || rethrow()
+            throw(ArgumentError(sprint(showerror, err) *
+                "; pass replace=true to replace the F2 groups"))
+        end
+        (label === :sugra_c1 && !inferred) || throw(ArgumentError(
+            "F2 spectrum groups in $(path) are legacy or unlabelled " *
+            "(read as $(repr(label)), inferred=$(inferred)); pass " *
+            "replace=true to replace them"))
+    end
+    for name in present
+        HDF5.delete_object(spectrum, name)
+    end
+    spectrum
+end
+
+"""Write the F2 `spectrum/metadata` group (CYAX-0232 R-006)."""
+function _write_f2_metadata!(spectrum::HDF5.Group, cubic_basis::AbstractString)
+    metadata = create_group(spectrum, "metadata")
+    metadata["schema_version"] = F2_SCHEMA_VERSION
+    metadata["kinetic_normalization"] = "sugra_c1"
+    metadata["cubic_basis"] = String(cubic_basis)
+    metadata
+end
+
+"""
     hp_spectrum_save(h11, tri, cy; prec=1000, quartics=true,
-        selection=:hp_effective, phase=zeros(h11))
+        selection=:hp_effective, phase=zeros(h11), replace=false)
 
 Compute and persist the high-precision spectrum and the cubic interaction
-tensor. The cubic tensor is evaluated in the charge basis selected by
-`selection` and is stored under `spectrum/cubic/tensor`; the phase vector is
-stored under `spectrum/cubic/phase`. The default `:hp_effective` selection
-uses the legacy `LQtildebar` basis.
+tensor (F2, CYAX-0232). `phase` is the charge-basis evaluation point ϑ₀, in
+the coordinates in which `potential_factored` defines `Q`. The cubic tensor is
+the third derivative of `V(ϑ) = Σₐ Λₐ (1 - cos(qₐ·ϑ))` at ϑ₀, over the
+instantons selected by `selection`, in the charge basis. The default
+`:hp_effective` selection uses the legacy `LQtildebar` basis and can return
+more instantons than `h11`.
+
+Outputs are written under `spectrum/`: `cubic/tensor`, `cubic/phase` (ϑ₀) and
+`spectrum/metadata` with `schema_version = "$(F2_SCHEMA_VERSION)"`,
+`kinetic_normalization = "sugra_c1"` and `cubic_basis = "charge_basis"`. The
+writer refuses legacy or unlabelled F2 groups unless `replace=true`; see
+`_f2_group!`.
 """
 function hp_spectrum_save(h11::Int, tri::Int, cy::Int=1; prec = 1000,
                           quartics::Bool=true,
                           selection::Symbol=:hp_effective,
-                          phase::AbstractVector{<:Real}=zeros(Float64, h11))
+                          phase::AbstractVector{<:Real}=zeros(Float64, h11),
+                          replace::Bool=false)
     if h11 != 0
+        length(phase) == h11 || throw(DimensionMismatch(
+            "phase must have length h11 = $(h11), got $(length(phase))"))
         pot_data = potential_factored(h11, tri, cy)
         Ltilde, Qtilde = _hp_selected_potential(pot_data.L, pot_data.Q, selection)
         spectrum_data = _hp_spectrum_factored(pot_data.C, Ltilde, Qtilde;
             prec = prec, quartics = quartics, selection = :raw)
-        cubic_data = cubic(phase, Ltilde, Qtilde)
+        # `cubic` takes L as N×2 and Q as N×n (CYAX-0232 A1.1).
+        cubic_data = cubic(Float64.(phase), Matrix(Ltilde'), Matrix(Qtilde'))
 
-        h5open(cyax_file(h11, tri, cy), "r+") do file
-            f2 = haskey(file, "spectrum") ? file["spectrum"] : create_group(file, "spectrum")
-            f2a = haskey(f2, "quartdiag") ? f2["quartdiag"] : create_group(f2, "quartdiag")
+        path = cyax_file(h11, tri, cy)
+        h5open(path, "r+") do file
+            f2 = _f2_group!(file, path; replace)
+            f2a = create_group(f2, "quartdiag")
             f2a["log10", deflate=9] = spectrum_data["λself"]
             f2a["sign", deflate=9] = spectrum_data["λselfsign"]
-            f2e = haskey(f2, "decay") ? f2["decay"] : create_group(f2, "decay")
+            f2e = create_group(f2, "decay")
             f2e["fpert", deflate=9] = spectrum_data["fpert"]
             f2e["fK", deflate=9] = spectrum_data["fK"]
 
-            f2b = haskey(f2, "quart31") ? f2["quart31"] : create_group(f2, "quart31")
+            f2b = create_group(f2, "quart31")
             f2b["log10", deflate=9] = spectrum_data["λ31"]
             f2b["sign", deflate=9] = spectrum_data["λ31sign"]
             f2b["index", deflate=9] = spectrum_data["λ31_i"]
 
-            f2c = haskey(f2, "quart22") ? f2["quart22"] : create_group(f2, "quart22")
+            f2c = create_group(f2, "quart22")
             f2c["log10", deflate=9] = spectrum_data["λ22"]
             f2c["sign", deflate=9] = spectrum_data["λ22sign"]
             f2c["index", deflate=9] = spectrum_data["λ22_i"]
 
-            f2d = haskey(f2, "masses") ? f2["masses"] : create_group(f2, "masses")
+            f2d = create_group(f2, "masses")
             f2d["log10", deflate=9] = spectrum_data["m"]
             f2d["sign", deflate=9] = spectrum_data["msign"]
 
-            f2g = haskey(f2, "cubic") ? f2["cubic"] : create_group(f2, "cubic")
+            f2g = create_group(f2, "cubic")
             f2g["tensor", deflate=9] = cubic_data
             f2g["phase", deflate=9] = Float64.(phase)
+            _write_f2_metadata!(f2, "charge_basis")
         end
     end
 
@@ -3207,38 +3267,57 @@ end
 
 
 """
-    pq_spectrum_save(h11, tri, cy; phase=zeros(h11))
+    pq_spectrum_save(h11, tri, cy; phase=zeros(h11), replace=false)
 
 Compute and persist the fast PQ spectrum, including masses, decay constants,
-mass signs, and the cubic interaction tensor in the PQ mass basis.  `phase`
-is the phase-space evaluation point in the selected charge basis.  Outputs
-are written under `spectrum/`, with the cubic tensor at
-`spectrum/cubic/tensor` and its phase at `spectrum/cubic/phase`.
+mass signs, and the cubic interaction tensor in the canonical PQ mass basis
+(F2, CYAX-0232). This production path uses the Float64 PQ leading-Hessian
+basis. Use [`hp_spectrum_save`](@ref) when arbitrary-precision spectrum data
+are needed.
 
-This production path uses the Float64 PQ leading-Hessian basis.  Use
-[`hp_spectrum_save`](@ref) when arbitrary-precision spectrum data are needed.
+`phase` is the charge-basis evaluation point ϑ₀, in the coordinates in which
+`potential_factored` defines `Q`. With `C` the canonical factor
+(`C * C' = Kinv / 2`) and `basis` the mass eigenbasis of the leading Hessian
+`C' H C`, the mass coordinates are `x = basis' * inv(C) * ϑ`. The tensor is the
+third derivative of `V(x) = Σₐ Λₐ (1 - cos(Qmassₐ·x))` over the leading
+`LQtilde` instantons, with `Qmass = Q̃' * C * basis`, evaluated at
+`x₀ = basis' * (C \\ ϑ₀)`, so that `Qmass * x₀ = Q̃' * ϑ₀`.
+
+Outputs are written under `spectrum/`: `cubic/tensor`, `cubic/phase` (ϑ₀) and
+`spectrum/metadata` with `schema_version = "$(F2_SCHEMA_VERSION)"`,
+`kinetic_normalization = "sugra_c1"` and
+`cubic_basis = "canonical_mass_basis"`. The writer refuses legacy or
+unlabelled F2 groups unless `replace=true`; see `_f2_group!`.
 """
 function pq_spectrum_save(h11::Int, tri::Int, cy::Int=1;
-                          phase::AbstractVector{<:Real}=zeros(Float64, h11))
+                          phase::AbstractVector{<:Real}=zeros(Float64, h11),
+                          replace::Bool=false)
     h11 == 0 && return nothing
+    length(phase) == h11 || throw(DimensionMismatch(
+        "phase must have length h11 = $(h11), got $(length(phase))"))
     pot_data = potential_factored(h11, tri, cy)
     L, Q, C = pot_data.L, pot_data.Q, pot_data.C
     spectrum_data = _pq_spectrum_factored(C, L, Q)
     LQtild = LQtilde(Q, L)
     _, _, basis = leading_hessian_mass_basis_float64(C, LQtild.Ltilde, LQtild.Qtilde)
     Qmass = (Matrix(LQtild.Qtilde') * C) * basis
-    cubic_data = cubic(phase, LQtild.Ltilde, Qmass)
-    h5open(cyax_file(h11, tri, cy), "r+") do file
-        f2 = haskey(file, "spectrum") ? file["spectrum"]::HDF5.Group : create_group(file, "spectrum")
-        f2e = haskey(f2, "decay") ? f2["decay"]::HDF5.Group : create_group(f2, "decay")
+    # ϑ₀ is in the charge basis; the tensor is evaluated at the mass-basis
+    # point x₀ = basisᵀ C⁻¹ ϑ₀, with L as N×2 (CYAX-0232 A1.1, A1.2).
+    x0 = transpose(basis) * (C \ Float64.(phase))
+    cubic_data = cubic(x0, Matrix(LQtild.Ltilde'), Qmass)
+    path = cyax_file(h11, tri, cy)
+    h5open(path, "r+") do file
+        f2 = _f2_group!(file, path; replace)
+        f2e = create_group(f2, "decay")
         f2e["fpert",deflate=9] = spectrum_data.f
         f2e["fK",deflate=9] = spectrum_data.fK
-        f2d = haskey(f2, "masses") ? f2["masses"]::HDF5.Group : create_group(f2, "masses")
+        f2d = create_group(f2, "masses")
         f2d["log10",deflate=9] = spectrum_data.m
         f2d["sign",deflate=9] = spectrum_data.msign
-        f2g = haskey(f2, "cubic") ? f2["cubic"]::HDF5.Group : create_group(f2, "cubic")
+        f2g = create_group(f2, "cubic")
         f2g["tensor",deflate=9] = cubic_data
         f2g["phase",deflate=9] = Float64.(phase)
+        _write_f2_metadata!(f2, "canonical_mass_basis")
     end
 end
 

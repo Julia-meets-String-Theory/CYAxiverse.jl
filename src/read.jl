@@ -532,23 +532,123 @@ function L_arb(h11::Int,tri::Int,cy::Int=1)
     return Ltemp
 end
 
+# F2 (`spectrum/{masses, decay, quartdiag, quart31, quart22, cubic}`) labels,
+# CYAX-0232 R-006 and R-007.
+const F2_SCHEMA_VERSION = "cyaxiverse-spectrum-groups-1"
+const F2_CHILD_GROUPS = ("masses", "decay", "quartdiag", "quart31", "quart22",
+    "cubic")
+const F2_CUBIC_BASES = ("charge_basis", "canonical_mass_basis")
+const KINETIC_NORMALIZATION_LABELS = ("sugra_c1", "p96_reproduction_c_half",
+    "a96_reproduction_raw_radian", "legacy_c_half")
+
+"""
+    f2_label(spectrum::HDF5.Group, path)
+
+Return `(kinetic_normalization, kinetic_normalization_inferred, cubic_basis)`
+for the F2 child groups of a geometry's `spectrum` group (CYAX-0232 R-007).
+
+- Current F2 (`spectrum/metadata/schema_version == "$(F2_SCHEMA_VERSION)"`):
+  `(:sugra_c1, false, :charge_basis)` or `(:sugra_c1, false,
+  :canonical_mass_basis)`.
+- Legacy F2 (`spectrum/masses/log10` present, no `spectrum/metadata`):
+  `(:legacy_c_half, true, :unknown)`. A legacy F2 layout records neither its
+  writer nor its cubic basis.
+
+Throws an `ArgumentError` naming `path` for a current-version F2 whose label
+or `cubic_basis` is missing or not allowed, for a label other than
+`"sugra_c1"` (F2 is a primary physical family), for an unknown schema version
+and for an unrecognized layout.
+"""
+function f2_label(spectrum::HDF5.Group, path::AbstractString)
+    where_ = "F2 spectrum groups in $(path)"
+    if haskey(spectrum, "metadata")
+        metadata = spectrum["metadata"]::HDF5.Group
+        haskey(metadata, "schema_version") || throw(ArgumentError(
+            "$(where_): spectrum/metadata has no schema_version"))
+        version = _read_dataset(metadata, "schema_version")
+        version == F2_SCHEMA_VERSION || throw(ArgumentError(
+            "$(where_): unknown F2 schema_version $(repr(version))"))
+        haskey(metadata, "kinetic_normalization") || throw(ArgumentError(
+            "$(where_): F2 $(version) has no kinetic_normalization label"))
+        label = _read_dataset(metadata, "kinetic_normalization")
+        label in KINETIC_NORMALIZATION_LABELS || throw(ArgumentError(
+            "$(where_): kinetic_normalization $(repr(label)) is not an allowed label"))
+        label == "sugra_c1" || throw(ArgumentError(
+            "$(where_): F2 is a primary physical family and holds only " *
+            "\"sugra_c1\", found $(repr(label))"))
+        haskey(metadata, "cubic_basis") || throw(ArgumentError(
+            "$(where_): F2 $(version) has no cubic_basis"))
+        basis = _read_dataset(metadata, "cubic_basis")
+        basis in F2_CUBIC_BASES || throw(ArgumentError(
+            "$(where_): unknown cubic_basis $(repr(basis))"))
+        return (:sugra_c1, false, Symbol(basis))
+    end
+    if haskey(spectrum, "masses") && haskey(spectrum["masses"], "log10")
+        return (:legacy_c_half, true, :unknown)
+    end
+    throw(ArgumentError("$(where_): no F2 layout is recognized"))
+end
+
+"""
+    stored_kinetic_normalization(path; family) -> (label::Symbol, inferred::Bool)
+
+Return the kinetic-normalization label of a persisted HDF5 output and whether
+it was inferred from a legacy layout (CYAX-0232 R-006), applying the R-007
+checks of [`f2_label`](@ref). `family` is the output family; `:f2` is
+supported.
+"""
+function stored_kinetic_normalization(path::AbstractString; family::Symbol)
+    family === :f2 || throw(ArgumentError(
+        "stored_kinetic_normalization: unsupported family $(repr(family))"))
+    h5open(path, "r") do file
+        haskey(file, "spectrum") || throw(ArgumentError(
+            "F2 spectrum groups in $(path): no spectrum group"))
+        label, inferred, _ = f2_label(file["spectrum"]::HDF5.Group, path)
+        (label, inferred)
+    end
+end
+
 """
     cubic_tensor(h11, tri, cy=1)
 
 Read the cubic interaction tensor saved by `pq_spectrum_save` or
-`hp_spectrum_save`.  Returns a named tuple with `tensor` and the evaluation
-`phase`; the tensor is stored in the corresponding saved spectrum basis.
+`hp_spectrum_save`. Returns a named tuple with `tensor`, the charge-basis
+evaluation point `phase` (ϑ₀), `cubic_basis` and the label fields
+`kinetic_normalization` and `kinetic_normalization_inferred` (CYAX-0232).
+
+`cubic_basis` is `:charge_basis` (`hp_spectrum_save`),
+`:canonical_mass_basis` (`pq_spectrum_save`) or `:unknown` for a legacy F2
+layout. A legacy tensor whose stored phase is nonzero is unreliable (it may be
+mis-oriented or evaluated at the wrong point); use [`require_cubic_basis`](@ref)
+before comparing or rescaling tensors.
 """
 function cubic_tensor(h11::Int, tri::Int, cy::Int=1)
-    h5open(cyax_file(h11, tri, cy), "r") do file
+    path = cyax_file(h11, tri, cy)
+    h5open(path, "r") do file
+        label, inferred, basis = f2_label(file["spectrum"]::HDF5.Group, path)
         tensor = HDF5.read(file, "spectrum/cubic/tensor")
         phase = HDF5.read(file, "spectrum/cubic/phase")
-        return (; tensor=tensor, phase=phase)
+        return (; tensor=tensor, phase=phase, cubic_basis=basis,
+            kinetic_normalization=label, kinetic_normalization_inferred=inferred)
     end
 end
 
 function cubic_tensor(geom_idx::GeometryIndex)
     cubic_tensor(geom_idx.h11, geom_idx.polytope, geom_idx.frst)
+end
+
+"""
+    require_cubic_basis(cubic) -> Symbol
+
+Return `cubic.cubic_basis` for a result of [`cubic_tensor`](@ref), and throw
+an `ArgumentError` for a legacy F2 tensor (`:unknown`), whose basis is not
+recorded. Consumers that compare or rescale cubic tensors call this first.
+"""
+function require_cubic_basis(cubic)
+    cubic.cubic_basis === :unknown && throw(ArgumentError(
+        "legacy F2 cubic tensor: its basis is not recorded, so it cannot be " *
+        "compared or rescaled"))
+    cubic.cubic_basis
 end
 
 
@@ -651,13 +751,23 @@ end
 ##### HDF5.read Spectra data ###
 ################################
 
+"""
+    pq_spectrum(h11, tri, cy=1)
+
+Read the F2 masses and decay constants written by `pq_spectrum_save` or
+`hp_spectrum_save`, with the label fields `kinetic_normalization` and
+`kinetic_normalization_inferred` (CYAX-0232; see [`f2_label`](@ref)).
+"""
 function pq_spectrum(h11::Int,tri::Int,cy::Int=1)
-    Hvals::Vector{Float64}, fK::Vector{Float64}, fpert::Vector{Float64} = 
-    h5open(cyax_file(h11,tri,cy), "r") do file
-        HDF5.read(file, "spectrum/masses/log10"),
-        HDF5.read(file, "spectrum/decay/fK"), HDF5.read(file, "spectrum/decay/fpert")
+    path = cyax_file(h11, tri, cy)
+    h5open(path, "r") do file
+        label, inferred, _ = f2_label(file["spectrum"]::HDF5.Group, path)
+        Hvals::Vector{Float64} = HDF5.read(file, "spectrum/masses/log10")
+        fK::Vector{Float64} = HDF5.read(file, "spectrum/decay/fK")
+        fpert::Vector{Float64} = HDF5.read(file, "spectrum/decay/fpert")
+        (; m = Hvals, fK = fK, fpert = fpert, kinetic_normalization = label,
+            kinetic_normalization_inferred = inferred)
     end
-    return (; m = Hvals, fK = fK, fpert = fpert)
 end
 
 """
@@ -707,7 +817,17 @@ function physical_spectrum(geom_idx::GeometryIndex)
     physical_spectrum(geom_idx.h11, geom_idx.polytope, geom_idx.frst)
 end
 
+"""
+    hp_spectrum(h11, tri, cy=1)
+
+Read the F2 spectrum and quartics written by `hp_spectrum_save`, with the
+label fields `kinetic_normalization` and `kinetic_normalization_inferred`
+(CYAX-0232; see [`f2_label`](@ref)).
+"""
 function hp_spectrum(h11::Int,tri::Int,cy::Int=1)
+    path = cyax_file(h11, tri, cy)
+    label, inferred, _ = h5open(file -> f2_label(file["spectrum"]::HDF5.Group, path),
+        path, "r")
     Hsign::Vector{Int64}, Hvals::Vector{Float64}, fK::Vector{Float64}, fpert::Vector{Float64},
     quartdiagsign::Vector{Int64},quartdiaglog::Vector{Float64},
     quart22_index,quart22_sign::Vector{Int},quart22_log10::Vector{Float64},quart31_index,
@@ -719,7 +839,8 @@ function hp_spectrum(h11::Int,tri::Int,cy::Int=1)
         HDF5.read(file, "spectrum/quart31/log10"),HDF5.read(file, "spectrum/quart22/index"),HDF5.read(file, "spectrum/quart22/sign"),
         HDF5.read(file, "spectrum/quart22/log10")
     end
-    return (; m = Hvals, fK = fK, fpert = fpert, λself = quartdiaglog, λ31_i = quart31_index, λ31 = quart31_log10, λ22_i = quart22_index, λ22 = quart22_log10)
+    return (; m = Hvals, fK = fK, fpert = fpert, λself = quartdiaglog, λ31_i = quart31_index, λ31 = quart31_log10, λ22_i = quart22_index, λ22 = quart22_log10,
+        kinetic_normalization = label, kinetic_normalization_inferred = inferred)
 end
 
 """
