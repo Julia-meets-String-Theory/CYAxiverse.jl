@@ -915,3 +915,134 @@ end
     @test f4_rejected([legacy; "kinetic_normalization" => "sugra_c1"])
     @test f4_rejected(["total_model_count" => 3])
 end
+
+const T035_INFL = only(f for f in r005_fixtures() if f.name == "infl")
+
+@testset "CYAX-0232 F6 inflation group label (T035)" begin
+    stored(path) = CYAxiverse.read.stored_kinetic_normalization(path; family=:f6)
+    write_f6(geom_idx) = write_inflation_group!(geom_idx,
+        (; status=:success, result=run_geometry(geom_idx; max_branches=1_000)),
+        (; status=:not_run, message="T035: e-fold scan not run");
+        catastrophe_settings=(; max_branches=1_000),
+        efold_settings=(; precision_bits=128), force=true)
+    set!(name, value) = group -> begin
+        haskey(group, name) && HDF5.delete_object(group, name)
+        value === nothing || (group[name] = value)
+    end
+    version(v) = "cyaxiverse-phase3-orientifold-inflation-" * v
+
+    r005_with_geometry(T035_INFL, 1) do geom_idx, path, _
+        write_f6(geom_idx)
+        h5open(path, "r") do file
+            @test read(file["inflation/schema_version"]) == version("2.4")
+            @test read(file["inflation/kinetic_normalization"]) == "sugra_c1"
+            @test read(file["inflation/catastrophes/legacy_v1/schema_version"]) ==
+                version("1.0")
+        end
+        @test stored(path) == (:sugra_c1, false)
+        # The nested legacy_v1 marker is not the group version.
+        h5open(file -> set!("schema_version", version("2.3"))(
+            file["inflation/catastrophes/legacy_v1"]), path, "r+")
+        @test stored(path) == (:sugra_c1, false)
+        # Every historical group version without a label is inferred.
+        for v in ("2.3", "2.2", "2.1", "2.0", "1.0")
+            h5open(path, "r+") do file
+                set!("kinetic_normalization", nothing)(file["inflation"])
+                set!("schema_version", version(v))(file["inflation"])
+            end
+            @test stored(path) == (:legacy_c_half, true)
+        end
+    end
+
+    function f6_rejected(edits...)
+        r005_with_geometry(T035_INFL, 1) do geom_idx, path, _
+            write_f6(geom_idx)
+            h5open(file -> foreach(e -> e(file["inflation"]), edits), path, "r+")
+            try
+                stored(path)
+                false
+            catch err
+                message = sprint(showerror, err)
+                err isa ArgumentError && occursin(path, message) && occursin("F6", message)
+            end
+        end
+    end
+    @test f6_rejected(set!("kinetic_normalization", nothing))
+    @test f6_rejected(set!("kinetic_normalization", "legacy_c_half"))
+    @test f6_rejected(set!("kinetic_normalization", "bogus"))
+    @test f6_rejected(set!("schema_version", version("2.3")))
+    @test f6_rejected(set!("schema_version", version("2.5")))
+    @test f6_rejected(set!("schema_version", nothing))
+end
+
+@testset "CYAX-0232 inflation CSV labels (T036)" begin
+    @test INFLATION_SCAN_CONTRACT_VERSION == "5"
+    @test INFLATION_DIAGNOSTIC_SCHEMA_VERSION == "2"
+    @test INFLATION_SHARD_SCHEMA_VERSION == "3"
+    @test REFINEMENT_SCHEMA_VERSION == "4"
+    @test FLOW_SCHEMA_VERSION == "2"
+    @test PILOT_SCHEMA_VERSION == "7"
+    @test INFLATION_PHYSICAL_KINETIC_NORMALIZATION == String(CYAxiverse.KINETIC_NORMALIZATION)
+    for fields in (REFINEMENT_FIELDS, FLOW_FIELDS, PILOT_COMMON_FIELDS)
+        @test fields[2:3] == (:schema_version, :kinetic_normalization)
+    end
+    @test :kinetic_normalization in SCAN_PREP_FIELDS
+    @test :kinetic_normalization in INFLATION_SHARD_FIELDS
+    function csv_rows(path)
+        lines = readlines(path)
+        header = _inflation_shard_csv_fields(lines[1])
+        [Dict(zip(header, _inflation_shard_csv_fields(line))) for line in lines[2:end]
+            if !isempty(strip(line))]
+    end
+    without_label(header) = replace(header, ",kinetic_normalization" => "")
+
+    r005_with_geometry(T035_INFL, 1) do geom_idx, path, root
+        row = run_geometry(geom_idx; max_branches=1_000)
+        @test (row.contract_version, row.diagnostic_schema_version,
+            row.kinetic_normalization) == ("5", "2", "sugra_c1")
+
+        # Scan-prep summary: round trip, and no append onto a legacy header.
+        summary = joinpath(root, "prep.csv")
+        _scan_prep_write_header(summary)
+        _scan_prep_append(summary, row; data_dir=root, max_branches=1_000)
+        prep = only(csv_rows(summary))
+        @test (prep["contract_version"], prep["diagnostic_schema_version"],
+            prep["kinetic_normalization"]) == ("5", "2", "sugra_c1")
+        legacy_summary = joinpath(root, "legacy_prep.csv")
+        write(legacy_summary, without_label(SCAN_PREP_HEADER) * "\n")
+        @test_throws ArgumentError _scan_prep_write_header(legacy_summary; append=true)
+
+        # Shard rows and the merged CSV.
+        shard = joinpath(root, "shards", "shard.csv")
+        inflation_prepare_shard(shard)
+        inflation_append_shard_row(shard, row; run_id="t036", shard_index=1,
+            shard_count=1, attempt=1, started_unix_s=0.0, finished_unix_s=1.0,
+            data_dir=root, max_branches=1_000)
+        shard_row = only(csv_rows(shard))
+        @test (shard_row["shard_schema_version"], shard_row["contract_version"],
+            shard_row["kinetic_normalization"]) == ("3", "5", "sugra_c1")
+        legacy_shard = joinpath(root, "legacy_shards", "shard.csv")
+        mkpath(dirname(legacy_shard))
+        write(legacy_shard, without_label(INFLATION_SHARD_HEADER) * "\n")
+        @test_throws ArgumentError inflation_prepare_shard(legacy_shard; append=true)
+        merged = inflation_merge_shards([shard], joinpath(root, "merged.csv"))
+        @test only(csv_rows(merged))["kinetic_normalization"] == "sugra_c1"
+
+        # Scale-continuation report and shard rows.
+        report = joinpath(root, "pilot", "report.csv")
+        pilot_shards = joinpath(root, "pilot", "shards")
+        options = _pilot_parse_args(["--data-dir", root, "--geometry",
+            "$(geom_idx.h11),$(geom_idx.polytope),$(geom_idx.frst)",
+            "--scale-grid", "1.0", "--scale-status", "homotopy_only",
+            "--report", report, "--shard-dir", pilot_shards, "--run-id", "t036"])
+        redirect_stdout(devnull) do
+            run_scale_continuation(options)
+        end
+        pilot_rows = vcat(csv_rows(report),
+            [csv_rows(p) for p in readdir(pilot_shards; join=true)]...)
+        @test !isempty(pilot_rows)
+        @test all(r -> r["schema_version"] == "7" &&
+            r["kinetic_normalization"] == "sugra_c1", pilot_rows)
+        @test startswith(readlines(report)[1], "row_type,schema_version,kinetic_normalization,")
+    end
+end

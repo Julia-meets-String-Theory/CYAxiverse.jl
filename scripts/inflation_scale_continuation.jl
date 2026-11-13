@@ -22,7 +22,8 @@ using SHA
 
 include(joinpath(@__DIR__, "inflation_scan_common.jl"))
 
-const PILOT_SCHEMA_VERSION = "6"
+# Version 7 rows carry `kinetic_normalization` (CYAX-0232 R-006).
+const PILOT_SCHEMA_VERSION = "7"
 const PILOT_DOMAIN_CERTIFICATE_VERSION = "physical-domain-certificate-3"
 const PILOT_PHYSICAL_NORMALIZATION = "homogeneous_full_volume_k32"
 const PILOT_PHYSICAL_UNITS = "M_s=M_Pl;k=dimensionless"
@@ -53,7 +54,7 @@ const PILOT_DEFAULT_CERTIFICATE_DIR = ""
 const PILOT_DEFAULT_CHECKPOINT_DIR = ""
 
 const PILOT_COMMON_FIELDS = (
-    :row_type, :schema_version, :run_id, :data_root, :geometry_path,
+    :row_type, :schema_version, :kinetic_normalization, :run_id, :data_root, :geometry_path,
     :h11, :polytope, :frst, :reference_scale, :sampled_scale,
     :scale_grid, :scale_source, :scale_status, :volume_normalization,
     :domain_certificate_version, :domain_status, :domain_reason,
@@ -1652,6 +1653,7 @@ function _pilot_context(geom, data_dir, geometry_path, scale, hierarchy,
         actual_scale_status == :unsupported ? "nonphysical_diagnostic" :
         "generic_log10_amplitude_exponent_stretch")
     (; row_type=:scale, schema_version=PILOT_SCHEMA_VERSION,
+       kinetic_normalization=INFLATION_PHYSICAL_KINETIC_NORMALIZATION,
        run_id=options[:run_id], data_root=data_dir, geometry_path,
        h11=geom.h11, polytope=geom.polytope, frst=geom.frst,
        reference_scale=1.0, sampled_scale=scale,
@@ -2168,6 +2170,7 @@ function run_scale_continuation(options)
                 key = (geom.h11, geom.polytope, geom.frst, scale)
                 key in completed && continue
                 fallback = (; row_type=:scale, schema_version=PILOT_SCHEMA_VERSION,
+                    kinetic_normalization=INFLATION_PHYSICAL_KINETIC_NORMALIZATION,
                     run_id, data_root=data_dir, geometry_path,
                     h11=geom.h11, polytope=geom.polytope, frst=geom.frst,
                     reference_scale=1.0, sampled_scale=scale,

@@ -1,6 +1,9 @@
 """Shared script-level measurements for the inflation scan stages."""
 
-const INFLATION_DIAGNOSTIC_SCHEMA_VERSION = "1"
+# Version 2 rows carry a per-row `kinetic_normalization` (CYAX-0232 R-006):
+# "sugra_c1" for the physical scan, "a96_reproduction_raw_radian" for the A96
+# refinement rows of `inflation_refinement_common.jl`.
+const INFLATION_DIAGNOSTIC_SCHEMA_VERSION = "2"
 const _INFLATION_MEASUREMENT_SCOPES = (:cold, :warm, :unspecified)
 
 function _inflation_validate_measurement_scope(scope::Symbol)
@@ -35,12 +38,20 @@ function _inflation_diagnostic_property(record, field::Symbol, default=nothing)
         getproperty(record, field) : default
 end
 
-"""Flatten screening and refinement results into one candidate diagnostic row."""
+"""
+Flatten screening and refinement results into one candidate diagnostic row.
+
+The row's `kinetic_normalization` is the refinement summary's own label
+(CYAX-0232 R-006 per-row labels); a summary without one is refused.
+"""
 function inflation_refinement_diagnostic_row(candidate, refined;
         serialization=nothing)
     screening = candidate.screening
     summary = refined.summary
+    hasproperty(summary, :kinetic_normalization) || throw(ArgumentError(
+        "refinement summary has no kinetic_normalization label"))
     (; diagnostic_schema_version=INFLATION_DIAGNOSTIC_SCHEMA_VERSION,
+       kinetic_normalization=summary.kinetic_normalization,
        candidate_id=candidate.candidate_id, model=candidate.model,
        screen_status=_inflation_diagnostic_property(screening, :status,
            candidate.accepted ? :accepted : :rejected),

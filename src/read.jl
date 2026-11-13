@@ -806,6 +806,53 @@ function f5_model_stage_input_label(file::HDF5.File, path::AbstractString)
     throw(ArgumentError("$(where_): unknown record_metadata_schema $(repr(version))"))
 end
 
+# F6 (`build_orientifold_vacua_inflation.jl` `inflation` group),
+# CYAX-0232 R-006 and R-007.
+const F6_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-2.4"
+const F6_LEGACY_SCHEMA_VERSIONS = ("cyaxiverse-phase3-orientifold-inflation-2.3",
+    "cyaxiverse-phase3-orientifold-inflation-2.2",
+    "cyaxiverse-phase3-orientifold-inflation-2.1",
+    "cyaxiverse-phase3-orientifold-inflation-2.0",
+    "cyaxiverse-phase3-orientifold-inflation-1.0")
+
+"""
+    f6_label(inflation::HDF5.Group, path) -> (label::Symbol, inferred::Bool)
+
+Return the kinetic-normalization label of a geometry's `inflation` group (F6,
+CYAX-0232 R-007) and whether it was inferred. The group version is
+`inflation/schema_version`; the nested compatibility marker
+`inflation/catastrophes/legacy_v1/schema_version` is not read.
+
+- `schema_version == "$(F6_SCHEMA_VERSION)"`: the label
+  `inflation/kinetic_normalization` must be `"sugra_c1"`; returns
+  `(:sugra_c1, false)`.
+- A historical group version (`…-2.3`, `…-2.2`, `…-2.1`, `…-2.0` or
+  `…-1.0`) with no label: `(:legacy_c_half, true)`.
+
+Throws an `ArgumentError` naming `path` for a missing or unknown version, a
+current-version group whose label is missing or not `"sugra_c1"`, and a
+historical version that carries a label.
+"""
+function f6_label(inflation::HDF5.Group, path::AbstractString)
+    where_ = "F6 inflation group in $(path)"
+    haskey(inflation, "schema_version") || throw(ArgumentError(
+        "$(where_): no schema_version"))
+    version = _read_dataset(inflation, "schema_version")
+    labelled = haskey(inflation, "kinetic_normalization")
+    if version == F6_SCHEMA_VERSION
+        labelled || throw(ArgumentError(
+            "$(where_): F6 $(version) has no kinetic_normalization label"))
+        _require_primary_label(_read_dataset(inflation, "kinetic_normalization"),
+            where_, "F6")
+        return (:sugra_c1, false)
+    elseif version in F6_LEGACY_SCHEMA_VERSIONS
+        labelled && throw(ArgumentError(
+            "$(where_): legacy F6 $(version) carries a kinetic_normalization label"))
+        return (:legacy_c_half, true)
+    end
+    throw(ArgumentError("$(where_): unknown F6 schema_version $(repr(version))"))
+end
+
 """
     stored_kinetic_normalization(path; family) -> (label::Symbol, inferred::Bool)
 
@@ -813,13 +860,19 @@ Return the kinetic-normalization label of a persisted HDF5 output and whether
 it was inferred from a legacy layout (CYAX-0232 R-006), applying the R-007
 checks of the family's reader. `family` is the output family: `:f1`
 ([`f1_label`](@ref)), `:f2` ([`f2_label`](@ref)), `:f3`
-([`f3_label`](@ref)) or `:f4` ([`f4_label`](@ref)).
+([`f3_label`](@ref)), `:f4` ([`f4_label`](@ref)) or `:f6`
+([`f6_label`](@ref)).
 """
 function stored_kinetic_normalization(path::AbstractString; family::Symbol)
-    family in (:f1, :f2, :f3, :f4) || throw(ArgumentError(
+    family in (:f1, :f2, :f3, :f4, :f6) || throw(ArgumentError(
         "stored_kinetic_normalization: unsupported family $(repr(family))"))
     h5open(path, "r") do file
         family === :f4 && return f4_label(file, path)
+        if family === :f6
+            haskey(file, "inflation") || throw(ArgumentError(
+                "F6 inflation group in $(path): no inflation group"))
+            return f6_label(file["inflation"]::HDF5.Group, path)
+        end
         if family === :f1
             haskey(file, "spectrum/physical") || throw(ArgumentError(
                 "F1 spectrum/physical in $(path): no spectrum/physical group"))

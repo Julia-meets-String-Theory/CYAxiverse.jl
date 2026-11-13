@@ -10,6 +10,10 @@ if !isdefined(@__MODULE__, :INFLATION_DIAGNOSTIC_SCHEMA_VERSION)
     include(joinpath(@__DIR__, "inflation_diagnostics_common.jl"))
 end
 
+# The poly-102 refinement runs `n8_physical_gradient_flow` with
+# `N8_K_RAW/k²`: an A96 reproduction path (CYAX-0232 R-008).
+const INFLATION_REFINEMENT_KINETIC_NORMALIZATION = "a96_reproduction_raw_radian"
+
 using CYAxiverse
 using OrdinaryDiffEq
 
@@ -72,6 +76,7 @@ function _refinement_summary(candidate, config, status::Symbol;
        refinement_status=status, error=error_message,
        measurement_status=measured === nothing ? :not_measured : measured.status,
        diagnostic_schema_version=INFLATION_DIAGNOSTIC_SCHEMA_VERSION,
+       kinetic_normalization=INFLATION_REFINEMENT_KINETIC_NORMALIZATION,
        measurement_scope=measured === nothing ? config.measurement_scope :
            measured.measurement_scope,
        precision_bits=config.precision_bits,

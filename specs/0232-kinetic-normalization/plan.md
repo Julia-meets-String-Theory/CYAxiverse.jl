@@ -423,6 +423,36 @@ literal in `reproduce`), the input file, and the F4 rules. The bridge test
 requires `…-reproduction-1.1` (T061); `merge_orientifold_shards.py` has no
 label yet (T037).
 
+### F6 and inflation CSV labels (T035, T036)
+
+**F6.** `write_inflation_group!` writes `inflation/kinetic_normalization`;
+`INFLATION_GROUP_SCHEMA_VERSION` comes from `read.F6_SCHEMA_VERSION`.
+`read.f6_label` reads only `inflation/schema_version`, so the nested
+`catastrophes/legacy_v1/schema_version` marker (still `…-1.0`) is never taken
+as the group version; `stored_kinetic_normalization` accepts `:f6`.
+
+**Inflation CSVs.** Versions: diagnostic `2`, contract `5`, shard `3`,
+refinement `4`, flow `2`, pilot `7`. The column `kinetic_normalization`
+follows `schema_version` in the refinement, flow and pilot field lists and
+`diagnostic_schema_version` in the scan-prep fields, which the shard fields
+include. Physical rows take `INFLATION_PHYSICAL_KINETIC_NORMALIZATION` (from
+`CYAxiverse.KINETIC_NORMALIZATION`). The A96 refinement summary in
+`inflation_refinement_common.jl` carries `"a96_reproduction_raw_radian"`, and
+`inflation_refinement_diagnostic_row` copies the summary's own label and
+refuses a summary without one. `inflation_scan_contract.jl` prints its failure
+rows with the label too (stdout only). `analyze_inflation_candidates.jl`
+(both CSVs) and `compare_reduction_inflation_scan.jl` (`scan_rows.csv`, its
+checkpoint and `geometry_summary.csv`) add the column last; they have no
+version. The existing exact-header checks of `_scan_prep_write_header`,
+`inflation_prepare_shard` and `pilot_prepare_csv` already refuse appending to
+a legacy file.
+
+**Left to later tasks.** T037: the merged shard CSV gets the column from its
+inputs, but `inflation_merge_shards` has no mixed-label check, and the pilot
+report has no label yet. T063: CSV reader inference from the T041 entries.
+T065, T066: resume checks (scan-prep, shards, scale continuation). T062: the
+notebook reader still requires F6 `2.0`.
+
 ### R-010 audit
 
 `test/fixtures/scientific_certification` (`backend_probe.jl`, `oracles.jl`,
@@ -446,6 +476,7 @@ runtests.jl:131–146 with `base_K = 2I` (passes) and `base_K = I`
 | runtests.jl:154 `base_K = I` | `2I` | R-011 |
 | runtests.jl:645–704, full.jl:784 (stored `Kinv = I`) | expected values follow R-005 factors where asserted | R-005 |
 | full.jl:551 `schema_version == "…-3"` | `"…-4"`, plus the label fields | R-006 (T031) |
+| full.jl:451 `inflation/schema_version == "…-2.3"` | `"…-2.4"`, plus the label | R-006 (T035) |
 
 G1 lists every other changed test with its reason.
 

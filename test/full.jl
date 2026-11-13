@@ -449,7 +449,8 @@ end
                 @test read(file["inflation/terminal_status"]) == "completed"
                 @test read(file["inflation/configuration_digest"]) == "fixture-digest"
                 @test read(file["inflation/schema_version"]) ==
-                    "cyaxiverse-phase3-orientifold-inflation-2.3"
+                    "cyaxiverse-phase3-orientifold-inflation-2.4"
+                @test read(file["inflation/kinetic_normalization"]) == "sugra_c1"
                 @test read(file["inflation/domain_certificate_version"]) ==
                     "physical-domain-certificate-2"
                 @test read(file["inflation/scale_status"]) == "homotopy_only"

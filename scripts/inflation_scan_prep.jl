@@ -18,8 +18,8 @@ include(joinpath(@__DIR__, "inflation_scan_common.jl"))
 using Printf
 
 const SCAN_PREP_FIELDS = (
-    :contract_version, :diagnostic_schema_version, :measurement_scope,
-    :data_dir, :max_branches,
+    :contract_version, :diagnostic_schema_version, :kinetic_normalization,
+    :measurement_scope, :data_dir, :max_branches,
     :h11, :polytope, :frst, :status, :error,
     :instantons, :selected_instantons, :qtilde_det, :negative_mode_range,
     :structured_charge_validated, :structured_fallback_reason,
@@ -404,6 +404,7 @@ function run_scan_prep(options)
                 failure = _scan_prep_error_status(error)
                 (; contract_version=INFLATION_SCAN_CONTRACT_VERSION,
                    diagnostic_schema_version=INFLATION_DIAGNOSTIC_SCHEMA_VERSION,
+                   kinetic_normalization=INFLATION_PHYSICAL_KINETIC_NORMALIZATION,
                    measurement_scope,
                    h11=geom_idx.h11, polytope=geom_idx.polytope, frst=geom_idx.frst,
                    status=failure.status, total_seconds=time() - started), failure.message

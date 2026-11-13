@@ -290,6 +290,7 @@ function result_row(geometry, k, normalization, model, loaded, solved, elapsed, 
         :reference_max_log10_error => loaded.reference_max_log10_error,
         :reference_sign_mismatches => loaded.reference_sign_mismatches,
         :reference_nonfinite_compatible => loaded.reference_nonfinite_compatible,
+        :kinetic_normalization => String(CYAxiverse.KINETIC_NORMALIZATION),
     )
 end
 
@@ -370,6 +371,7 @@ function summarize(rows, sample, grid, options)
             :reference_sign_mismatches => isempty(full_rows) ? missing :
                 full_rows[1][:reference_sign_mismatches],
             :rows_completed => length(full_rows),
+            :kinetic_normalization => String(CYAxiverse.KINETIC_NORMALIZATION),
         ))
     end
     summary
@@ -424,7 +426,7 @@ function main(args)
         :reduction_dimension, :reduction_signature, :multiplicity, :extra_rows,
         :solver_status, :residual_max, :elapsed_seconds, :starts, :residual_tolerance,
         :merge_tolerance, :reference_max_log10_error, :reference_sign_mismatches,
-        :reference_nonfinite_compatible)
+        :reference_nonfinite_compatible, :kinetic_normalization)
     error_fields = (:sample_rank, :h11, :polytope, :frst, :k, :normalization, :model,
         :stage, :error)
     checkpoint = (current_rows, current_errors, sample_rank) -> begin
@@ -442,7 +444,8 @@ function main(args)
         :both_candidate, :cn_only_candidate, :full_only_candidate,
         :reduction_count_difference, :reduction_structural_switch,
         :reduced_minima_not_full_minima, :normalization_difference,
-        :reference_max_log10_error, :reference_sign_mismatches, :rows_completed)
+        :reference_max_log10_error, :reference_sign_mismatches, :rows_completed,
+        :kinetic_normalization)
     write_csv(joinpath(output_dir, "scan_rows.csv"), rows, result_fields)
     write_csv(joinpath(output_dir, "geometry_summary.csv"), summary, summary_fields)
     write_csv(joinpath(output_dir, "errors.csv"), errors, error_fields)

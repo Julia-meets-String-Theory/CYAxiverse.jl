@@ -8,7 +8,9 @@ them.
 """
 
 if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
-    const INFLATION_SHARD_SCHEMA_VERSION = "2"
+    # Version 3 rows include the scan-prep `kinetic_normalization` column
+    # (CYAX-0232 R-006).
+    const INFLATION_SHARD_SCHEMA_VERSION = "3"
     const INFLATION_SHARD_METADATA_FIELDS = (
         :shard_schema_version, :run_id, :shard_index, :shard_count,
         :attempt, :started_unix_s, :finished_unix_s)

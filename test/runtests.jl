@@ -700,6 +700,13 @@ end
             flow_report = joinpath(root, "flows.csv")
             _write_csv(flow_report, scan.flow.rows, FLOW_FIELDS)
             @test length(readlines(flow_report)) == length(scan.flow.rows) + 1
+            # CYAX-0232 R-006 (T036): flow 2 and refinement 4 rows are labelled.
+            @test startswith(readlines(flow_report)[1],
+                "row_type,schema_version,kinetic_normalization,")
+            @test all(row.schema_version == "2" &&
+                row.kinetic_normalization == "sugra_c1" for row in scan.flow.rows)
+            @test all(row.schema_version == "4" &&
+                row.kinetic_normalization == "sugra_c1" for row in scan.refinement.rows)
         end
     end
 end
@@ -3477,6 +3484,13 @@ end
         @test diagnostic_row.serialization_status == :completed
         @test diagnostic_row.serialization_measurement_scope == :warm
         @test diagnostic_row.serialization_output_bytes > 0
+        # CYAX-0232 R-006 (T036): the A96 refinement row carries its own label.
+        @test refined.summary.kinetic_normalization == "a96_reproduction_raw_radian"
+        @test diagnostic_row.kinetic_normalization == "a96_reproduction_raw_radian"
+        @test diagnostic_row.diagnostic_schema_version == "2"
+        @test_throws ArgumentError inflation_refinement_diagnostic_row(
+            refinement_candidate, (; summary=Base.structdiff(refined.summary,
+                NamedTuple{(:kinetic_normalization,)})))
         @test occursin("candidate_id", inflation_diagnostic_csv_line(
             diagnostic_row; header=true))
         diagnostic_path = joinpath(mktempdir(), "stage4.csv")
@@ -3486,6 +3500,7 @@ end
         @test written.measurement_scope == :warm
         @test isfile(diagnostic_path)
         @test count(==('\n'), read(diagnostic_path, String)) == 2
+        @test occursin(",a96_reproduction_raw_radian,", read(diagnostic_path, String))
         failed_measurement = inflation_stage_measure(
             () -> throw(ArgumentError("stage-4 failure"));
             measurement_scope=:warm, capture_errors=true)

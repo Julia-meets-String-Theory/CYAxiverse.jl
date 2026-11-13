@@ -48,7 +48,10 @@ include(joinpath(@__DIR__, "inflation_scan_common.jl"))
 isdefined(@__MODULE__, :scan_geometry_for_inflation) ||
     include(joinpath(@__DIR__, "inflation_candidate_refinement.jl"))
 
-const INFLATION_GROUP_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-2.3"
+# F6 version and label (CYAX-0232 R-006): `2.4` carries
+# `inflation/kinetic_normalization = "sugra_c1"`.
+const INFLATION_GROUP_SCHEMA_VERSION = CYAxiverse.read.F6_SCHEMA_VERSION
+const INFLATION_KINETIC_NORMALIZATION = String(CYAxiverse.KINETIC_NORMALIZATION)
 const INFLATION_LEGACY_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-1.0"
 const INFLATION_FLOW_ENCODING_SCHEMA_VERSION = "cyaxiverse-inflation-flow-decimal-string-1.0"
 const INFLATION_DOMAIN_CERTIFICATE_VERSION = "physical-domain-certificate-2"
@@ -168,6 +171,7 @@ function write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
             haskey(file, "inflation") && HDF5.delete_object(file, "inflation")
             group = create_group(file, "inflation")
             group["schema_version"] = INFLATION_GROUP_SCHEMA_VERSION
+            group["kinetic_normalization"] = INFLATION_KINETIC_NORMALIZATION
             group["configuration_digest"] = config_digest
             group["status"] = phase3_status
             group["terminal_status"] = phase3_status

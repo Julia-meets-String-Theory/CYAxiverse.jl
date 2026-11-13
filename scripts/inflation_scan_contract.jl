@@ -93,6 +93,7 @@ function main(args)
         catch error
             failure = _scan_prep_error_status(error)
             (; contract_version=INFLATION_SCAN_CONTRACT_VERSION,
+               kinetic_normalization=INFLATION_PHYSICAL_KINETIC_NORMALIZATION,
                h11=geom_idx.h11, polytope=geom_idx.polytope, frst=geom_idx.frst,
                status=failure.status, error=failure.message)
         end

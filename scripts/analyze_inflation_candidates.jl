@@ -119,6 +119,7 @@ function analyze_geometry(geom_idx; starts=8192, reduction::Symbol=:catastrophe)
             negative_modes=c.negative_modes,
             zeroish_modes=c.zeroish_modes,
             positive_modes=c.positive_modes,
+            kinetic_normalization=String(CYAxiverse.KINETIC_NORMALIZATION),
         ))
     end
     # The counts partition the spectrum, so this must hold for every point.
@@ -161,6 +162,7 @@ function analyze_geometry(geom_idx; starts=8192, reduction::Symbol=:catastrophe)
         best_epsilon=flattest === nothing ? NaN : flattest.epsilon,
         zeroish_mode_points=count(row -> row.zeroish_modes > 0, point_rows),
         candidate_slowroll_saddles=count(row -> row.epsilon < 1 && abs(row.min_eta) < 1, saddle_rows),
+        kinetic_normalization=String(CYAxiverse.KINETIC_NORMALIZATION),
     )
     summary, point_rows
 end
