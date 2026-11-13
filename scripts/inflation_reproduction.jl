@@ -11,6 +11,10 @@ const Bench = CYAxiverse.axion_benchmarks
 const Poly102 = Bench.poly102_inflation
 const Source = Bench.benchmark_source_identity()
 const Manifest = Bench.benchmark_manifest()
+# CYAX-0232 R-008: the fixtures below are A96 reproductions (author matrices
+# `N5_K_RAW`, `N8_K_RAW`). The in-memory fixtures carry the Symbol label and
+# the serialized fixture carries the R-006 string under `:kinetic_normalization`.
+const FIXTURE_KINETIC_NORMALIZATION = Poly102.A96_KINETIC_NORMALIZATION
 
 function n8_fixture(delta_k)
     k = Bench.N8_KC + delta_k
@@ -47,7 +51,8 @@ function n8_fixture(delta_k)
        claim_boundary=Manifest.claim_boundary,
        Q=potential.Q, phases=potential.phases,
        tau=potential.qdotτ,
-       divisor_volumes=Bench.n8_geometry().divisor_volumes .* k,
+       # The A96 geometry: its divisor volumes equal the P96 reconstruction's.
+       divisor_volumes=Poly102.n8_geometry().divisor_volumes .* k,
        V_CY=126.0 * k^(3 / 2), k, kc=Bench.N8_KC,
        amplitudes=derivatives.amplitudes, K=kinetic,
        critical_point=critical.theta, hessian=derivatives.hessian,
@@ -76,7 +81,8 @@ function n8_fixture(delta_k)
            sixty_efolds=(delta_k=1.5320548620798324e-3,
                efolds=59.690642055250756),
        ),
-       reference=Poly102.n8_hilltop_normal_form_efolds(delta_k).efolds)
+       reference=Poly102.n8_hilltop_normal_form_efolds(delta_k).efolds,
+       kinetic_normalization=FIXTURE_KINETIC_NORMALIZATION)
 end
 
 function n5_fixture(delta_k)
@@ -107,13 +113,15 @@ function n5_fixture(delta_k)
        solver=(rtol=1e-6, atol=1e-9, max_step=5.0, tmax=1e6),
        phase_input=Bench.phase_fixture(:n5),
        catastrophe, catastrophe_high_precision,
-       reference=Poly102.n5_hilltop_normal_form_efolds(delta_k).efolds)
+       reference=Poly102.n5_hilltop_normal_form_efolds(delta_k).efolds,
+       kinetic_normalization=FIXTURE_KINETIC_NORMALIZATION)
 end
 
 function write_fixture(path)
     mkpath(dirname(path))
     open(path, "w") do io
         serialize(io, Dict(
+            :kinetic_normalization => String(FIXTURE_KINETIC_NORMALIZATION),
             :n5 => n5_fixture(1e-7),
             :n8_poly102 => n8_fixture(1e-7),
             :contract => (

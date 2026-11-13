@@ -1736,3 +1736,235 @@ end
         @test !isempty(records)
     end
 end
+
+# CYAX-0232 T070–T072 (R-008, Clarifications A4 and A7): reproduction results
+# carry their contract label, K-free reproduction functions carry none, bare
+# arrays document their contract, persisted reproduction outputs carry the
+# R-006 string, and physical readers reject reproduction labels.
+module CYAX0232ReproductionFixture
+# The script loads the Serialization stdlib, which the test environment does
+# not declare; make the standard library path visible for this include only.
+const _STDLIB_PUSHED = !("@stdlib" in LOAD_PATH)
+_STDLIB_PUSHED && push!(LOAD_PATH, "@stdlib")
+try
+    include(joinpath(@__DIR__, "..", "scripts", "inflation_reproduction.jl"))
+finally
+    _STDLIB_PUSHED && filter!(!=("@stdlib"), LOAD_PATH)
+end
+end
+
+@testset "CYAX-0232 reproduction labels (T070-T072)" begin
+    pb = CYAxiverse.paper_benchmarks
+    ai = pb.author_inflation
+    A96 = :a96_reproduction_raw_radian
+    P96 = :p96_reproduction_c_half
+    @test ai.A96_KINETIC_NORMALIZATION === A96
+    @test pb.A96_KINETIC_NORMALIZATION === A96
+    @test pb.P96_KINETIC_NORMALIZATION === P96
+    labelled(result, label) = hasproperty(result, :kinetic_normalization) &&
+        result.kinetic_normalization === label
+    unlabelled(result) = !hasproperty(result, :kinetic_normalization)
+
+    seed_a = [0.0, 0.00499839, 0.99500161, 0.75995156,
+              0.75004523, 0.24995477, 0.0, 0.75495317]
+
+    @testset "A96: poly102_inflation and its aliases (T070)" begin
+        k = ai.N8_KC + 1e-7
+        @test labelled(ai.n5_geometry(), A96)
+        @test labelled(ai.n5_light_direction(), A96)
+        @test labelled(ai.n8_geometry(), A96)
+        @test labelled(ai.n8_full_potential(k=k), A96)
+        @test labelled(ai.n8_coordinate_maps(k), A96)
+        critical = ai.n8_degenerate_point()
+        @test labelled(critical, A96)
+        @test labelled(ai.n8_mass_eigenbasis(k), A96)
+        @test labelled(ai.n8_unstable_direction(k), A96)
+        @test labelled(ai.n8_inflation_initial_condition(k), A96)
+        @test labelled(ai.n8_inflation_initial_condition(k;
+            direction_raw=ones(8)), A96)
+        audit = ai.n8_basis_directions(k)
+        @test labelled(audit, A96)
+        @test keys(audit.directions) == (:A_draft_kinetic, :B_package_current,
+            :C_canonical_hessian, :D_raw_coordinate, :E_mass_eigenbasis)
+        @test labelled(ai.n8_hilltop_probe(1e-7; sample_count=2), A96)
+        @test labelled(ai.n8_slow_roll_trajectory(1e-7; max_efolds=1e-3,
+            sample_count=1), A96)
+        short = ai.n8_author_trajectory(1e-7; precision_bits=64, max_time=1e-6,
+            sample_count=1)
+        @test labelled(short, A96)
+        # The full equation-(19) path uses N8_K_RAW; the default path is K-free.
+        @test labelled(ai.n8_full_derivatives(critical.theta, k), A96)
+        @test labelled(ai.n8_potential_derivatives(critical.theta, k; full=true), A96)
+        @test unlabelled(ai.n8_potential_derivatives(critical.theta, k;
+            trajectory=true))
+        # Compatibility aliases return the same labelled results.
+        @test pb.n5_geometry === ai.n5_geometry
+        @test pb.n8_physical_gradient_flow === ai.n8_author_trajectory
+        @test pb.n8_hilltop_normal_form === ai.n8_hilltop_probe
+        @test pb.n8_efold_gradient_flow === ai.n8_slow_roll_trajectory
+        @test labelled(pb.n8_hilltop_probe(1e-7; sample_count=2), A96)
+        @test labelled(pb.n8_slow_roll_trajectory(1e-7; max_efolds=1e-3,
+            sample_count=1), A96)
+        # catastrophe_diagnostics.jl.
+        @test labelled(pb.benchmark_manifest(), A96)
+        @test labelled(pb.n5_catastrophe_diagnostic(), A96)
+        @test labelled(pb.n8_catastrophe_diagnostic(), A96)
+        # A K-argument API is physical-domain and is not labelled (R-006).
+        @test unlabelled(pb.local_catastrophe_diagnostic([0.0], reshape([1], 1, 1),
+            [1.0], reshape([2.0], 1, 1)))
+    end
+
+    @testset "P96: reduced_models, compatibility, continuation, G3 (T070)" begin
+        @test labelled(pb.n8_geometry(), P96)
+        @test labelled(pb.n8_full_potential(k=2.0), P96)
+        @test labelled(pb.n8_potential_derivatives(zeros(8), 2.0; full=true), P96)
+        @test unlabelled(pb.n8_potential_derivatives(zeros(8), 2.0))
+        kc = pb.n8_degenerate_point(seed_a).k
+        hilltop = pb.n8_hilltop(kc + 1e-7)
+        @test labelled(hilltop, P96)
+        @test labelled(pb.n8_inflation_initial_condition(kc + 1e-7), P96)
+        @test labelled(pb.n8_inflation_initial_condition(kc + 1e-7;
+            basis=:mass_eigenbasis), P96)
+        local_form = pb.n8_local_hilltop_coefficients()
+        @test labelled(local_form, P96)
+        @test labelled(pb.n8_hilltop_efolds(1e-7), P96)
+        @test pb.n8_local_hilltop_efolds === pb.n8_hilltop_efolds
+        @test labelled(pb.n8_gradient_flow(1e-7; max_steps=1), P96)
+        @test labelled(pb.n8_valley_flow(1e-7; max_steps=1), P96)
+        @test labelled(pb.n8_stiff_gradient_flow(1e-7; max_steps=1), P96)
+        @test labelled(pb.n8_coordinate_maps(kc), P96)
+        @test labelled(pb.n8_mass_eigenbasis(kc + 1e-7; theta=hilltop.theta), P96)
+        @test labelled(pb.n8_unstable_direction(kc + 1e-7;
+            basis_theta=hilltop.theta), P96)
+        @test labelled(pb.n8_basis_directions(kc + 1e-7), P96)
+
+        # n8_continuation.jl.
+        theta = mod.(hilltop.theta, 1.0)
+        @test labelled(pb.n8_continuation_classify(theta, kc), P96)
+        @test labelled(pb.n8_bigfloat_p96_diagnostic(theta, kc; precision_bits=128), P96)
+        branches = pb.n8_find_regular_branches(0.68; n_starts=2)
+        @test :kinetic_normalization in fieldnames(eltype(branches))
+        @test all(branch -> labelled(branch, P96), branches)
+        result = pb.n8_pseudo_arclength_continuation(theta, kc + 1e-3; n_steps=1)
+        @test result isa pb.N8ContinuationResult{Float64}
+        @test result.kinetic_normalization === P96
+        @test :kinetic_normalization in propertynames(result)
+        @test hasproperty(result, :kinetic_normalization)
+        # R-006: the field layout and the positional constructor are unchanged.
+        @test fieldnames(pb.N8ContinuationResult) == (:steps, :branch_id,
+            :catastrophe_bracket, :catastrophe_k, :catastrophe_theta, :status)
+        step(k) = pb.N8ContinuationStep{Float64}(copy(theta), k, 0.0, 0.0,
+            zeros(8), true, 0, zeros(8), 0.0, 0.0, 1, 1, k - kc, :newton, 8,
+            1.0, 0, 0.0)
+        bracketed = pb.N8ContinuationResult{Float64}([step(kc - 1e-4),
+            step(kc + 1e-4)], 1, (1, 2), kc, copy(theta), :catastrophe_detected)
+        @test bracketed.kinetic_normalization === P96
+        @test bracketed.status === :catastrophe_detected
+        @test labelled(pb.n8_continuation_catastrophe_localization(bracketed;
+            bisection_steps=1), P96)
+
+        # n8_g3_control.jl.
+        g3 = pb.n8_g3_predictor_corrector(theta, ones(8), 0.0)
+        @test g3 isa pb.G3ContinuationResult{Float64}
+        @test g3.status === :invalid_initial_state
+        @test g3.kinetic_normalization === P96
+        @test g3.metric_contract === :P96_CYTools
+        @test :kinetic_normalization in propertynames(g3)
+        @test :kinetic_normalization ∉ fieldnames(pb.G3ContinuationResult)
+        @test length(fieldnames(pb.G3ContinuationResult)) == 10
+        null_vector = normalize(ones(8))
+        @test labelled(pb.n8_g3_seed_from_radial(theta, null_vector, kc;
+            max_iterations=1), P96)
+        @test labelled(pb.n8_g3_bigfloat_augmented_solve(theta, null_vector, kc,
+            0.0; precision_bits=128, max_iterations=1), P96)
+        @test labelled(pb.n8_g3_local_diagnostics(theta, null_vector, kc, 0.0;
+            precision_bits=128), P96)
+    end
+
+    @testset "K-free reproduction functions carry no label (A4, T072)" begin
+        kc5 = ai.n5_critical_scale()
+        @test unlabelled(pb.n5_potential())
+        @test unlabelled(ai.n5_potential())
+        @test unlabelled(pb.n8_potential())
+        @test unlabelled(ai.n8_potential(trajectory=true))
+        @test unlabelled(pb.n5_reduced_critical_points(kc5 + 1e-3))
+        @test unlabelled(ai.n5_reduced_critical_points(kc5 + 1e-3))
+        steps = ai.n5_reduced_zero_phase_continuation([kc5 - 1e-3, kc5 + 1e-3])
+        @test all(unlabelled, steps)
+        @test pb.n5_critical_scale() isa Float64
+        @test pb.n5_reduced_ratio(1.0) isa Float64
+        @test pb.instanton_scales([1.0, 2.0], 1.0) isa Matrix{Float64}
+        @test all(unlabelled, pb.n8_minima_scan(scales=(0.68,), starts=4))
+        # The reduced-model degenerate point uses no kinetic matrix.
+        @test unlabelled(pb.n8_degenerate_point(seed_a))
+    end
+
+    @testset "Bare-array contracts and persisted outputs (T071)" begin
+        doc(f) = string(Base.Docs.doc(f))
+        for (f, label) in ((ai.n5_kinetic_matrix, "a96_reproduction_raw_radian"),
+                (ai.n8_kinetic_matrix, "a96_reproduction_raw_radian"),
+                (pb.n8_kinetic_matrix, "p96_reproduction_c_half"))
+            @test occursin(label, doc(f))
+            @test occursin("CYAxiverse.kinetic_matrix", doc(f))
+            @test occursin("not the physical c = 1", doc(f))
+        end
+        @test ai.n8_kinetic_matrix(1.0) isa Hermitian
+        @test pb.n8_kinetic_matrix(1.0) isa Hermitian
+
+        fixture = CYAX0232ReproductionFixture
+        @test fixture.FIXTURE_KINETIC_NORMALIZATION === A96
+        # The N=8 fixture takes its divisor volumes from the A96 geometry;
+        # they equal the P96 reconstruction's (numerically unchanged).
+        @test ai.n8_geometry().divisor_volumes == pb.n8_geometry().divisor_volumes
+        mktempdir() do dir
+            path = fixture.write_fixture(joinpath(dir, "inflation_fixtures.jls"))
+            stored = open(fixture.deserialize, path)
+            @test stored[:kinetic_normalization] == "a96_reproduction_raw_radian"
+            @test stored[:n5].kinetic_normalization === A96
+            @test stored[:n8_poly102].kinetic_normalization === A96
+        end
+    end
+
+    @testset "Mixed-contract pilot benchmark (A7, T072)" begin
+        benchmark = pilot_benchmark_regression()
+        @test benchmark.passed
+        @test !hasproperty(benchmark, :kinetic_normalization)
+        both = (:a96_reproduction_raw_radian, :p96_reproduction_c_half)
+        a96 = (:a96_reproduction_raw_radian,)
+        @test benchmark.kinetic_normalization_by_field == (
+            n8_critical_scale=a96, n8_gradient_residual=a96,
+            n8_null_residual=a96, n8_zero_mode=a96,
+            n8_positive_heavy_modes=a96,
+            n8_detuned_negative_modes=both, n8_detuned_eigenvalues=both,
+            passed=both)
+        map = benchmark.kinetic_normalization_by_field
+        @test all(name -> hasproperty(benchmark, name), keys(map))
+        @test all(labels -> issorted(labels) && allunique(labels), values(map))
+        @test !any(name -> startswith(String(name), "n5_"), keys(map))
+    end
+
+    @testset "Physical readers reject reproduction labels (T071, T072)" begin
+        # No physical consumer of a reproduction result exists; the physical
+        # label readers reject both reproduction labels in every HDF5 family
+        # (R-007). F5 (Python) is covered by scripts/test_f5_legacy_layouts.py.
+        meta = Dict("metadata" => true, "cubic_basis" => "charge_basis")
+        for label in ("a96_reproduction_raw_radian", "p96_reproduction_c_half")
+            @test t060_case(:f1; expect=:reject, version=T060_F1_CURRENT, label)
+            @test t060_case(:f2; expect=:reject,
+                version="cyaxiverse-spectrum-groups-1", label, extra=meta)
+            @test t060_case(:f3; expect=:reject, version=2, label)
+            @test t060_case(:f4; expect=:reject,
+                version="cyaxiverse-fuzzy-axion-model-stage-1", label)
+            @test t060_case(:f6; expect=:reject, version=T060_F6 * "2.4", label)
+            mktempdir() do dir
+                path = joinpath(dir, "f1.h5")
+                h5open(file -> t060_build(:f1, file; version=T060_F1_CURRENT,
+                    label), path, "w")
+                h5open(path, "r") do file
+                    @test_throws ArgumentError CYAxiverse.read.f1_label(
+                        file["spectrum/physical"], path)
+                end
+            end
+        end
+    end
+end

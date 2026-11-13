@@ -96,6 +96,16 @@ class F5LegacyLayoutTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     labels.f5_reproduction_label(bad, "f.json")
 
+    def test_reproduction_labels_rejected(self):
+        # CYAX-0232 R-008 (T071): F5 is a physical family; its reader rejects
+        # both reproduction labels, and names the file.
+        for label in ("p96_reproduction_c_half", "a96_reproduction_raw_radian"):
+            summary = {"schema_version": labels.F5_REPRODUCTION_SCHEMA,
+                       "kinetic_normalization": label}
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(ValueError, "f.json"):
+                    labels.f5_reproduction_label(summary, "f.json")
+
 
 if __name__ == "__main__":
     unittest.main()

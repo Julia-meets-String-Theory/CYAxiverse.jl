@@ -1871,6 +1871,34 @@ function pilot_augmented_catastrophe(initial_theta::AbstractVector{<:Real},
            factor \ data.hessian / factor')))
 end
 
+# CYAX-0232 Clarification A7: `pilot_benchmark_regression` combines the A96
+# `poly102_inflation.n8_degenerate_point` with the P96
+# `paper_benchmarks.n8_hilltop`, so it carries no top-level
+# `kinetic_normalization`. This map gives the sorted labels of each
+# K-dependent field by provenance; the `n5_*` fields come from K-free
+# functions (Clarification A4) and are omitted.
+const PILOT_BENCHMARK_A96 = (:a96_reproduction_raw_radian,)
+const PILOT_BENCHMARK_A96_P96 = (:a96_reproduction_raw_radian, :p96_reproduction_c_half)
+const PILOT_BENCHMARK_KINETIC_NORMALIZATION_BY_FIELD = (
+    n8_critical_scale=PILOT_BENCHMARK_A96,
+    n8_gradient_residual=PILOT_BENCHMARK_A96,
+    n8_null_residual=PILOT_BENCHMARK_A96,
+    n8_zero_mode=PILOT_BENCHMARK_A96,
+    n8_positive_heavy_modes=PILOT_BENCHMARK_A96,
+    n8_detuned_negative_modes=PILOT_BENCHMARK_A96_P96,
+    n8_detuned_eigenvalues=PILOT_BENCHMARK_A96_P96,
+    passed=PILOT_BENCHMARK_A96_P96,
+)
+
+"""
+    pilot_benchmark_regression()
+
+Replay the N=5 and N=8 benchmark anchors. The result combines the A96 and P96
+reproduction contracts (CYAX-0232 Clarification A7): it has no top-level
+`kinetic_normalization` and carries `kinetic_normalization_by_field`, which
+maps each K-dependent field to its sorted tuple of labels. It is not a
+physical result.
+"""
 function pilot_benchmark_regression()
     benchmark = CYAxiverse.paper_benchmarks.poly102_inflation
     n5_kc = benchmark.n5_critical_scale()
@@ -1938,7 +1966,8 @@ function pilot_benchmark_regression()
            isapprox(n8.k, benchmark.N8_KC; atol=1e-9) &&
            n8.gradient_residual < 1e-10 && n8.null_residual < 1e-10 &&
            abs(n8.eigenvalues[1]) < 1e-9 && all(>(0), n8.eigenvalues[2:end]) &&
-           count(<(0), detuned.eigenvalues) == 1)
+           count(<(0), detuned.eigenvalues) == 1,
+       kinetic_normalization_by_field=PILOT_BENCHMARK_KINETIC_NORMALIZATION_BY_FIELD)
 end
 
 function _pilot_parse_args(args)

@@ -21,6 +21,10 @@ from scipy.integrate import solve_ivp
 from scipy.optimize import brentq
 
 
+# CYAX-0232 R-006/R-008: the output JSON is an A96 reproduction (the author's
+# raw-radian matrix `K_RAW`) and carries this top-level label.
+KINETIC_NORMALIZATION = "a96_reproduction_raw_radian"
+
 KC = 0.674506370003365
 BEST_X = np.array([
     0.0, 1.539958173041265, 4.743227134138319, 0.03083815375363047,
@@ -240,6 +244,7 @@ def main(output: Path, detunings: tuple[float, ...]):
             )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps({
+        "kinetic_normalization": KINETIC_NORMALIZATION,
         "source": "independent transcription of poly102_core.wl",
         "kc": KC,
         "basis_eigenvalues": eigenvalues.tolist(),

@@ -4,6 +4,12 @@ using NLsolve
 using OrdinaryDiffEq
 using LinearSolve
 
+# CYAX-0232 R-008: every struct or `NamedTuple` result of this module that
+# depends on `N8_K_RAW` or `N5_K_RAW` carries this reproduction label (the A96
+# raw-radian contract of spec 0148). Functions that consume no kinetic matrix
+# (Clarification A4) carry no label.
+const A96_KINETIC_NORMALIZATION = :a96_reproduction_raw_radian
+
 const N8_KC = 0.674506370003365
 const N8_BEST_X = Float64[
     0, 1.539958173041265, 4.743227134138319, 0.03083815375363047,
@@ -148,25 +154,46 @@ function n5_potential(; k::Real=1.0, phases=nothing)
        qdotτ=copy(N5_QDOTTAU), phases=phase, coefficient_model=:leading_terms)
 end
 
-"""Appendix-B N=5 geometry reconstructed with native CYTools."""
+"""Appendix-B N=5 geometry reconstructed with native CYTools.
+
+`kinetic` is the A96 author matrix `N5_K_RAW`; the result carries
+`kinetic_normalization = :a96_reproduction_raw_radian` (CYAX-0232 R-008).
+"""
 function n5_geometry()
     (; h11=5, h21=75, euler=-140, volume=N5_VOLUME,
        vertices=copy(N5_VERTICES), divisor_volumes=copy(N5_DIVISOR_VOLUMES),
        kinetic=Hermitian(copy(N5_K_RAW)),
        light_direction=copy(N5_LIGHT_DIRECTION),
-       metric_convention=:raw_angles_radians)
+       metric_convention=:raw_angles_radians,
+       kinetic_normalization=A96_KINETIC_NORMALIZATION)
 end
 
-"""The reconstructed N=5 kinetic matrix at volume scale `k`."""
+"""
+    n5_kinetic_matrix(k) -> Hermitian
+
+The reconstructed N=5 author kinetic matrix at volume scale `k`,
+`N5_K_RAW / k²`.
+
+Contract (CYAX-0232 R-008): A96 reproduction, `:a96_reproduction_raw_radian`.
+The matrix is the author's raw-radian matrix for raw angles θ with argument
+`Q'θ`. It is not the physical c = 1 kinetic matrix
+`CYAxiverse.kinetic_matrix` (`2 Kinv⁻¹`), and it returns a bare
+array, so it carries no label field.
+"""
 n5_kinetic_matrix(k::Real) = Hermitian(N5_K_RAW / Float64(k)^2)
 
-"""K-normalized period-one light direction from the draft's reduced model."""
+"""K-normalized period-one light direction from the draft's reduced model.
+
+The metric is the A96 [`n5_kinetic_matrix`](@ref); the result carries
+`kinetic_normalization = :a96_reproduction_raw_radian` (CYAX-0232 R-008).
+"""
 function n5_light_direction(k::Real=n5_critical_scale())
     metric = Matrix(n5_kinetic_matrix(k))
     direction = copy(N5_LIGHT_DIRECTION)
     direction ./= sqrt(dot(direction, metric * direction))
     (; direction, metric, norm=sqrt(dot(direction, metric * direction)),
-       qdot_light=N5_Q * direction)
+       qdot_light=N5_Q * direction,
+       kinetic_normalization=A96_KINETIC_NORMALIZATION)
 end
 
 """Appendix C Table 1, with twelve instanton rows and zero phases."""
@@ -182,7 +209,9 @@ end
 
 `N8_TAU` is the twelve-entry instanton-action list, not the eight divisor
 volumes.  Keep those source quantities separate so a replay cannot silently
-use an action list as a Kähler point.
+use an action list as a Kähler point. `kinetic` is the A96 matrix `N8_K_RAW`;
+the result carries `kinetic_normalization = :a96_reproduction_raw_radian`
+(CYAX-0232 R-008).
 """
 function n8_geometry()
     (; h11=8, h21=28, euler=-40, volume=N8_VOLUME,
@@ -190,10 +219,21 @@ function n8_geometry()
        divisor_volumes=copy(N8_DIVISOR_VOLUMES),
        instanton_actions=copy(N8_INSTANTON_ACTIONS),
        kinetic=Hermitian(copy(N8_K_RAW)),
-       metric_convention=:raw_angles_radians)
+       metric_convention=:raw_angles_radians,
+       kinetic_normalization=A96_KINETIC_NORMALIZATION)
 end
 
-"""The metric used by the author code at volume scale `k`."""
+"""
+    n8_kinetic_matrix(k) -> Hermitian
+
+The metric used by the author code at volume scale `k`, `N8_K_RAW / k²`.
+
+Contract (CYAX-0232 R-008): A96 reproduction, `:a96_reproduction_raw_radian`.
+The matrix is the author's raw-radian Mathematica matrix for raw angles θ
+with argument `Q'θ`. It is not the physical c = 1 kinetic matrix
+`CYAxiverse.kinetic_matrix` (`2 Kinv⁻¹`), and it returns a bare
+array, so it carries no label field.
+"""
 n8_kinetic_matrix(k::Real) = Hermitian(N8_K_RAW / Float64(k)^2)
 
 @inline function _n5_reduced_zero_phase_critical_scale(::Type{T}) where {T<:Real}
@@ -612,6 +652,11 @@ Evaluate the Appendix-C twelve-row model by default.  `trajectory=true` selects
 the ten retained rows used by `poly102_core.wl`.  `full=true` is retained as a
 diagnostic and adds all pairwise difference rows from the equation-(19)
 reconstruction.
+
+The default evaluation uses no kinetic matrix and carries no label
+(CYAX-0232 Clarification A4). The `full=true` cross terms use `N8_K_RAW`, so
+that result carries `kinetic_normalization = :a96_reproduction_raw_radian`
+(R-008).
 """
 function n8_potential_derivatives(theta::AbstractVector{<:Real}, k::Real;
         trajectory::Bool=false, full::Bool=false, phases=nothing)
@@ -650,7 +695,8 @@ function n8_full_potential(; k::Real=1.0, phases=nothing)
        qdotτ=nothing, phases=vcat(p.phases, [
            p.phases[j] - p.phases[i]
            for i in 1:(size(qrows, 1) - 1) for j in (i + 1):size(qrows, 1)
-       ]), diagonal_count=12, cross_count=66)
+       ]), diagonal_count=12, cross_count=66,
+       kinetic_normalization=A96_KINETIC_NORMALIZATION)
 end
 
 function n8_full_derivatives(theta::AbstractVector{<:Real}, k::Real;
@@ -663,7 +709,8 @@ function n8_full_derivatives(theta::AbstractVector{<:Real}, k::Real;
     (; value=sum(weights .* (1 .- cos.(args))),
        gradient=q * (weights .* sin.(args)),
        hessian=q * Diagonal(weights .* cos.(args)) * q',
-       amplitudes=weights, arguments=args)
+       amplitudes=weights, arguments=args,
+       kinetic_normalization=A96_KINETIC_NORMALIZATION)
 end
 
 function _symmetric_power(a::AbstractMatrix{<:Real}, power::Real)
@@ -681,7 +728,8 @@ function n8_coordinate_maps(k::Real)
            theta=(:raw_angle, :radian, :coordinate_vector),
            chi=(:canonical, :M_Pl, :coordinate_vector),
            tangent=(:raw_angle, :radian, :physical_tangent),
-       ))
+       ),
+       kinetic_normalization=A96_KINETIC_NORMALIZATION)
 end
 
 function _metric_normalize(direction::AbstractVector{<:Real}, metric::AbstractMatrix{<:Real})
@@ -742,7 +790,8 @@ function n8_degenerate_point(initial_theta::AbstractVector{<:Real}=N8_BEST_X;
     (; theta, null_vector=null / norm(null), k,
        eigenvalues=eigensystem.values, gradient_residual, null_residual,
        normalized_null_vector_residual=normalized_residual, converged,
-       iterations=result.iterations, tolerance=Float64(tolerance), max_iterations)
+       iterations=result.iterations, tolerance=Float64(tolerance), max_iterations,
+       kinetic_normalization=A96_KINETIC_NORMALIZATION)
 end
 
 """
@@ -767,7 +816,8 @@ function n8_mass_eigenbasis(k::Real=N8_KC;
        orthonormality_residual=norm(raw_eigenvectors' * maps.metric *
            raw_eigenvectors - I, Inf),
        generalized_residual=opnorm(d.hessian * raw_eigenvectors -
-           maps.metric * raw_eigenvectors * Diagonal(eigensystem.values)))
+           maps.metric * raw_eigenvectors * Diagonal(eigensystem.values)),
+       kinetic_normalization=A96_KINETIC_NORMALIZATION)
 end
 
 """
@@ -794,7 +844,8 @@ function n8_unstable_direction(k::Real=N8_KC; mode::Symbol=:most_negative,
        canonical_eigenvectors=mass_basis.canonical_eigenvectors,
        hessian_theta=mass_basis.hessian_theta,
        generalized_residual=mass_basis.generalized_residual,
-       orthonormality_residual=mass_basis.orthonormality_residual)
+       orthonormality_residual=mass_basis.orthonormality_residual,
+       kinetic_normalization=A96_KINETIC_NORMALIZATION)
 end
 
 """
@@ -843,7 +894,8 @@ function n8_inflation_initial_condition(k::Real; displacement::Real=1e-8,
        basis_raw_eigenvectors=direction.raw_eigenvectors,
        basis_canonical_eigenvectors=direction.canonical_eigenvectors,
        basis_orthonormality_residual=direction.orthonormality_residual,
-       basis_generalized_residual=direction.generalized_residual)
+       basis_generalized_residual=direction.generalized_residual,
+       kinetic_normalization=A96_KINETIC_NORMALIZATION)
 end
 
 """Return the explicitly normalized direction variants used in the basis audit."""
@@ -872,7 +924,8 @@ function n8_basis_directions(k::Real=N8_KC)
     (; directions, overlap, metric=maps.metric, metric_eigenvalues=kinetic.values,
        draft_kinetic_index=draft_index, unstable=unstable,
        canonical_hessian=unstable, mass_eigenbasis=mass,
-       equivalent_mass_direction=abs(dot(unstable.raw, maps.metric * mass.raw)))
+       equivalent_mass_direction=abs(dot(unstable.raw, maps.metric * mass.raw)),
+       kinetic_normalization=A96_KINETIC_NORMALIZATION)
 end
 
 """
@@ -930,7 +983,8 @@ function n8_hilltop_probe(delta_k::Real; displacement::Real=1e-8,
     (; k, delta_k=Float64(delta_k), efolds=total, entered_slow_roll=true,
        end_event=:local_normal_form, steps=sample_count, samples, initial,
        basis=initial.basis, basis_theta=copy(initial.basis_theta), basis_k=k,
-       solver=(method=:local_normal_form, sample_count))
+       solver=(method=:local_normal_form, sample_count),
+       kinetic_normalization=A96_KINETIC_NORMALIZATION)
 end
 
 function _n8_canonical_state(chi::AbstractVector{<:Real}, k::Real,
@@ -1025,7 +1079,8 @@ function n8_slow_roll_trajectory(delta_k::Real; displacement::Real=1e-8,
        basis=initial.basis, basis_theta=initial.basis_theta,
        basis_k=initial.basis_k,
        solver=(method=:rk4, max_efolds=Float64(max_efolds),
-           max_step=Float64(max_step), initial_step=Float64(initial_step)))
+           max_step=Float64(max_step), initial_step=Float64(initial_step)),
+       kinetic_normalization=A96_KINETIC_NORMALIZATION)
 end
 
 function _n8_big_symmetric_power(a::AbstractMatrix{BigFloat}, power::Real)
@@ -1263,7 +1318,8 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
                     accepted_steps=solution.stats.naccept,
                     rejected_steps=solution.stats.nreject,
                     rhs_evaluations=solution.stats.nf,
-                    jacobian_evaluations=solution.stats.njacs))
+                    jacobian_evaluations=solution.stats.njacs),
+                kinetic_normalization=A96_KINETIC_NORMALIZATION)
         end
         window_index = argmax(window[2] - window[1] for window in windows)
         entry_time, exit_time, exit_event = windows[window_index]
@@ -1295,7 +1351,8 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
                 initial_step=T(initial_step),
                 retcode=solution.retcode, accepted_steps=solution.stats.naccept,
                 rejected_steps=solution.stats.nreject, rhs_evaluations=solution.stats.nf,
-                jacobian_evaluations=solution.stats.njacs))
+                jacobian_evaluations=solution.stats.njacs),
+            kinetic_normalization=A96_KINETIC_NORMALIZATION)
     end
 end
 

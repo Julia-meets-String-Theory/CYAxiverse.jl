@@ -151,9 +151,17 @@ The package-facing potential convention is:
 
 | Object | Shape | Meaning |
 | --- | --- | --- |
-| `K` | `h11 × h11` | Axion kinetic metric. Geometry files normally store `Kinv`. |
+| `K` | `h11 × h11` | Axion kinetic matrix `K = 2 Kinv⁻¹` (see below). Geometry files store `Kinv`. |
 | `Q` | `h11 × N` | Integer instanton charges, one charge vector per column. |
 | `L` | `2 × N` | Signed log-scale data: sign/mantissa in row 1 and `log10` scale in row 2. |
+
+**Kinetic normalization.** Physical results use the supergravity
+normalization `-(1/2) M_pl² K ∂ϑ ∂ϑ` with `K = 2 Kinv⁻¹` and period-one ϑ
+(`CYAxiverse.KINETIC_NORMALIZATION == :sugra_c1`, CYAX-0232). Persisted outputs
+carry a `kinetic_normalization` label; outputs written before this convention
+are read as `legacy_c_half`. The documentation page *Kinetic normalization*
+(`docs/src/kinetic_normalization.md`) states the convention, the scaling
+relative to the earlier one, and the reading rules.
 
 The log-scale representation preserves information when instanton scales span
 many orders of magnitude. `oriented_potential` validates dimensions and finite

@@ -170,6 +170,8 @@ satisfies `B * B' = K⁻¹` and `ϑ = B ψ` gives canonically normalized ψ.
 asymmetric. The factor ½ is applied only here, in [`kinetic_matrix`](@ref) and
 in the kinetic norm `qᵀ (Kinv/2) q`; stored and exported inverse metrics stay
 unscaled; `CYAxiverse.KINETIC_NORMALIZATION` names this convention.
+See the *Kinetic normalization* page of the manual for the convention,
+the persisted labels and how earlier outputs are read.
 """
 kinetic_factor(Kinv::AbstractMatrix{<:Real}) = cholesky(Symmetric(Kinv ./ 2)).L
 
@@ -179,7 +181,8 @@ kinetic_factor(Kinv::AbstractMatrix{<:Real}) = cholesky(Symmetric(Kinv ./ 2)).L
 Return the physical axion kinetic matrix `K = 2 inv(Hermitian(Kinv))`, the
 matrix in `-(1/2) M_pl² K ∂ϑ ∂ϑ` with period-one ϑ (c = 1, CYAX-0232).
 `Kinv` is the stored, unscaled CYTools inverse Kähler metric; see
-[`kinetic_factor`](@ref).
+[`kinetic_factor`](@ref). See the *Kinetic normalization* page of the manual for the convention,
+the persisted labels and how earlier outputs are read.
 """
 kinetic_matrix(Kinv::AbstractMatrix{<:Real}) = 2 * inv(Hermitian(Kinv))
 
@@ -188,7 +191,9 @@ kinetic_matrix(Kinv::AbstractMatrix{<:Real}) = 2 * inv(Hermitian(Kinv))
 
 Construct the physical axion kinetic matrix `K = 2 Kinv⁻¹` (c = 1, see
 [`kinetic_matrix`](@ref)) from the stored inverse Kähler metric `Kinv` using a
-symmetry-aware inverse.
+symmetry-aware inverse. This is the matrix in `-(1/2) M_pl² K ∂ϑ ∂ϑ` for
+period-one ϑ (CYAX-0232). See the *Kinetic normalization* page of the manual for the convention,
+the persisted labels and how earlier outputs are read.
 
 `Kinv` is read from HDF5 as a plain `Matrix`. Inverting it directly
 (`inv(Kinv)`) selects a general LU factorisation that ignores its symmetry;
@@ -224,7 +229,8 @@ end
     _validate_kinetic_matrix(K, Kinv, geom_idx)
 
 Enforce the physical invariant (`.copilot/AGENTS.md`, section 3) that the
-axion kinetic matrix `K = 2 Kinv⁻¹` is symmetric positive-definite,
+axion kinetic matrix `K = 2 Kinv⁻¹` (c = 1; see the *Kinetic normalization*
+page of the manual) is symmetric positive-definite,
 throwing a `DomainError` naming the offending geometry and quantity when it
 is not, so a corrupt on-disk artifact is identifiable from the error alone.
 
@@ -861,7 +867,8 @@ it was inferred from a legacy layout (CYAX-0232 R-006), applying the R-007
 checks of the family's reader. `family` is the output family: `:f1`
 ([`f1_label`](@ref)), `:f2` ([`f2_label`](@ref)), `:f3`
 ([`f3_label`](@ref)), `:f4` ([`f4_label`](@ref)) or `:f6`
-([`f6_label`](@ref)).
+([`f6_label`](@ref)). See the *Kinetic normalization* page of the manual for the convention,
+the persisted labels and how earlier outputs are read.
 """
 function stored_kinetic_normalization(path::AbstractString; family::Symbol)
     family in (:f1, :f2, :f3, :f4, :f6) || throw(ArgumentError(

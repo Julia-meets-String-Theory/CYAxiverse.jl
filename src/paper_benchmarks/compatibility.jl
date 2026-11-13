@@ -12,6 +12,7 @@ const N5_VOLUME = author_inflation.N5_VOLUME
 const N5_DIVISOR_VOLUMES = author_inflation.N5_DIVISOR_VOLUMES
 const N5_K_RAW = author_inflation.N5_K_RAW
 const N5_LIGHT_DIRECTION = author_inflation.N5_LIGHT_DIRECTION
+const A96_KINETIC_NORMALIZATION = author_inflation.A96_KINETIC_NORMALIZATION
 
 const n5_geometry = author_inflation.n5_geometry
 const n5_kinetic_matrix = author_inflation.n5_kinetic_matrix
@@ -44,10 +45,15 @@ function _n8_symmetric_power(matrix::AbstractMatrix{<:Real}, power::Real)
     eigensystem.vectors * Diagonal(eigensystem.values .^ power) *
         eigensystem.vectors'
 end
+
+# The functions below use the P96 `n8_kinetic_matrix` of reduced_models.jl and
+# carry `kinetic_normalization = :p96_reproduction_c_half` (CYAX-0232 R-008).
+# The A96 aliases above return the labelled `author_inflation` results.
 function n8_coordinate_maps(k::Real)
     metric = Matrix(n8_kinetic_matrix(k))
     (; metric, raw_to_canonical=_n8_symmetric_power(metric, 1 / 2),
-       canonical_to_raw=_n8_symmetric_power(metric, -1 / 2))
+       canonical_to_raw=_n8_symmetric_power(metric, -1 / 2),
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 function n8_mass_eigenbasis(k::Real=N8_KC;
@@ -69,7 +75,8 @@ function n8_mass_eigenbasis(k::Real=N8_KC;
        orthonormality_residual=norm(raw_eigenvectors' * maps.metric *
            raw_eigenvectors - I, Inf),
        generalized_residual=opnorm(derivatives.hessian * raw_eigenvectors -
-           maps.metric * raw_eigenvectors * Diagonal(eigensystem.values)))
+           maps.metric * raw_eigenvectors * Diagonal(eigensystem.values)),
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 function n8_unstable_direction(k::Real=N8_KC;
@@ -90,7 +97,8 @@ function n8_unstable_direction(k::Real=N8_KC;
        canonical_eigenvectors=mass_basis.canonical_eigenvectors,
        hessian_theta=mass_basis.hessian_theta,
        generalized_residual=mass_basis.generalized_residual,
-       orthonormality_residual=mass_basis.orthonormality_residual)
+       orthonormality_residual=mass_basis.orthonormality_residual,
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 function n8_basis_directions(k::Real=N8_KC)
@@ -114,5 +122,6 @@ function n8_basis_directions(k::Real=N8_KC)
        metric_eigenvalues=kinetic.values, draft_kinetic_index=draft_index,
        unstable, canonical_hessian=unstable, mass_eigenbasis=mass,
        equivalent_mass_direction=abs(dot(unstable.raw,
-           unstable.metric * mass.raw)))
+           unstable.metric * mass.raw)),
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end

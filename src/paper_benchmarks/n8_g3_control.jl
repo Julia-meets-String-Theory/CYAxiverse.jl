@@ -140,6 +140,18 @@ struct G3ContinuationStep{T<:AbstractFloat}
     corrector_method::Symbol
 end
 
+"""
+    G3ContinuationResult{T}
+
+Result of [`n8_g3_predictor_corrector`](@ref): the accepted `steps`,
+`branch_id`, `status`, `termination_reason`, step counts, `source_data`,
+`metric_contract` (`:P96_CYTools`) and `control`.
+
+The result is a P96 reproduction. `result.kinetic_normalization` returns
+`:p96_reproduction_c_half` (CYAX-0232 R-008). The label is a property, not a
+field, so the field layout and the positional constructor are unchanged
+(R-006).
+"""
 struct G3ContinuationResult{T<:AbstractFloat}
     steps::Vector{G3ContinuationStep{T}}
     branch_id::Int
@@ -153,12 +165,19 @@ struct G3ContinuationResult{T<:AbstractFloat}
     control::Symbol
 end
 
+Base.getproperty(result::G3ContinuationResult, name::Symbol) =
+    name === :kinetic_normalization ? P96_KINETIC_NORMALIZATION :
+        getfield(result, name)
+Base.propertynames(::G3ContinuationResult, private::Bool=false) =
+    (fieldnames(G3ContinuationResult)..., :kinetic_normalization)
+
 """Find a local positive-alpha augmented seed from the radial event.
 
 The radial event is singular when alpha is held fixed.  A signed null-mode
 displacement at a small positive alpha supplies the two local unfolding
 branches without a grid search; failure of either signed seed is retained as
-a diagnostic status.
+a diagnostic status. The result carries
+`kinetic_normalization = :p96_reproduction_c_half` (CYAX-0232 R-008).
 """
 function n8_g3_seed_from_radial(theta0::AbstractVector{<:Real},
         null0::AbstractVector{<:Real}, k0::Real; alpha_seed::Real=1e-8,
@@ -179,7 +198,8 @@ function n8_g3_seed_from_radial(theta0::AbstractVector{<:Real},
             return (; theta=mod.(copy(theta), one(T)), null_vector=copy(null_vector),
                 k, alpha, converged=true, iterations=iter, residual,
                 side, displacement, status=:seed_converged,
-                source=:radial_event_null_displacement)
+                source=:radial_event_null_displacement,
+                kinetic_normalization=P96_KINETIC_NORMALIZATION)
         end
         jacobian = system.jacobian[:, 1:17]
         correction = try jacobian \ (-system.residual)
@@ -208,7 +228,8 @@ function n8_g3_seed_from_radial(theta0::AbstractVector{<:Real},
         accepted || return (; theta=mod.(copy(theta), one(T)), null_vector=copy(null_vector),
             k, alpha, converged=false, iterations=iter, residual,
             side, displacement, status=:seed_failed,
-            source=:radial_event_null_displacement)
+            source=:radial_event_null_displacement,
+            kinetic_normalization=P96_KINETIC_NORMALIZATION)
     end
     geometry = _g3_geometry(k, alpha)
     derivatives = _g3_geometry_derivatives(k, alpha, geometry)
@@ -216,7 +237,8 @@ function n8_g3_seed_from_radial(theta0::AbstractVector{<:Real},
     (; theta=mod.(copy(theta), one(T)), null_vector=copy(null_vector), k, alpha,
        converged=false, iterations=max_iterations, residual=norm(system.residual, Inf),
        side, displacement, status=:seed_max_iterations,
-       source=:radial_event_null_displacement)
+       source=:radial_event_null_displacement,
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 function _g3_augmented_system(theta::AbstractVector{T}, null_vector::AbstractVector{T},
@@ -303,6 +325,8 @@ end
 Alpha is the bounded continuation coordinate.  At each target alpha, the
 17-equation augmented system is solved in `(theta, null_vector, k)` using a
 predictor from the analytic alpha column and a damped Newton corrector.
+The returned [`G3ContinuationResult`](@ref) has the property
+`kinetic_normalization == :p96_reproduction_c_half` (CYAX-0232 R-008).
 """
 function n8_g3_predictor_corrector(theta0::AbstractVector{<:Real},
         null0::AbstractVector{<:Real}, k0::Real; alpha0::Real=0,
@@ -457,7 +481,11 @@ function n8_g3_predictor_corrector(theta0::AbstractVector{<:Real},
         :exact_integer_rational_table1, :P96_CYTools, :source12_positive_alpha)
 end
 
-"""Refine one fixed-alpha augmented solution with exact source geometry."""
+"""Refine one fixed-alpha augmented solution with exact source geometry.
+
+The result carries `kinetic_normalization = :p96_reproduction_c_half`
+(CYAX-0232 R-008); `n8_g3_local_diagnostics` does too.
+"""
 function n8_g3_bigfloat_augmented_solve(theta_seed::AbstractVector{<:Real},
         null_seed::AbstractVector{<:Real}, k_seed::Real, alpha::Real;
         precision_bits::Int=256, tolerance::Real=BigFloat("1e-60"),
@@ -492,7 +520,8 @@ function n8_g3_bigfloat_augmented_solve(theta_seed::AbstractVector{<:Real},
                     action_vector=copy(geometry.actions),
                     amplitudes=copy(geometry.full_amplitudes),
                     tau=copy(geometry.tau), volume=geometry.volume,
-                    metric=copy(geometry.metric)))
+                    metric=copy(geometry.metric),
+                    kinetic_normalization=P96_KINETIC_NORMALIZATION))
             end
             jacobian = system.jacobian[:, 1:17]
             correction = try jacobian \ (-system.residual)
@@ -534,7 +563,8 @@ function n8_g3_bigfloat_augmented_solve(theta_seed::AbstractVector{<:Real},
             iterations=max_iterations, precision_bits,
             source_precision_bits=precision_bits,
             source_data=:exact_integer_rational_table1,
-            metric_contract=:P96_CYTools, full_factor=true))
+            metric_contract=:P96_CYTools, full_factor=true,
+            kinetic_normalization=P96_KINETIC_NORMALIZATION))
     end
 end
 
@@ -557,6 +587,7 @@ function n8_g3_local_diagnostics(theta::AbstractVector{<:Real}, null_vector::Abs
             metric_contract=:P96_CYTools, full_factor=true,
             action_vector=copy(geometry.actions), amplitudes=copy(geometry.full_amplitudes),
             tau=copy(geometry.tau), volume=geometry.volume, metric=copy(geometry.metric),
-            trial_geometry=geometry))
+            trial_geometry=geometry,
+            kinetic_normalization=P96_KINETIC_NORMALIZATION))
     end
 end

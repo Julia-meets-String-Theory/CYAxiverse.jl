@@ -1,5 +1,12 @@
 const _LOG10E = log10(exp(1.0))
 
+# CYAX-0232 R-008: every struct or `NamedTuple` result of the reduced N=8
+# model that depends on the reconstructed `n8_geometry().kinetic` (M96) carries
+# this reproduction label (the P96 contract of spec 0148: period-one θ,
+# argument 2πQθ, metric M96/k²). Functions that consume no kinetic matrix
+# (Clarification A4) carry no label.
+const P96_KINETIC_NORMALIZATION = :p96_reproduction_c_half
+
 """Convert the leading `q⋅τ exp(-2π q⋅τ)` scaling to pipeline `L` data."""
 function instanton_scales(qdotτ::AbstractVector{<:Real}, k::Real)
     k > 0 || throw(ArgumentError("the volume scale k must be positive"))
@@ -71,7 +78,9 @@ end
 
 Complete equation-(19) potential from the 12 diagonal and 66 cross terms.
 The `:full` convention scales the Calabi--Yau volume as `k^(3/2)`;
-`:fixed` retains the reference volume for the explicit prefactor.
+`:fixed` retains the reference volume for the explicit prefactor. The cross
+terms use the inverse of the P96 metric; the result carries
+`kinetic_normalization = :p96_reproduction_c_half` (CYAX-0232 R-008).
 """
 function n8_full_potential(; k::Real=1.0, volume_normalization::Symbol=:full,
         phases=nothing)
@@ -109,7 +118,8 @@ function n8_full_potential(; k::Real=1.0, volume_normalization::Symbol=:full,
     ]
     (; Q=qmatrix, L=vcat(reshape(signs, 1, :), reshape(logs, 1, :)),
        phases=vcat(diagonal_phases, cross_phases), volume,
-       volume_normalization, diagonal_count=12, cross_count=66)
+       volume_normalization, diagonal_count=12, cross_count=66,
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 """
@@ -117,7 +127,9 @@ end
 
 Appendix C geometry data, including the full kinetic matrix reconstructed from
 the published vertices at the tip of the stretched Kähler cone. The matrix is
-in the same GLSM divisor basis as the Table 1 charges.
+in the same GLSM divisor basis as the Table 1 charges. It is the P96 matrix
+M96; the result carries `kinetic_normalization = :p96_reproduction_c_half`
+(CYAX-0232 R-008).
 """
 function n8_geometry()
     vertices = Int[
@@ -146,7 +158,8 @@ function n8_geometry()
     ]
     (; vertices, h11=8, h21=28, euler=-40, volume=126.0,
        divisor_volumes, instanton_actions, curve_volume_range=(1.0, 3.0),
-       kinetic=Hermitian(kinetic))
+       kinetic=Hermitian(kinetic),
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 """Exact volume scale of the cusp catastrophe in the reduced N=5 model."""
@@ -268,10 +281,13 @@ function n8_potential_derivatives(theta::AbstractVector{<:Real}, k::Real;
     length(theta) == 8 || throw(DimensionMismatch("the N=8 benchmark needs eight coordinates"))
     k > 0 || throw(ArgumentError("k must be positive"))
     if full
+        # The equation-(19) cross terms use the P96 metric (CYAX-0232 R-008);
+        # the default truncated evaluation is K-free (A4) and unlabelled.
         benchmark = n8_full_potential(k=k,
             volume_normalization=volume_normalization, phases=phases)
-        return _n8_potential_derivatives(theta, benchmark.Q, benchmark.L;
-            phases=benchmark.phases)
+        return merge(_n8_potential_derivatives(theta, benchmark.Q, benchmark.L;
+            phases=benchmark.phases),
+            (; kinetic_normalization=P96_KINETIC_NORMALIZATION))
     else
         benchmark = _n8_potential(k=k, phases=phases)
         return _n8_potential_derivatives(theta, benchmark.Q, benchmark.L;
@@ -279,10 +295,25 @@ function n8_potential_derivatives(theta::AbstractVector{<:Real}, k::Real;
     end
 end
 
-"""Kinetic matrix at volume scale `k`, using `tau(k)=k*tau(1)`."""
+"""
+    n8_kinetic_matrix(k) -> Hermitian
+
+Kinetic matrix of the reduced N=8 model at volume scale `k`, using
+`tau(k)=k*tau(1)`: `M96 / k²` with `M96 = n8_geometry().kinetic`.
+
+Contract (CYAX-0232 R-008): P96 reproduction, `:p96_reproduction_c_half`
+(period-one θ, argument 2πQθ, spec 0148). It is not the physical c = 1 kinetic
+matrix `CYAxiverse.kinetic_matrix` (`2 Kinv⁻¹`), and it returns a
+bare array, so it carries no label field. The A96 author matrix is
+`poly102_inflation.n8_kinetic_matrix`.
+"""
 n8_kinetic_matrix(k::Real) = n8_geometry().kinetic / Float64(k)^2
 
-"""Locate the N=8 hilltop for volume scale `k` and return its soft mode."""
+"""Locate the N=8 hilltop for volume scale `k` and return its soft mode.
+
+The soft mode uses the P96 metric; the result carries
+`kinetic_normalization = :p96_reproduction_c_half` (CYAX-0232 R-008).
+"""
 function n8_hilltop(k::Real; branch::Symbol=:a, tolerance::Float64=1e-12)
     seeds = (
         a=[0.0, 0.00499839, 0.99500161, 0.75995156,
@@ -318,7 +349,8 @@ function n8_hilltop(k::Real; branch::Symbol=:a, tolerance::Float64=1e-12)
     direction ./= sqrt(dot(direction, kinetic * direction))
     (; theta, phi, direction, eigenvalues=eigensystem.values,
        converged=result.f_converged || result.x_converged,
-       residual=result.residual_norm, k=Float64(k), kc=catastrophe.k)
+       residual=result.residual_norm, k=Float64(k), kc=catastrophe.k,
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 """
@@ -378,7 +410,8 @@ function n8_inflation_initial_condition(k::Real; displacement::Real=1e-8,
             basis_raw_eigenvectors=mass_basis.raw_eigenvectors,
             basis_canonical_eigenvectors=mass_basis.canonical_eigenvectors,
             basis_orthonormality_residual=mass_basis.orthonormality_residual,
-            basis_generalized_residual=mass_basis.generalized_residual)
+            basis_generalized_residual=mass_basis.generalized_residual,
+            kinetic_normalization=P96_KINETIC_NORMALIZATION)
     end
     metric_scale = follow_hilltop ? Float64(k) : catastrophe.k
     kinetic = Matrix(n8_kinetic_matrix(metric_scale))
@@ -403,7 +436,8 @@ function n8_inflation_initial_condition(k::Real; displacement::Real=1e-8,
        canonical_direction=factor' * direction,
        displacement=Float64(displacement), k=Float64(k), kc=catastrophe.k,
        hilltop, follow_hilltop, basis=:canonical_hessian,
-       basis_theta=copy(theta_critical), basis_k=Float64(metric_scale))
+       basis_theta=copy(theta_critical), basis_k=Float64(metric_scale),
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 """
@@ -462,7 +496,8 @@ function n8_local_hilltop_coefficients(; branch::Symbol=:a,
     c4 = -fourth_effective / (6 * center.derivatives.value)
     (; kc, beta1, c4, potential=center.derivatives.value,
        fourth_straight=fourth_xxxx,
-       fourth_effective, k_step=Float64(k_step))
+       fourth_effective, k_step=Float64(k_step),
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 """Equation-(13) local hilltop estimate for the reduced N=8 model."""
@@ -474,7 +509,8 @@ function n8_hilltop_efolds(delta_k::Real; displacement::Real=1e-8,
     beta = coefficients.beta1 * Float64(delta_k)
     efolds = log1p(beta / (coefficients.c4 * Float64(displacement)^2)) / (2 * beta)
     (; efolds, beta, coefficients, displacement=Float64(displacement),
-       delta_k=Float64(delta_k))
+       delta_k=Float64(delta_k),
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 """
@@ -594,7 +630,7 @@ function n8_gradient_flow(delta_k::Real; displacement::Real=1e-8,
        distance_path, efold_path, epsilon=epsilon_path,
        eta_parallel=eta_path, inflation_started,
        completed=inflation_started && abs(eta_path[end]) >= 1,
-       initial)
+       initial, kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 """Build the canonical soft/heavy decomposition used by valley flow."""
@@ -704,7 +740,8 @@ function n8_valley_flow(delta_k::Real; displacement::Real=1e-8,
        coordinates=hcat(theta_path...), x_path, efold_path,
        epsilon=epsilon_path, eta_parallel=eta_path,
        inflation_started, completed=inflation_started &&
-           (abs(point.eta) >= 1 || point.epsilon >= 1))
+           (abs(point.eta) >= 1 || point.epsilon >= 1),
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 """Take an implicit backward-Euler step for stiff gradient flow."""
@@ -791,7 +828,8 @@ function n8_stiff_gradient_flow(delta_k::Real; displacement::Real=1e-8,
        epsilon=epsilon_path, eta_parallel=eta_path,
        inflation_started,
        completed=inflation_started &&
-           (abs(eta_path[end]) >= 1 || epsilon_path[end] >= 1))
+           (abs(eta_path[end]) >= 1 || epsilon_path[end] >= 1),
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 function n8_degenerate_point(; kwargs...)

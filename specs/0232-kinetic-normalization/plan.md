@@ -322,6 +322,51 @@ Classification (`[S]` struct, `[NT]` `NamedTuple`, `[A]` bare array or scalar):
 Reproduction functions not named in the spec: `n8_g3_control.jl` (P96),
 `catastrophe_diagnostics.jl` (A96), and the K-free set (OD-4).
 
+**T070–T072 implementation.** Every [NT] above appends
+`kinetic_normalization` at each return point: A96 (`A96_KINETIC_NORMALIZATION`
+in `author_inflation`, aliased in `paper_benchmarks`) for the
+`poly102_inflation.jl` set, its compatibility aliases, `benchmark_manifest`,
+`n5_catastrophe_diagnostic` and `n8_catastrophe_diagnostic`; P96
+(`P96_KINETIC_NORMALIZATION`) for the `reduced_models.jl` set (`n8_valley_flow`
+on its result, not on the internal `_n8_valley_setup`), the compatibility.jl
+P96 functions, `n8_continuation.jl` and `n8_g3_control.jl`. The public structs
+`N8ContinuationResult` and `G3ContinuationResult` keep their fields and
+positional constructors (R-006): `Base.getproperty` returns the P96 label for
+`:kinetic_normalization`, `Base.propertynames` lists it, and the struct
+docstrings state it. Nested intermediates (trajectory `samples`,
+`n8_basis_directions().directions`, which callers iterate) are not labelled.
+`inflation_reproduction.jl` `n5_fixture` and `n8_fixture` carry the A96 label,
+and the serialized fixture has the key `:kinetic_normalization =>
+"a96_reproduction_raw_radian"`; `n8_fixture` now takes its divisor volumes from
+the A96 `n8_geometry()` instead of the P96 one (equal values, so that its only
+contract is A96). `author_poly102_reference.py` writes the top-level JSON key.
+`benchmark_inflation_scalability.jl` only prints a labelled
+`n8_physical_gradient_flow` result. `n5_kinetic_matrix` and both
+`n8_kinetic_matrix` docstrings state their contract.
+`pilot_benchmark_regression` carries `kinetic_normalization_by_field` (A7) and
+no top-level label; no physical consumer of it exists. Left unlabelled as
+K-free (A4): `n5_potential`, `n8_potential`, `n5_reduced_critical_points`,
+`n5_reduced_zero_phase_continuation`, `n5_critical_scale`, `n5_reduced_ratio`,
+`instanton_scales`, `n8_minima_scan`, the K-free scripts above, and the
+`local_catastrophe_diagnostic` K-argument API. Functions the record missed:
+P96 `reduced_models.jl` `n8_hilltop_efolds` (alias `n8_local_hilltop_efolds`;
+it uses `n8_local_hilltop_coefficients`), `n8_continuation_catastrophe_localization`
+and `n8_find_regular_branches` (each element) in `n8_continuation.jl`, and the
+`full=true` path of `reduced_models.jl` `n8_potential_derivatives` (through
+`n8_full_potential`); A96 `poly102_inflation.jl` `n8_basis_directions` and
+`n8_full_derivatives` (the `full=true` path of its `n8_potential_derivatives`).
+K-free and unlabelled (A4): the default path of both `n8_potential_derivatives`,
+`reduced_models.jl` `n8_degenerate_point`, `n8_bigfloat_continuation_refine`,
+`n8_bigfloat_augmented_solve`, `n8_continuation_compare_matcher`,
+`phase_fixture`, `cumulative_turning`, and the hard-coded normal-form functions
+`n5_hilltop_efolds`, `poly102_inflation.n8_hilltop_efolds` and
+`reference_efolds`. `trajectory_observables` takes a caller-supplied trajectory
+and is not labelled. Open: the comparison CSV of `inflation_reproduction.jl`
+(`write_comparison`) is not labelled, because its N8 rows hold the P96
+`n8_local_hilltop_efolds` next to A96 values: one R-006 row label cannot
+state both contracts, and A7 covers only in-memory results. This waits for an
+owner decision.
+
 ## Fixtures
 
 ### R-004 pins
@@ -716,6 +761,22 @@ file is named by its header).
 label or version, keeps a copied version, skips a legacy target and refuses a
 current-version target; `migrate_quartic_index_ordering.jl` refuses a
 current-version F2 group.
+
+### Conventions page (T080)
+
+`docs/src/kinetic_normalization.md` (manual page *Kinetic normalization*)
+states the definition, units, factor and K-argument contracts, the
+source-facts table with versions and the arXiv:2103.06812 numbering map, the
+open inferences, the P96 and A96 contracts, the full R-005 scaling tables, the
+label values, every family's label location and version history, the R-007
+inference, rejection, combination, batch-resume and migration rules, the
+unreliable legacy F2 cubic note (A1.5), the meaning of an inferred F5 label
+(A2), and the non-certified `scan_fresh_relaxed_qcd_candidates.py` (A6). It is
+pointed to from the README, the axion–photon page (whose `K = Kinv⁻¹` sentence
+is corrected) and the docstrings of `KINETIC_NORMALIZATION`, `kinetic_factor`,
+`kinetic_matrix`, `_kinetic_matrix`, `_validate_kinetic_matrix` and
+`stored_kinetic_normalization`; the `_kinetic_matrix` "`K = (1/2) g`" text was
+replaced in T010.
 
 ### R-010 audit
 
