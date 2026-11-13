@@ -902,6 +902,34 @@ Stop for the owner if:
 - the F5 evaluator dependence of another output is unclear;
 - implementation would need a normative change.
 
+## Open owner decisions at G1
+
+These points are not decided by the spec, Clarification A or this plan's
+recorded decisions. Each is left as implemented and is not declared complete.
+
+| # | Point | State at the candidate | Where recorded |
+|---|---|---|---|
+| G1-1 | `orientifold_population_preflight.py` accepts an inferred legacy `shard-merge-1.0` merge | accepted; the label is returned in the preflight result | *Readers* (T061) |
+| G1-2 | R-002 and R-005 harness dumps | unlabelled verification tools | *Writer inventory*, second pass |
+| G1-3 | `inflation_reproduction.jl` comparison CSV (`write_comparison`) mixes P96 and A96 rows | unlabelled | *R-008 search record* |
+| G1-4 | Committed `validation/inflation_fixtures.jls`, `validation/inflation_comparison.csv`, `validation/author_poly102_reference_miniforge.json` | not regenerated, so they carry no label although their writers now write one (T071) | this table |
+| G1-5 | `trajectory_observables` (caller-supplied trajectory) | unlabelled | *R-008 search record* |
+| G1-6 | Hard-coded normal-form functions (`n5_hilltop_efolds`, `poly102_inflation.n8_hilltop_efolds`, `reference_efolds`) | unlabelled as K-free under A4, although their constants were derived under a kinetic convention | *R-008 search record* |
+| G1-7 | `n8_author_trajectory` default tolerances | see below | this section |
+
+**G1-7.** `n8_author_trajectory` (`poly102_inflation.jl:1166`) derives its
+default tolerances from `precision_bits`: `reltol = 10^-(precision_bits ÷ 2)`,
+`abstol = 10^-(2·precision_bits ÷ 3)` (line 1237). For every allowed
+`precision_bits ≥ 64` this `reltol` is below the BigFloat working precision
+`2^-precision_bits` (64 bits: 1e-32 against 5e-20; the default 100 bits:
+1e-50 against 8e-31). The behaviour is unchanged from the base `10aa3dc`. Its
+only caller in the repository is the T070 label test, which hung at 64 bits
+with the defaults and now passes explicit `reltol`, `abstol` and `maxiters`
+(`5b5c4c0`). That the default call does not converge is inferred from that
+hang and is untested at the default 100 bits. Changing the defaults changes a
+reproduction path's numerics, which the spec's non-scope excludes, so it is
+left for the owner.
+
 ## Task decomposition
 
 T001–T002 gate everything. T010 precedes all label work. Family tasks
