@@ -976,9 +976,9 @@ not change: their assertions do not depend on K, and the full suite passes.
 found two gaps, both fixed in `90f6f43`: `stored_kinetic_normalization` was
 not exported (spec *Interfaces*), and T050's `base_K = I` case had no test.
 Remaining partial or unmet items, none declared complete:
-- R-008 / T071: the committed `validation/` files carry no label until the
-  B4 regeneration (G1-4). The `write_comparison` CSV is labelled per field
-  under Clarification B2 (tested in the T071 testset).
+- R-008 / T071: closed. The `write_comparison` CSV is labelled per field
+  under Clarification B2 (tested in the T071 testset), and the owner committed
+  the regenerated `validation/` files in `e172f9f` (B4 check below).
 - R-005: the inflation and F6 rows use the `infl` fixture instead of the
   R-004/R-003 pins (*R-005 row map*). This deviation was made in the plan,
   not by a spec amendment.
@@ -1010,8 +1010,7 @@ restructured the benchmarks. That drift predates CYAX-0232. In particular,
 since `828d2ff` the N8 `reduced_model_efolds` column holds the P96
 `n8_local_hilltop_efolds` (6818.66 and 1.2924) rather than the A96 normal form
 (464970.49 and 63.857) of the committed file, while its `method` text still
-reads "local normal form". This is out of CYAX-0232 scope and is reported to
-the owner.
+reads "local normal form". This is out of CYAX-0232 scope and is tracked in #235.
 - R-005 "reported" rows missing from the count report: e-folds, F6
   `n_candidates`, `n_qualified`, flow e-folds, F4 `model_lambda` and model
   counts, F5 optimizer outputs.
