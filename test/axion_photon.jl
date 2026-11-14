@@ -35,7 +35,9 @@ end
         axion_photon.InstantonData(reshape(Int[3], 1, 1),
             Float64[-20.0], Int[1], Int[1]),
         reshape(Float64[0.25], 1, 1))
-    one_q = 3.0 / 2.0
+    # c = 1 (CYAX-0232): the canonical factor is sqrt(Kinv / 2), so the
+    # canonical charge is q̂ = 3 sqrt(0.25 / 2) = 3 / (2√2), not 3 / 2.
+    one_q = 3.0 * sqrt(0.25 / 2)
     @test one_axion.log10_f_GeV[1] ≈
         log10(axion_photon.M_PLANCK_GEV) - log10(2π) - log10(one_q)
     @test one_axion.log10_mass_eV[1] ≈
@@ -78,8 +80,9 @@ end
         Float64[1.0, 1.0], Float64[2.0, 3.0], 5.0,
         Matrix{Float64}(I, 2, 2), Int[1 0; 0 1], Float64[1.0, 2.0],
         Int[1, 2], assignment)
+    # c = 1 (CYAX-0232): the QED kinetic norm is qᵀ (Kinv/2) q = 1/2 here.
     expected_log_threshold = 0.5 * assignment.qed_log10_lambda4 +
-        log10(axion_photon.M_PLANCK_GEV) + 9.0 + log10(2π)
+        log10(axion_photon.M_PLANCK_GEV) + 9.0 + log10(2π) + 0.5 * log10(0.5)
     @test axion_photon.qed_instanton_log10_threshold_eV(geometry) ≈
         expected_log_threshold
     @test axion_photon.qed_instanton_threshold_eV(geometry) ≈
@@ -112,7 +115,9 @@ end
     @test payload.selected_determinant == "1000003"
 
     # Hand-computed case: the first charge is (2, 1), the second is (1, 0),
-    # and Gram--Schmidt gives q = [sqrt(5) 2/sqrt(5); 0 1/sqrt(5)].
+    # and Gram--Schmidt gives q = [sqrt(5) 2/sqrt(5); 0 1/sqrt(5)] for the
+    # factor I. At c = 1 (CYAX-0232) the factor for Kinv = I is I/sqrt(2), so
+    # q and theta_from_canonical both carry 1/sqrt(2).
     hand = axion_photon.leading_hierarchy(
         axion_photon.InstantonData(Int[2 1; 1 0], Float64[7.0, 6.0],
             Int[1, 1], Int[1, 2]), Matrix{Float64}(I, 2, 2))
@@ -120,9 +125,9 @@ end
     @test hand.dependent_indices == Int[]
     @test hand.rank_certificate.prefix_ranks == [1, 2]
     @test hand.rank_certificate.selected_determinant == -1
-    @test hand.q ≈ [sqrt(5.0) 2 / sqrt(5.0); 0.0 1 / sqrt(5.0)]
+    @test hand.q ≈ [sqrt(5.0) 2 / sqrt(5.0); 0.0 1 / sqrt(5.0)] / sqrt(2.0)
     @test hand.theta_from_canonical ≈
-        [2 / sqrt(5.0) 1 / sqrt(5.0); 1 / sqrt(5.0) -2 / sqrt(5.0)]
+        [2 / sqrt(5.0) 1 / sqrt(5.0); 1 / sqrt(5.0) -2 / sqrt(5.0)] / sqrt(2.0)
 
     rng = MersenneTwister(0x03_0e_aa)
     for _ in 1:40

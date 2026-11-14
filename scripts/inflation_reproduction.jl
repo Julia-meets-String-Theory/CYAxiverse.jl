@@ -11,6 +11,10 @@ const Bench = CYAxiverse.axion_benchmarks
 const Poly102 = Bench.poly102_inflation
 const Source = Bench.benchmark_source_identity()
 const Manifest = Bench.benchmark_manifest()
+# CYAX-0232 R-008: the fixtures below are A96 reproductions (author matrices
+# `N5_K_RAW`, `N8_K_RAW`). The in-memory fixtures carry the Symbol label and
+# the serialized fixture carries the R-006 string under `:kinetic_normalization`.
+const FIXTURE_KINETIC_NORMALIZATION = Poly102.A96_KINETIC_NORMALIZATION
 
 function n8_fixture(delta_k)
     k = Bench.N8_KC + delta_k
@@ -47,7 +51,8 @@ function n8_fixture(delta_k)
        claim_boundary=Manifest.claim_boundary,
        Q=potential.Q, phases=potential.phases,
        tau=potential.qdotτ,
-       divisor_volumes=Bench.n8_geometry().divisor_volumes .* k,
+       # The A96 geometry: its divisor volumes equal the P96 reconstruction's.
+       divisor_volumes=Poly102.n8_geometry().divisor_volumes .* k,
        V_CY=126.0 * k^(3 / 2), k, kc=Bench.N8_KC,
        amplitudes=derivatives.amplitudes, K=kinetic,
        critical_point=critical.theta, hessian=derivatives.hessian,
@@ -76,7 +81,8 @@ function n8_fixture(delta_k)
            sixty_efolds=(delta_k=1.5320548620798324e-3,
                efolds=59.690642055250756),
        ),
-       reference=Poly102.n8_hilltop_normal_form_efolds(delta_k).efolds)
+       reference=Poly102.n8_hilltop_normal_form_efolds(delta_k).efolds,
+       kinetic_normalization=FIXTURE_KINETIC_NORMALIZATION)
 end
 
 function n5_fixture(delta_k)
@@ -107,13 +113,15 @@ function n5_fixture(delta_k)
        solver=(rtol=1e-6, atol=1e-9, max_step=5.0, tmax=1e6),
        phase_input=Bench.phase_fixture(:n5),
        catastrophe, catastrophe_high_precision,
-       reference=Poly102.n5_hilltop_normal_form_efolds(delta_k).efolds)
+       reference=Poly102.n5_hilltop_normal_form_efolds(delta_k).efolds,
+       kinetic_normalization=FIXTURE_KINETIC_NORMALIZATION)
 end
 
 function write_fixture(path)
     mkpath(dirname(path))
     open(path, "w") do io
         serialize(io, Dict(
+            :kinetic_normalization => String(FIXTURE_KINETIC_NORMALIZATION),
             :n5 => n5_fixture(1e-7),
             :n8_poly102 => n8_fixture(1e-7),
             :contract => (
@@ -133,33 +141,51 @@ function write_fixture(path)
     path
 end
 
+# CYAX-0232 Clarification B2: the comparison CSV mixes A96 and P96 values, so
+# it carries one label column per K-dependent value column, set from each
+# value's provenance, and no row-level `kinetic_normalization` column. Physical
+# readers must reject it (A7).
+const COMPARISON_A96 = String(Poly102.A96_KINETIC_NORMALIZATION)
+const COMPARISON_P96 = String(Bench.P96_KINETIC_NORMALIZATION)
+const COMPARISON_HEADER = "benchmark,delta_k," *
+    "reduced_model_efolds,normal_form_efolds,independent_physical_flow_efolds," *
+    "reference_efolds,method," *
+    "reduced_model_efolds_kinetic_normalization," *
+    "normal_form_efolds_kinetic_normalization," *
+    "independent_physical_flow_efolds_kinetic_normalization," *
+    "reference_efolds_kinetic_normalization"
+
 function write_comparison(path)
     reference = Bench.benchmark_efold_targets()
     independent_physical_flow = Dict(
         1e-7 => 464213.5708051051,
         1.5320548620798324e-3 => 59.690642055250756,
     )
+    # Label columns, in value-column order: reduced model, normal form,
+    # independent physical flow (empty where there is no value), reference.
+    n5_labels = (COMPARISON_A96, COMPARISON_A96, "", COMPARISON_A96)
+    n8_labels = (COMPARISON_P96, COMPARISON_A96, COMPARISON_A96, COMPARISON_A96)
     rows = (
         ("N5", 1e-7, Poly102.n5_hilltop_normal_form_efolds(1e-7).efolds,
             reference.n5[1].efolds, "", reference.n5[1].efolds,
-            "local reduced model; no independent author trajectory"),
+            "local reduced model; no independent author trajectory", n5_labels...),
         ("N5", 6.65e-5, Poly102.n5_hilltop_normal_form_efolds(6.65e-5).efolds,
             reference.n5[2].efolds, "", reference.n5[2].efolds,
-            "local reduced model; no independent author trajectory"),
+            "local reduced model; no independent author trajectory", n5_labels...),
         ("N8_poly102", 1e-7, Bench.n8_local_hilltop_efolds(1e-7).efolds,
             reference.n8[1].efolds, independent_physical_flow[1e-7],
             reference.n8[1].efolds,
-            "local normal form; miniforge Python physical flow"),
+            "local normal form; miniforge Python physical flow", n8_labels...),
         ("N8_poly102", 1.5320548620798324e-3,
             Bench.n8_local_hilltop_efolds(1.5320548620798324e-3).efolds,
             reference.n8[2].efolds,
             independent_physical_flow[1.5320548620798324e-3],
             reference.n8[2].efolds,
-            "local normal form; miniforge Python physical flow"),
+            "local normal form; miniforge Python physical flow", n8_labels...),
     )
     mkpath(dirname(path))
     open(path, "w") do io
-        println(io, "benchmark,delta_k,reduced_model_efolds,normal_form_efolds,independent_physical_flow_efolds,reference_efolds,method")
+        println(io, COMPARISON_HEADER)
         for row in rows
             println(io, join(row, ","))
         end

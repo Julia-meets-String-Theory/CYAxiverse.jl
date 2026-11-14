@@ -33,7 +33,9 @@ benchmark_source_identity() = PAPER_SOURCE_IDENTITY
 
 Return a replayable manifest for the two named paper examples.  The manifest
 keeps the instanton action list separate from the divisor-volume Kähler point
-and records the fixed-saxion scientific boundary explicitly.
+and records the fixed-saxion scientific boundary explicitly. Its `kinetic`
+matrices are the A96 author matrices; the manifest carries
+`kinetic_normalization = :a96_reproduction_raw_radian` (CYAX-0232 R-008).
 """
 function benchmark_manifest()
     n5 = author_inflation.n5_geometry()
@@ -100,7 +102,8 @@ function benchmark_manifest()
             fixed_saxions=true,
             complete_nonperturbative_superpotential=false,
             moduli_stabilization=:not_established,
-        ))
+        ),
+        kinetic_normalization=author_inflation.A96_KINETIC_NORMALIZATION)
 end
 
 function _catastrophe_impl(theta, charges, amplitudes, metric, phases;
@@ -216,6 +219,15 @@ Classify a stationary point using the canonical near-null direction and its
 projected second, third, and fourth derivatives.  `Q` has axions in rows and
 instantons in columns; `amplitudes` are the signed coefficients in
 `sum(amplitude * (1 - cos(argument_scale * Q' * theta + phase)))`.
+
+`metric` is a K-argument (CYAX-0232): the kinetic matrix `K` in
+`-(1/2) M_pl² K ∂θ ∂θ` for the coordinates `theta`, used as given and never
+rescaled. With `argument_scale = 1` (period-one θ) and stored CYTools data at
+c = 1, it is `CYAxiverse.kinetic_matrix(Kinv)`, which is `2 Kinv⁻¹`.
+Because `metric` is supplied by the caller, the result carries no
+`kinetic_normalization` label (CYAX-0232 R-006); the reproduction wrappers
+`n5_catastrophe_diagnostic`, `n8_catastrophe_diagnostic` (A96) and
+`n8_continuation_classify`, `n8_bigfloat_p96_diagnostic` (P96) add theirs.
 """
 function local_catastrophe_diagnostic(theta::AbstractVector, Q::AbstractMatrix,
         amplitudes::AbstractVector, metric::AbstractMatrix;
@@ -269,7 +281,8 @@ function n5_catastrophe_diagnostic(; k::Real=author_inflation.n5_critical_scale(
         derivative_tolerance)
     merge(result, (; example=:n5, k=Float64(k),
         kc=author_inflation.n5_critical_scale(),
-        source_identity=PAPER_SOURCE_IDENTITY.identifier))
+        source_identity=PAPER_SOURCE_IDENTITY.identifier,
+        kinetic_normalization=author_inflation.A96_KINETIC_NORMALIZATION))
 end
 
 function n8_catastrophe_diagnostic(; theta=nothing, k::Real=N8_KC,
@@ -290,7 +303,8 @@ function n8_catastrophe_diagnostic(; theta=nothing, k::Real=N8_KC,
         derivative_tolerance)
     merge(result, (; example=:n8_poly102, k=Float64(k), kc=N8_KC,
         source_identity=PAPER_SOURCE_IDENTITY.identifier,
-        trajectory_truncation=trajectory ? :ten_rows : :twelve_rows))
+        trajectory_truncation=trajectory ? :ten_rows : :twelve_rows,
+        kinetic_normalization=author_inflation.A96_KINETIC_NORMALIZATION))
 end
 
 """

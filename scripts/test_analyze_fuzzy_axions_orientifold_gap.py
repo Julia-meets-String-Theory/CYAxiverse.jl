@@ -6,6 +6,8 @@ import unittest
 from unittest import mock
 
 import analyze_fuzzy_axions_orientifold_gap as gap
+from f5_legacy_layout_api import synthesize
+import kinetic_normalization_labels as labels
 from orientifold_terminal_ledger import TerminalLedgerWriter
 
 
@@ -34,11 +36,13 @@ def _detail(
 
 
 def _provenance():
+    # The run provenance shape written at reproduction-1.1 (CYAX-0232 T041
+    # record, PROV macro), so that shard fixtures match a recorded layout.
     return {
         "source_commit": "fixture-commit",
         "git_dirty": False,
         "runtime_versions": {"python": "fixture"},
-        "input_partition_manifest": {"status": "complete", "version": "fixture"},
+        "input_partition_manifest": {"status": "complete", "partitions": []},
     }
 
 
@@ -450,7 +454,32 @@ _SYNTH_TARGETS = {
 }
 
 
+# CYAX-0232 T061: a reproduction-1.1 shard artifact must match a recorded
+# layout (Clarification A2). The fixtures are built on layout 1.1-G3-L03 (a
+# sharded run with --orientifold-audit, h11 with a Table 1 row): its required
+# paths, then the test's own values merged in.
+_SHARD_LAYOUT = "1.1-G3-L03"
+
+
+def _merge(base, values):
+    for key, value in values.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
 def _shard_artifact(summary, *, index, count, shard_favorable, total_favorable, counts):
+    layout = next(
+        layout for layout in labels.f5_legacy_layouts("1.1") if layout.id == _SHARD_LAYOUT
+    )
+    return _merge(synthesize(layout.required), _shard_values(
+        summary, index=index, count=count, shard_favorable=shard_favorable,
+        total_favorable=total_favorable, counts=counts))
+
+
+def _shard_values(summary, *, index, count, shard_favorable, total_favorable, counts):
     return {
         "schema_version": gap.REPRODUCTION_SCHEMA_VERSION,
         "run_provenance": {"source_commit": "fixture-commit"},
@@ -668,6 +697,32 @@ class ShardedAnalysisTests(unittest.TestCase):
         shards[1]["paper_targets"]["inherited_orientifold_cys"] = 999
         supported, table = self._patched()
         with supported, table, self.assertRaisesRegex(gap.ArtifactError, "paper_targets"):
+            gap._validate_sharded_artifacts(
+                shards, _SYNTH_H11, [Path("s0.json"), Path("s1.json")]
+            )
+
+    def test_shard_matching_no_recorded_layout_is_rejected(self):
+        # CYAX-0232 R-007, Clarification A2: a 1.1 shard is inferred only when
+        # it matches a recorded layout.
+        (dir0, dir1), shards = _two_shard_population()
+        self.addCleanup(dir0.cleanup)
+        self.addCleanup(dir1.cleanup)
+        shards[1]["unrecorded_block"] = {"value": 1}
+        supported, table = self._patched()
+        with supported, table, self.assertRaisesRegex(
+            gap.ArtifactError, r"s1\.json.*matches no recorded layout"
+        ):
+            gap._validate_sharded_artifacts(
+                shards, _SYNTH_H11, [Path("s0.json"), Path("s1.json")]
+            )
+
+    def test_labelled_1_1_shard_is_rejected(self):
+        (dir0, dir1), shards = _two_shard_population()
+        self.addCleanup(dir0.cleanup)
+        self.addCleanup(dir1.cleanup)
+        shards[0]["kinetic_normalization"] = "sugra_c1"
+        supported, table = self._patched()
+        with supported, table, self.assertRaisesRegex(gap.ArtifactError, "carries a kinetic"):
             gap._validate_sharded_artifacts(
                 shards, _SYNTH_H11, [Path("s0.json"), Path("s1.json")]
             )

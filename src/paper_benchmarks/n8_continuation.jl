@@ -29,6 +29,18 @@ struct N8ContinuationStep{T<:AbstractFloat}
     branch_state_error::T
 end
 
+"""
+    N8ContinuationResult{T}
+
+Result of [`n8_pseudo_arclength_continuation`](@ref): the accepted
+`steps`, `branch_id`, `catastrophe_bracket`, `catastrophe_k`,
+`catastrophe_theta` and `status`.
+
+The result is a P96 reproduction (canonical Hessians use the metric M96/k²).
+`result.kinetic_normalization` returns `:p96_reproduction_c_half`
+(CYAX-0232 R-008). The label is a property, not a field, so the field layout
+and the positional constructor are unchanged (R-006).
+"""
 struct N8ContinuationResult{T<:AbstractFloat}
     steps::Vector{N8ContinuationStep{T}}
     branch_id::Int
@@ -37,6 +49,12 @@ struct N8ContinuationResult{T<:AbstractFloat}
     catastrophe_theta::Union{Nothing,Vector{T}}
     status::Symbol
 end
+
+Base.getproperty(result::N8ContinuationResult, name::Symbol) =
+    name === :kinetic_normalization ? P96_KINETIC_NORMALIZATION :
+        getfield(result, name)
+Base.propertynames(::N8ContinuationResult, private::Bool=false) =
+    (fieldnames(N8ContinuationResult)..., :kinetic_normalization)
 
 # Immutable source data used by the high-precision validation path.  Keeping
 # the charges as integers and the actions as rationals prevents a Float64
@@ -226,7 +244,9 @@ stability. Input and output use period-one GLSM coordinates.
 Eigenvalues are monitored using the P96 canonical Hessian (K_θ^{-1/2} H K_θ^{-1/2})
 and the hierarchy-conditioned Hessian (for catastrophe bracket detection).
 
-P96 convention: period-one θ, argument 2πQθ, metric M96/k².
+P96 convention: period-one θ, argument 2πQθ, metric M96/k². The returned
+[`N8ContinuationResult`](@ref) has the property
+`kinetic_normalization == :p96_reproduction_c_half` (CYAX-0232 R-008).
 """
 function n8_pseudo_arclength_continuation(
         theta0::AbstractVector{<:Real}, k0::Real;
@@ -534,7 +554,8 @@ end
 
 Find distinct stationary points of ∇V(θ,k)=0 at fixed k using the
 hierarchy-preconditioned leading-charge solver. Returns period-one GLSM
-coordinates with P96 canonical Hessian inertia.
+coordinates with P96 canonical Hessian inertia. Each returned `NamedTuple`
+carries `kinetic_normalization = :p96_reproduction_c_half` (CYAX-0232 R-008).
 """
 function n8_find_regular_branches(k::Real; n_starts::Int=512,
         residual_tolerance::Real=1e-10, merge_tolerance::Real=1e-5)
@@ -544,8 +565,9 @@ function n8_find_regular_branches(k::Real; n_starts::Int=512,
 
     found = Vector{NamedTuple{(:theta, :phi, :gradient_residual,
         :canonical_eigenvalues, :conditioned_eigenvalues,
-        :n_negative, :n_zero, :converged),
-        Tuple{Vector{T}, Vector{T}, T, Vector{T}, Vector{T}, Int, Int, Bool}}}()
+        :n_negative, :n_zero, :converged, :kinetic_normalization),
+        Tuple{Vector{T}, Vector{T}, T, Vector{T}, Vector{T}, Int, Int, Bool,
+            Symbol}}}()
 
     for start_idx in 1:n_starts
         phi = start_idx == 1 ? zeros(T, n) : rand(T, n)
@@ -593,7 +615,8 @@ function n8_find_regular_branches(k::Real; n_starts::Int=512,
                 gradient_residual=norm(sys.gradient, Inf),
                 canonical_eigenvalues=copy(can_eig),
                 conditioned_eigenvalues=copy(cond_eig),
-                n_negative, n_zero, converged))
+                n_negative, n_zero, converged,
+                kinetic_normalization=P96_KINETIC_NORMALIZATION))
         end
     end
     sort!(found, by=f -> f.n_negative)
@@ -604,7 +627,8 @@ end
     n8_continuation_catastrophe_localization(result; bisection_steps=50)
 
 Refine the catastrophe bracket by bisection on the conditioned Hessian
-smallest eigenvalue.
+smallest eigenvalue. The canonical Hessian uses the P96 metric; the result
+carries `kinetic_normalization = :p96_reproduction_c_half` (CYAX-0232 R-008).
 """
 function n8_continuation_catastrophe_localization(result::N8ContinuationResult{T};
         bisection_steps::Int=50, tolerance::T=T(1e-12)) where {T<:AbstractFloat}
@@ -680,7 +704,8 @@ function n8_continuation_catastrophe_localization(result::N8ContinuationResult{T
        canonical_hessian_eigenvalues=copy(can_eig),
        conditioned_hessian_min=minimum(cond_eig),
        conditioned_hessian_eigenvalues=copy(cond_eig),
-       bracket_width=abs(k_hi - k_lo))
+       bracket_width=abs(k_hi - k_lo),
+       kinetic_normalization=P96_KINETIC_NORMALIZATION)
 end
 
 """
@@ -818,7 +843,8 @@ end
 Evaluate the P96 projected diagnostic with exact twelve-term source data.
 The reconstructed P96 metric is currently a Float64 witness, so the result
 records that 53-bit metric boundary instead of implying a high-precision
-canonical metric.
+canonical metric. The result carries
+`kinetic_normalization = :p96_reproduction_c_half` (CYAX-0232 R-008).
 """
 function n8_bigfloat_p96_diagnostic(theta_seed::AbstractVector{<:Real},
         k_seed::Real; precision_bits::Int=256,
@@ -841,7 +867,8 @@ function n8_bigfloat_p96_diagnostic(theta_seed::AbstractVector{<:Real},
         merge(result, (; metric_source_precision_bits=53,
             metric_precision_boundary=:float64_reconstructed,
             source_data=:exact_integer_rational_table1,
-            coordinate_contract=:P96))
+            coordinate_contract=:P96,
+            kinetic_normalization=P96_KINETIC_NORMALIZATION))
     end
 end
 
@@ -849,16 +876,19 @@ end
     n8_continuation_classify(theta, k; precision_bits=53)
 
 Classify catastrophe at (theta, k) using P96 canonical metric and argument_scale=2π.
+The result carries `kinetic_normalization = :p96_reproduction_c_half`
+(CYAX-0232 R-008).
 """
 function n8_continuation_classify(theta::AbstractVector{<:Real}, k::Real;
         precision_bits::Int=53, tolerance::Real=1e-8)
     potential = _n8_potential(k=k)
     metric = Matrix(n8_kinetic_matrix(k))
     amplitudes = vec(potential.L[1, :]) .* 10.0 .^ vec(potential.L[2, :])
-    local_catastrophe_diagnostic(theta, potential.Q, amplitudes, metric;
+    result = local_catastrophe_diagnostic(theta, potential.Q, amplitudes, metric;
         argument_scale=2π, precision_bits, tolerance,
         gradient_tolerance=tolerance, hessian_tolerance=tolerance,
         derivative_tolerance=tolerance)
+    merge(result, (; kinetic_normalization=P96_KINETIC_NORMALIZATION))
 end
 
 """

@@ -37,21 +37,72 @@ array read back in Julia equals its own Python-side transpose element for
 element). Every 2D dataset read here is therefore explicitly `permutedims`'d
 back to the Python-documented shape before use. 1D datasets and scalars are
 unaffected (also confirmed live) and are read as-is.
+
+Kinetic normalization (CYAX-0232 R-006, R-007): the output carries root
+`schema_version = "cyaxiverse-fuzzy-axion-model-stage-1"` and
+`kinetic_normalization = "sugra_c1"`. The driver refuses an input whose
+`record_metadata_schema` is not `"kaehler-point-provenance-2"` with label
+`"sugra_c1"`, and refuses to overwrite an existing output file that is not a
+current `"sugra_c1"` output.
 """
 
 using CYAxiverse
 using HDF5
 
-function main()
-    length(ARGS) in (5, 6) || error(
-        "usage: julia fuzzy_axion_model_stage_driver.jl <input.h5> <output.h5> <gs> <w0_real> <w0_imag> [<qcd_divisor_domain>]")
-    input_path, output_path, gs_arg, w0_real_arg, w0_imag_arg = ARGS[1:5]
-    gs = parse(Float64, gs_arg)
-    w0 = Complex{Float64}(parse(Float64, w0_real_arg), parse(Float64, w0_imag_arg))
-    qcd_divisor_domain = length(ARGS) == 6 ? Symbol(ARGS[6]) : :all_prime
+const MODEL_STAGE_SCHEMA_VERSION = CYAxiverse.read.F4_SCHEMA_VERSION
+const MODEL_STAGE_KINETIC_NORMALIZATION = String(CYAxiverse.KINETIC_NORMALIZATION)
+
+"""
+    _require_current_model_stage_input(input_path)
+
+Throw an `ArgumentError` unless the model-stage input is a current
+`"sugra_c1"` export. A legacy input is refused: the driver is a primary
+writer and does not compute from inputs selected under the earlier convention.
+"""
+function _require_current_model_stage_input(input_path)
+    label, inferred = h5open(input_path, "r") do file
+        CYAxiverse.read.f5_model_stage_input_label(file, input_path)
+    end
+    (label === :sugra_c1 && !inferred) || throw(ArgumentError(
+        "F5 model-stage input $(input_path) is $(label) (inferred=$(inferred)); " *
+        "the model-stage driver refuses legacy inputs"))
+    nothing
+end
+
+"""
+    _require_replaceable_model_stage_output(output_path)
+
+Throw an `ArgumentError` if `output_path` exists and is not a current
+`"sugra_c1"` F4 output (CYAX-0232 R-007). A legacy, unlabelled or unreadable
+file is never overwritten.
+"""
+function _require_replaceable_model_stage_output(output_path)
+    isfile(output_path) || return nothing
+    label, inferred = try
+        h5open(file -> CYAxiverse.read.f4_label(file, output_path), output_path, "r")
+    catch err
+        err isa InterruptException && rethrow()
+        throw(ArgumentError("refusing to overwrite $(output_path): " *
+            first(split(sprint(showerror, err), '\n'))))
+    end
+    (label === :sugra_c1 && !inferred) || throw(ArgumentError(
+        "refusing to overwrite $(output_path): it holds a $(label) " *
+        "(inferred=$(inferred)) model-stage output"))
+    nothing
+end
+
+"""
+    run_model_stage_driver(input_path, output_path, gs, w0; qcd_divisor_domain=:all_prime)
+
+Enumerate the models of every input record and write the F4 output file.
+"""
+function run_model_stage_driver(input_path, output_path, gs::Float64,
+        w0::Complex{Float64}; qcd_divisor_domain::Symbol=:all_prime)
     qcd_divisor_domain in CYAxiverse.paper_benchmarks.FUZZY_AXION_QCD_DIVISOR_DOMAINS || error(
         "qcd_divisor_domain must be one of $(CYAxiverse.paper_benchmarks.FUZZY_AXION_QCD_DIVISOR_DOMAINS), got :$(qcd_divisor_domain)")
 
+    _require_current_model_stage_input(input_path)
+    _require_replaceable_model_stage_output(output_path)
     prefactor_P = CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(gs)
 
     record_count = h5open(file -> read(file, "record_count"), input_path, "r")
@@ -115,7 +166,10 @@ function main()
 
     total_model_count = sum(model_count_per_record)
 
+    _require_replaceable_model_stage_output(output_path)
     h5open(output_path, "w") do file
+        write(file, "schema_version", MODEL_STAGE_SCHEMA_VERSION)
+        write(file, "kinetic_normalization", MODEL_STAGE_KINETIC_NORMALIZATION)
         write(file, "record_count", record_count)
         write(file, "total_model_count", total_model_count)
         write(file, "model_count_per_record", model_count_per_record)
@@ -134,6 +188,20 @@ function main()
 
     println("wrote $(output_path): $(record_count) records, $(total_model_count) total models " *
             "(qcd_divisor_domain=$(qcd_divisor_domain))")
+    output_path
 end
 
-main()
+"""Parse the command line and run the model-stage driver."""
+function main(args=ARGS)
+    length(args) in (5, 6) || error(
+        "usage: julia fuzzy_axion_model_stage_driver.jl <input.h5> <output.h5> <gs> <w0_real> <w0_imag> [<qcd_divisor_domain>]")
+    input_path, output_path, gs_arg, w0_real_arg, w0_imag_arg = args[1:5]
+    gs = parse(Float64, gs_arg)
+    w0 = Complex{Float64}(parse(Float64, w0_real_arg), parse(Float64, w0_imag_arg))
+    qcd_divisor_domain = length(args) == 6 ? Symbol(args[6]) : :all_prime
+    run_model_stage_driver(input_path, output_path, gs, w0; qcd_divisor_domain)
+end
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end

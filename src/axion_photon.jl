@@ -20,6 +20,8 @@ using SHA
 import Nemo
 
 using ..filestructure: resolve_data_dir
+using ..read: kinetic_factor, f3_label, f3_identity_label,
+    F3_IDENTITY_SCHEMA_VERSION
 using ..structs: GeometryIndex
 
 const M_PLANCK_GEV = 2.435e18
@@ -138,7 +140,14 @@ struct AxionPhotonConfiguration
     precision::String
 end
 
-"""Identity binding a result to its geometry, inputs, and configuration."""
+"""
+Identity binding a result to its geometry, inputs, and configuration.
+
+`schema_version` is the identity version as stored (CYAX-0232 R-006): version
+2 means the result is at the `:sugra_c1` convention; version 1, read back from
+a legacy output, means `:legacy_c_half` (inferred). Use
+`CYAxiverse.read.f3_identity_label(identity.schema_version)` to get the label.
+"""
 struct AxionPhotonIdentity
     schema_version::Int
     geometry_index::GeometryIndex{Int}
@@ -198,7 +207,9 @@ function _dataset(parent::HDF5.Group, name::AbstractString)
     object
 end
 
-const _AXION_PHOTON_IDENTITY_SCHEMA_VERSION = 1
+# Identity version 2 carries `identity/kinetic_normalization = "sugra_c1"`;
+# version 1 is the legacy c = 1/2 layout (CYAX-0232 R-006).
+const _AXION_PHOTON_IDENTITY_SCHEMA_VERSION = F3_IDENTITY_SCHEMA_VERSION
 
 function _identity_write_bytes!(io::IO, bytes::AbstractVector{UInt8})
     write(io, bytes)
@@ -1034,7 +1045,10 @@ function _canonical_frame(Q_reduced::Matrix{Int}, Kinv::Matrix{T}) where {T<:Abs
     n = size(Q_reduced, 1)
     size(Q_reduced, 2) == n || throw(DimensionMismatch(
         "selected charge matrix must be square"))
-    factor = cholesky(Symmetric(Kinv))
+    # c = 1 (CYAX-0232): the canonical factor B satisfies B * B' = Kinv / 2.
+    # Wrapping B as a Cholesky object keeps `factor \ theta` in
+    # `leading_hierarchy`'s metric residual on the same factorization.
+    factor = Cholesky(kinetic_factor(Kinv))
     lower = factor.L
     Q_float = Matrix{T}(Q_reduced)
     charge_columns = Matrix{T}(undef, n, n)
@@ -1149,8 +1163,9 @@ function qed_instanton_log10_threshold_eV(
     @inbounds for index in eachindex(charge)
         charge[index] = T(assignment.qed_charge[index])
     end
+    # Kinetic norm qᵀ (Kinv/2) q of the QED charge (c = 1, CYAX-0232).
     mul!(transformed, geometry.kinv, charge)
-    norm_squared = dot(charge, transformed)
+    norm_squared = dot(charge, transformed) / 2
     norm_squared > zero(T) && isfinite(norm_squared) || throw(ArgumentError(
         "QED divisor charge has a non-positive kinetic norm"))
     T(0.5) * assignment.qed_log10_lambda4 + log10(planck) + T(9) +
@@ -1333,19 +1348,36 @@ function _max_log10_abs(values::AbstractVector{T}) where {T<:AbstractFloat}
     maximum((_log10_abs(value) for value in values); init=T(-Inf))
 end
 
-"""Write one compact CSV summary; detailed arrays remain in Julia."""
+"""
+    write_scan_csv(path, results)
+
+Write one compact CSV summary; detailed arrays remain in Julia.
+
+Each row carries `kinetic_normalization` and `kinetic_normalization_inferred`,
+derived from the result's stored identity version (CYAX-0232 R-006): a result
+read back from a legacy (identity version 1) output gives `legacy_c_half` and
+`true`. Results whose labels differ are not combined: an `ArgumentError`
+names both labels (R-007).
+"""
 function write_scan_csv(path::AbstractString, results::AbstractVector{<:AxionPhotonResult})
     parent = dirname(normpath(path))
     isdir(parent) || throw(ArgumentError("CSV parent directory does not exist: $parent"))
+    labels = [f3_identity_label(result.identity.schema_version) for result in results]
+    for label in labels
+        label == first(labels) || throw(ArgumentError(
+            "write_scan_csv: results with kinetic_normalization " *
+            "$(repr(first(labels)[1])) and $(repr(label[1])) cannot be combined"))
+    end
     fields = ("path", "h11", "polytope", "frst", "status", "n_input",
         "n_selected", "n_dependent", "em_divisor_index", "em_divisor_volume",
         "em_charge_source", "light_threshold_policy", "light_threshold_eV",
         "log10_light_threshold_eV", "light_mode_count", "max_log10_g_GeVinv",
         "max_log10_Cgamma",
-        "triangular_residual", "metric_residual", "charge_residual")
+        "triangular_residual", "metric_residual", "charge_residual",
+        "kinetic_normalization", "kinetic_normalization_inferred")
     open(path, "w") do io
         println(io, join(fields, ','))
-        for result in results
+        for (result, (label, inferred)) in zip(results, labels)
             g = result.geometry
             h = result.hierarchy
             p = result.photons
@@ -1357,7 +1389,7 @@ function write_scan_csv(path::AbstractString, results::AbstractVector{<:AxionPho
                 p.light_threshold_eV, p.log10_light_threshold_eV,
                 p.light_mode_count, maximum(p.log10_g_GeVinv),
                 _max_log10_abs(p.Cgamma), h.triangular_residual,
-                h.metric_residual, p.charge_residual)
+                h.metric_residual, p.charge_residual, label, inferred)
             println(io, join(string.(values), ','))
         end
     end
@@ -1460,6 +1492,8 @@ function _write_axion_photon_identity(group::HDF5.Group,
         identity::AxionPhotonIdentity)
     identity_group = create_group(group, "identity")
     identity_group["schema_version"] = identity.schema_version
+    identity.schema_version == _AXION_PHOTON_IDENTITY_SCHEMA_VERSION &&
+        (identity_group["kinetic_normalization"] = "sugra_c1")
     identity_group["geometry_h11"] = identity.geometry_index.h11
     identity_group["geometry_polytope"] = identity.geometry_index.polytope
     identity_group["geometry_frst"] = identity.geometry_index.frst
@@ -1491,8 +1525,8 @@ end
 function _read_axion_photon_identity(group::HDF5.Group)
     identity_group = _required_axion_photon_group(group, "identity")
     try
-        schema_version = _required_axion_photon_dataset(identity_group,
-            "schema_version")
+        # R-007 label checks; the stored identity version is kept.
+        _, _, schema_version = f3_label(identity_group, HDF5.filename(group))
         geometry_h11 = _required_axion_photon_dataset(identity_group,
             "geometry_h11")
         geometry_polytope = _required_axion_photon_dataset(identity_group,
@@ -1509,10 +1543,6 @@ function _read_axion_photon_identity(group::HDF5.Group)
             "potential_snapshot_digest")
         configuration_digest = _required_axion_photon_dataset(identity_group,
             "configuration_digest")
-        _integer_value(schema_version) || throw(ArgumentError(
-            "persisted axion-photon schema_version must be an integer"))
-        Int(schema_version) == _AXION_PHOTON_IDENTITY_SCHEMA_VERSION ||
-            throw(ArgumentError("unsupported persisted axion-photon identity schema"))
         all(_integer_value, (geometry_h11, geometry_polytope, geometry_frst)) ||
             throw(ArgumentError("persisted geometry identity must contain integer indices"))
         index_values = Int[Int(geometry_h11), Int(geometry_polytope), Int(geometry_frst)]
@@ -1563,7 +1593,7 @@ function _read_axion_photon_identity(group::HDF5.Group)
             expected_digest = _configuration_digest(configuration)
             String(configuration_digest) == expected_digest || throw(ArgumentError(
                 "persisted configuration identity digest does not match its fields"))
-            AxionPhotonIdentity(_AXION_PHOTON_IDENTITY_SCHEMA_VERSION,
+            AxionPhotonIdentity(schema_version,
                 GeometryIndex(index_values[1], index_values[2], index_values[3]),
                 String(geometry_digest), String(potential_digest),
                 String(geometry_snapshot_digest), String(potential_snapshot_digest),
@@ -1576,8 +1606,50 @@ function _read_axion_photon_identity(group::HDF5.Group)
     end
 end
 
-"""Validate the complete persisted axion-photon group."""
+"""
+    _check_axion_photon_label(group::HDF5.Group)
+
+Apply the CYAX-0232 R-007 F3 label checks (`CYAxiverse.read.f3_label`) to
+the `identity` of a persisted axion-photon group. The checks run outside the
+catch-all validation below, so an R-007 `ArgumentError` propagates instead of
+reading as an absent or incomplete result. A group without an `identity`
+group is left to the validation.
+"""
+function _check_axion_photon_label(group::HDF5.Group)
+    haskey(group, "identity") || return nothing
+    identity = group["identity"]
+    try
+        identity isa HDF5.Group && f3_label(identity, HDF5.filename(group))
+    finally
+        close(identity)
+    end
+    nothing
+end
+
+function _check_axion_photon_label(file::HDF5.File)
+    haskey(file, "spectrum") || return nothing
+    spectrum = file["spectrum"]
+    try
+        spectrum isa HDF5.Group || return nothing
+        haskey(spectrum, "axion_photon") || return nothing
+        group = spectrum["axion_photon"]
+        try
+            group isa HDF5.Group && _check_axion_photon_label(group)
+        finally
+            close(group)
+        end
+    finally
+        close(spectrum)
+    end
+    nothing
+end
+
+"""
+Validate the complete persisted axion-photon group. R-007 label errors
+propagate (CYAX-0232); other defects return `false`.
+"""
 function _validate_axion_photon_group(group::HDF5.Group)
+    _check_axion_photon_label(group)
     nested_groups = HDF5.Group[]
     try
         identity = _read_axion_photon_identity(group)
@@ -1735,7 +1807,9 @@ function _assert_result_identity_matches!(file::HDF5.File,
         path::AbstractString, result::AxionPhotonResult)
     identity = result.identity
     identity.schema_version == _AXION_PHOTON_IDENTITY_SCHEMA_VERSION || throw(ArgumentError(
-        "axion-photon result has an unsupported identity schema"))
+        "axion-photon result has identity schema_version $(identity.schema_version), " *
+        "not $(_AXION_PHOTON_IDENTITY_SCHEMA_VERSION); a result read back from a " *
+        "legacy output cannot be written (CYAX-0232 R-007)"))
     identity.geometry_index == result.geometry.index || throw(ArgumentError(
         "axion-photon result identity does not match its retained geometry"))
     identity.configuration_digest == _configuration_digest(identity.configuration) ||
@@ -1894,7 +1968,18 @@ function write_axion_photon_result(result::AxionPhotonResult; force::Bool=false)
     write_axion_photon_result(result.geometry.path, result; force=force)
 end
 
-"""Read a persisted axion-photon result from a geometry's HDF5 file."""
+"""
+    read_axion_photon_result(path; T=Float64)
+
+Read a persisted axion-photon result from a geometry's HDF5 file.
+
+The result keeps the stored identity version in `identity.schema_version`
+(CYAX-0232 R-006): 2 for a `:sugra_c1` output, 1 for a legacy output read as
+`:legacy_c_half` by inference. The R-007 checks of
+`CYAxiverse.read.f3_label` are applied first, so an invalid or missing label
+raises an `ArgumentError` naming the file. The label of a stored output is also
+available from `CYAxiverse.read.stored_kinetic_normalization(path; family=:f3)`.
+"""
 function read_axion_photon_result(path::AbstractString;
         T::Type{<:AbstractFloat}=Float64)
     isfile(path) || throw(ArgumentError("geometry file does not exist: $path"))
@@ -1904,6 +1989,7 @@ function read_axion_photon_result(path::AbstractString;
                 "spectrum/axion_photon group not found in file: $path"))
 
         ap = file["spectrum/axion_photon"]::HDF5.Group
+        haskey(ap, "identity") && f3_label(ap["identity"]::HDF5.Group, path)
         _validate_axion_photon_group(ap) || throw(ArgumentError(
             "spectrum/axion_photon is incomplete or lacks required identity metadata; " *
             "recompute the result"))
@@ -2014,6 +2100,8 @@ function read_axion_photon_result(index::GeometryIndex;
 end
 
 function _has_axion_photon(file::HDF5.File; expected_index=nothing, path=nothing)
+    # R-007: a legacy or invalid label must not read as an absent result.
+    _check_axion_photon_label(file)
     opened_groups = HDF5.Group[]
     try
         haskey(file, "spectrum") || return false
@@ -2048,6 +2136,18 @@ end
 
 function _has_axion_photon(path::AbstractString; configuration=nothing)
     isfile(path) || return false
+    # R-007: label errors propagate; an unreadable file still reads as absent.
+    labelled_file = try
+        h5open(path, "r")
+    catch err
+        err isa InterruptException && rethrow()
+        nothing
+    end
+    labelled_file === nothing || try
+        _check_axion_photon_label(labelled_file)
+    finally
+        close(labelled_file)
+    end
     expected_index = try
         _index_from_path(path)
     catch
@@ -2098,28 +2198,39 @@ function run_batch_axion_photon(; data_dir=nothing,
         status::Symbol, error::String}}()
     for index in indices
         path = geometry_path(index; data_dir=root)
-        if skip_complete && !force && _has_axion_photon(path)
-            stored_configuration = h5open(path, "r") do file
-                ap = file["spectrum/axion_photon"]::HDF5.Group
-                try
-                    _read_axion_photon_identity(ap).configuration
-                finally
-                    close(ap)
+        try
+            # CYAX-0232 R-007 batch resume, inside the per-geometry `try`
+            # (approval note 4): an R-007 rejection, a legacy result or a
+            # configuration mismatch records :failed and the batch continues.
+            if skip_complete && !force && _has_axion_photon(path)
+                stored_identity = h5open(path, "r") do file
+                    ap = file["spectrum/axion_photon"]::HDF5.Group
+                    try
+                        _read_axion_photon_identity(ap)
+                    finally
+                        close(ap)
+                    end
                 end
-            end
-            if _configuration_matches_request(
-                    stored_configuration, requested_configuration)
-                verbose && println("skip $path (axion_photon exists)")
-                push!(summaries, (index=index, path=path, status=:skipped, error=""))
+                if stored_identity.schema_version != _AXION_PHOTON_IDENTITY_SCHEMA_VERSION
+                    label, inferred = f3_identity_label(stored_identity.schema_version)
+                    message = "existing axion-photon result has kinetic_normalization " *
+                        "$(label) (inferred=$(inferred)); use force=true to recompute"
+                    verbose && println(message)
+                    push!(summaries, (index=index, path=path, status=:failed, error=message))
+                    continue
+                end
+                if _configuration_matches_request(
+                        stored_identity.configuration, requested_configuration)
+                    verbose && println("skip $path (axion_photon exists)")
+                    push!(summaries, (index=index, path=path, status=:skipped, error=""))
+                    continue
+                end
+                message = "valid axion-photon result has a different configuration; " *
+                    "use force=true to recompute"
+                verbose && println(message)
+                push!(summaries, (index=index, path=path, status=:failed, error=message))
                 continue
             end
-            message = "valid axion-photon result has a different configuration; " *
-                "use force=true to recompute"
-            verbose && println(message)
-            push!(summaries, (index=index, path=path, status=:failed, error=message))
-            continue
-        end
-        try
             result = _run_local_scan(path; T=T,
                 em_divisor_index=em_divisor_index,
                 light_threshold_eV=light_threshold_eV,

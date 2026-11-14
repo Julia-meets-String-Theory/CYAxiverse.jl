@@ -78,27 +78,54 @@ function _physical_files(root, h11_min, h11_max)
     files
 end
 
-"""Read completed physical-spectrum values grouped by h11."""
+"""
+Read completed physical-spectrum values grouped by h11.
+
+Returns `(masses, fpert, fK, completed, label)`, where `label` is the common
+`(kinetic_normalization, kinetic_normalization_inferred)` of the inputs
+(CYAX-0232 R-006 derived writer). A file without `spectrum/physical/m`, or one
+that cannot be opened, is skipped with a warning. The F1 label check
+(`CYAxiverse.read.f1_label`) runs outside that skip, so an R-007 rejection
+propagates (R-007 "Errors are not skipped"), and inputs whose labels differ are
+rejected with an `ArgumentError` naming both labels.
+"""
 function _read_values(files)
     masses = Dict{Int,Vector{Float64}}()
     fpert = Dict{Int,Vector{Float64}}()
     fK = Dict{Int,Vector{Float64}}()
     completed = Dict{Int,Int}()
+    label = nothing
+    label_path = ""
     for (h11, path) in files
-        try
+        values = try
             h5open(path, "r") do file
+                haskey(file, "spectrum/physical/m") || return nothing
                 physical = file["spectrum/physical"]
-                haskey(physical, "m") || return
-                append!(get!(masses, h11, Float64[]), read(physical["m"]))
-                haskey(physical, "fK_log10") && append!(get!(fK, h11, Float64[]), read(physical["fK_log10"]))
-                haskey(physical, "fpert_log10") && append!(get!(fpert, h11, Float64[]), read(physical["fpert_log10"]))
-                completed[h11] = get(completed, h11, 0) + 1
+                (; m=read(physical["m"]),
+                    fK=haskey(physical, "fK_log10") ? read(physical["fK_log10"]) : Float64[],
+                    fpert=haskey(physical, "fpert_log10") ? read(physical["fpert_log10"]) : Float64[])
             end
         catch err
+            err isa InterruptException && rethrow()
             @warn "Skipping unreadable spectrum output" path exception=(err, catch_backtrace())
+            nothing
         end
+        values === nothing && continue
+        file_label = h5open(file -> CYAxiverse.read.f1_label(file["spectrum/physical"], path),
+            path, "r")
+        if label === nothing
+            label, label_path = file_label, path
+        elseif file_label != label
+            throw(ArgumentError("cannot combine F1 outputs with kinetic_normalization " *
+                "$(repr(label)) ($(label_path)) and $(repr(file_label)) ($(path))"))
+        end
+        append!(get!(masses, h11, Float64[]), values.m)
+        append!(get!(fK, h11, Float64[]), values.fK)
+        append!(get!(fpert, h11, Float64[]), values.fpert)
+        completed[h11] = get(completed, h11, 0) + 1
     end
-    masses, fpert, fK, completed
+    label === nothing && throw(ArgumentError("no readable physical spectrum outputs"))
+    masses, fpert, fK, completed, label
 end
 
 """Compute a normalized histogram for finite values and supplied bin edges."""
@@ -144,10 +171,16 @@ function _quantile_or_empty(values, q)
     isempty(values) ? "" : quantile(values, q)
 end
 
-"""Write per-h11 quantiles and completion counts to CSV."""
-function _write_summary(path, h11s, masses, fpert, fK, completed)
+"""
+Write per-h11 quantiles and completion counts to CSV.
+
+Every row carries the inputs' common label `(kinetic_normalization,
+kinetic_normalization_inferred)` (CYAX-0232 R-006 derived writer).
+"""
+function _write_summary(path, h11s, masses, fpert, fK, completed, label)
+    kinetic_normalization, inferred = label
     open(path, "w") do io
-        println(io, "h11,geometries,mass_count,mass_q05,mass_median,mass_q95,fpert_count,fpert_q05,fpert_median,fpert_q95,fK_count,fK_q05,fK_median,fK_q95")
+        println(io, "h11,geometries,mass_count,mass_q05,mass_median,mass_q95,fpert_count,fpert_q05,fpert_median,fpert_q95,fK_count,fK_q05,fK_median,fK_q95,kinetic_normalization,kinetic_normalization_inferred")
         for h11 in h11s
             mass = get(masses, h11, Float64[])
             self = get(fpert, h11, Float64[])
@@ -155,7 +188,8 @@ function _write_summary(path, h11s, masses, fpert, fK, completed)
             println(io, join((h11, get(completed, h11, 0), length(mass),
                 _quantile_or_empty(mass, 0.05), _quantile_or_empty(mass, 0.5), _quantile_or_empty(mass, 0.95),
                 length(self), _quantile_or_empty(self, 0.05), _quantile_or_empty(self, 0.5), _quantile_or_empty(self, 0.95),
-                length(metric), _quantile_or_empty(metric, 0.05), _quantile_or_empty(metric, 0.5), _quantile_or_empty(metric, 0.95)), ','))
+                length(metric), _quantile_or_empty(metric, 0.05), _quantile_or_empty(metric, 0.5), _quantile_or_empty(metric, 0.95),
+                kinetic_normalization, inferred), ','))
         end
     end
 end
@@ -167,7 +201,7 @@ function main(options)
     mkpath(output_dir)
     files = _physical_files(data_dir, options[:h11_min], options[:h11_max])
     isempty(files) && error("no physical spectrum outputs found")
-    masses, fpert, fK, completed = _read_values(files)
+    masses, fpert, fK, completed, label = _read_values(files)
     h11s = collect(options[:h11_min]:options[:h11_max])
     bins = options[:bins]
     mass_edges = range(-33.0, 28.0; length=bins + 1)
@@ -179,7 +213,8 @@ function main(options)
         "Appendix B spectrum reproduction: perturbative decay constants", "log10(fpert / GeV)")
     _plot_heatmap(joinpath(output_dir, "fK_by_h11.pdf"), _matrix(fK, h11s, fK_edges), h11s, fK_edges,
         "Appendix B spectrum reproduction: Kahler decay constants", "log10(fK / GeV)")
-    _write_summary(joinpath(output_dir, "appendix_b_quantiles.csv"), h11s, masses, fpert, fK, completed)
+    _write_summary(joinpath(output_dir, "appendix_b_quantiles.csv"), h11s, masses, fpert, fK,
+        completed, label)
     @printf("Read %d spectrum outputs across h11=%d..%d\n", length(files), options[:h11_min], options[:h11_max])
     println("Wrote plots and quantiles to ", output_dir)
 end

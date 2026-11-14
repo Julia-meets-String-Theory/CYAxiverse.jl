@@ -40,6 +40,7 @@ from pathlib import Path
 import sys
 from typing import Any, Iterable
 
+from kinetic_normalization_labels import common_label, f5_reproduction_label
 from orientifold_terminal_ledger import (
     READABLE_LEDGER_SCHEMA_VERSIONS,
     TerminalLedgerError,
@@ -648,6 +649,15 @@ def _sharded_terminal_ledger_audit(
     return result
 
 
+def _f5_label(data: dict[str, Any], path: Path) -> tuple[str, bool]:
+    """Apply the CYAX-0232 R-007 F5 checks (Clarification A2 for 1.1)."""
+
+    try:
+        return f5_reproduction_label(data, path)
+    except ValueError as error:
+        raise ArtifactError(str(error)) from error
+
+
 def _validate_artifact(data: dict[str, Any], expected_h11: int, path: Path) -> None:
     if expected_h11 not in SUPPORTED_H11:
         raise ArtifactError(
@@ -657,6 +667,7 @@ def _validate_artifact(data: dict[str, Any], expected_h11: int, path: Path) -> N
         raise ArtifactError(
             f"{path}: unsupported reproduction schema {data.get('schema_version')!r}"
         )
+    _f5_label(data, path)
     input_data = data.get("input")
     if not isinstance(input_data, dict):
         raise ArtifactError(f"{path}: missing input metadata")
@@ -988,6 +999,18 @@ def _validate_sharded_artifacts(
         raise ArtifactError("sharded analysis requires at least two shard artifacts")
 
     targets = TABLE_1_TARGETS[expected_h11]
+    for data, path in zip(shard_datas, source_paths):
+        if data.get("schema_version") != REPRODUCTION_SCHEMA_VERSION:
+            raise ArtifactError(
+                f"{path}: unsupported reproduction schema {data.get('schema_version')!r}"
+            )
+    # CYAX-0232 R-007: every shard passes the F5 checks, and shards whose
+    # labels differ are not combined.
+    try:
+        common_label([_f5_label(data, path) for data, path in zip(shard_datas, source_paths)],
+                     source_paths)
+    except ValueError as error:
+        raise ArtifactError(str(error)) from error
     shard_count: int | None = None
     total_favorable: int | None = None
     indices: list[int] = []

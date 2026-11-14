@@ -155,10 +155,45 @@ end
 #############################
 
 """
+    kinetic_factor(Kinv)
+
+Return the canonical kinetic factor `B = cholesky(Symmetric(Kinv ./ 2)).L`:
+lower triangular with positive diagonal and `B * B' ≈ Kinv / 2`.
+
+`Kinv` is the inverse Kähler metric as CYTools returns it and as it is stored
+(`cytools/geometric/Kinv`). CYAxiverse uses the supergravity axion kinetic
+normalization (c = 1, CYAX-0232): the kinetic term is
+`-(1/2) M_pl² K ∂ϑ ∂ϑ` with `K = 2 Kinv⁻¹` and period-one ϑ, so the factor
+satisfies `B * B' = K⁻¹` and `ϑ = B ψ` gives canonically normalized ψ.
+
+`Symmetric` reads the upper triangle; symmetrize `Kinv` first if it may be
+asymmetric. The factor ½ is applied only here, in [`kinetic_matrix`](@ref) and
+in the kinetic norm `qᵀ (Kinv/2) q`; stored and exported inverse metrics stay
+unscaled; `CYAxiverse.KINETIC_NORMALIZATION` names this convention.
+See the *Kinetic normalization* page of the manual for the convention,
+the persisted labels and how earlier outputs are read.
+"""
+kinetic_factor(Kinv::AbstractMatrix{<:Real}) = cholesky(Symmetric(Kinv ./ 2)).L
+
+"""
+    kinetic_matrix(Kinv)
+
+Return the physical axion kinetic matrix `K = 2 inv(Hermitian(Kinv))`, the
+matrix in `-(1/2) M_pl² K ∂ϑ ∂ϑ` with period-one ϑ (c = 1, CYAX-0232).
+`Kinv` is the stored, unscaled CYTools inverse Kähler metric; see
+[`kinetic_factor`](@ref). See the *Kinetic normalization* page of the manual for the convention,
+the persisted labels and how earlier outputs are read.
+"""
+kinetic_matrix(Kinv::AbstractMatrix{<:Real}) = 2 * inv(Hermitian(Kinv))
+
+"""
     _kinetic_matrix(Kinv, geom_idx)
 
-Construct the axion kinetic matrix `K = (1/2) g` from the stored inverse
-Kähler metric `Kinv` using a symmetry-aware inverse.
+Construct the physical axion kinetic matrix `K = 2 Kinv⁻¹` (c = 1, see
+[`kinetic_matrix`](@ref)) from the stored inverse Kähler metric `Kinv` using a
+symmetry-aware inverse. This is the matrix in `-(1/2) M_pl² K ∂ϑ ∂ϑ` for
+period-one ϑ (CYAX-0232). See the *Kinetic normalization* page of the manual for the convention,
+the persisted labels and how earlier outputs are read.
 
 `Kinv` is read from HDF5 as a plain `Matrix`. Inverting it directly
 (`inv(Kinv)`) selects a general LU factorisation that ignores its symmetry;
@@ -179,11 +214,11 @@ reported as a `DomainError` naming the geometry, rather than letting a raw
 """
 function _kinetic_matrix(Kinv::AbstractMatrix{Float64}, geom_idx::GeometryIndex)
     try
-        Hermitian(inv(Hermitian(Matrix{Float64}(Kinv))))
+        Hermitian(kinetic_matrix(Matrix{Float64}(Kinv)))
     catch err
         err isa SingularException || rethrow()
         throw(DomainError(0.0,
-            "kinetic matrix K = (1/2) g could not be constructed: stored " *
+            "kinetic matrix K = 2 Kinv⁻¹ could not be constructed: stored " *
             "inverse metric Kinv is exactly singular for geometry " *
             "h11=$(geom_idx.h11), polytope=$(geom_idx.polytope), " *
             "frst=$(geom_idx.frst)"))
@@ -194,7 +229,8 @@ end
     _validate_kinetic_matrix(K, Kinv, geom_idx)
 
 Enforce the physical invariant (`.copilot/AGENTS.md`, section 3) that the
-axion kinetic matrix `K_ij = 1/2 g_ij` is symmetric positive-definite,
+axion kinetic matrix `K = 2 Kinv⁻¹` (c = 1; see the *Kinetic normalization*
+page of the manual) is symmetric positive-definite,
 throwing a `DomainError` naming the offending geometry and quantity when it
 is not, so a corrupt on-disk artifact is identifiable from the error alone.
 
@@ -229,7 +265,7 @@ function _validate_kinetic_matrix(K::Hermitian{Float64, Matrix{Float64}},
     λmin_K = eigmin(K)
     λmin_Kinv = eigmin(Hermitian(Matrix{Float64}(Kinv)))
     throw(DomainError(λmin_K,
-        "kinetic matrix K = (1/2) g is not symmetric positive-definite for " *
+        "kinetic matrix K = 2 Kinv⁻¹ is not symmetric positive-definite for " *
         "geometry h11=$(geom_idx.h11), polytope=$(geom_idx.polytope), " *
         "frst=$(geom_idx.frst): smallest eigenvalue of K is $λmin_K " *
         "(smallest eigenvalue of the stored Kinv is $λmin_Kinv). A negative " *
@@ -244,6 +280,10 @@ Read the signed, log-scaled instanton potential and kinetic matrix for one
 geometry. The returned `AxionPotential` preserves the raw HDF5 orientation;
 use [`oriented_potential`](@ref) when a canonical axion-by-instanton layout
 is required.
+
+The returned `K` is the physical kinetic matrix `kinetic_matrix(Kinv) = 2 Kinv⁻¹`
+(c = 1, CYAX-0232) built from the stored `cytools/geometric/Kinv`, so it can be
+passed to any API that takes K under the K-argument contract.
 """
 function potential(geom_idx::GeometryIndex; hilbert = false, validate::Bool = true)
     if hilbert
@@ -270,9 +310,12 @@ end
 """
     potential_factored(geom_idx::GeometryIndex; hilbert=false)
 
-Read a potential together with the inverse kinetic metric and its Cholesky
-factor.  Return `C` such that `Kinv ≈ C * C'`; callers that whiten a Hessian
-can therefore form `C' * H * C` without explicitly constructing `inv(Kinv)`.
+Read a potential together with the stored inverse Kähler metric and the
+canonical kinetic factor. Return `C = kinetic_factor(Kinv)`, so that
+`C * C' ≈ Kinv / 2 = K⁻¹` for the physical kinetic matrix `K = 2 Kinv⁻¹`
+(c = 1, CYAX-0232); callers that whiten a Hessian can therefore form
+`C' * H * C` without explicitly constructing `K`. The returned `Kinv` is the
+stored matrix symmetrized as `(Kinv + Kinv')/2`, without the factor ½.
 """
 function potential_factored(geom_idx::GeometryIndex; hilbert = false)
     L, Q, Kinv = h5open(cyax_file(geom_idx), "r") do file
@@ -292,7 +335,7 @@ function potential_factored(geom_idx::GeometryIndex; hilbert = false)
     size(Kinv, 1) == size(Kinv, 2) ||
         throw(DimensionMismatch("Kinv must be square"))
     Kinv = (Kinv + transpose(Kinv)) / 2
-    C = Matrix(cholesky(Symmetric(Kinv)).L)
+    C = Matrix(kinetic_factor(Kinv))
     (; L, Q, Kinv, C)
 end
 
@@ -403,6 +446,10 @@ The helper accepts the two matrix orientations emitted by older geometry
 files, validates dimensions and finite kinetic/log-scale data, and owns the
 normalization used by numerical screening callers. It does not apply scan
 thresholds or candidate policy.
+
+`K` is the physical kinetic matrix `2 Kinv⁻¹` (c = 1, CYAX-0232) from
+[`potential`](@ref), suitable for any API that takes K under the K-argument
+contract.
 """
 function oriented_potential(geom_idx::GeometryIndex;
         canonicalize_charge_rows::Bool=true)
@@ -445,6 +492,20 @@ function Q(h11::Int,tri::Int,cy::Int=1; hilbert = false)
     return Q
 end
 
+"""
+    K(h11, tri, cy=1; hilbert=false)
+
+Read the dataset `cytools/potential/K` and return it symmetrized as a
+`Hermitian` matrix.
+
+!!! warning
+    This is not the physical kinetic-matrix accessor. No repository writer
+    produces `cytools/potential/K`, and its normalization is not recorded
+    (unlabelled). The physical kinetic matrix at c = 1 (CYAX-0232) is
+    [`kinetic_matrix`](@ref) applied to the stored inverse metric
+    `cytools/geometric/Kinv`, as returned in `potential(geom_idx).K`. The
+    `hilbert` keyword is accepted but ignored.
+"""
 function K(h11::Int,tri::Int,cy::Int=1; hilbert = false)
     K::Matrix{Float64} = h5open(cyax_file(h11,tri,cy), "r") do file
         HDF5.read(file, "cytools/potential/K")
@@ -477,23 +538,407 @@ function L_arb(h11::Int,tri::Int,cy::Int=1)
     return Ltemp
 end
 
+# F2 (`spectrum/{masses, decay, quartdiag, quart31, quart22, cubic}`) labels,
+# CYAX-0232 R-006 and R-007.
+const F2_SCHEMA_VERSION = "cyaxiverse-spectrum-groups-1"
+const F2_CHILD_GROUPS = ("masses", "decay", "quartdiag", "quart31", "quart22",
+    "cubic")
+const F2_CUBIC_BASES = ("charge_basis", "canonical_mass_basis")
+const KINETIC_NORMALIZATION_LABELS = ("sugra_c1", "p96_reproduction_c_half",
+    "a96_reproduction_raw_radian", "legacy_c_half")
+
+"""
+    _require_primary_label(label, where_, family)
+
+Throw an `ArgumentError` unless a stored label of a primary physical HDF5
+family (F1–F6, CYAX-0232 R-007) is `"sugra_c1"`. These families never hold
+derived values, so a stored `"legacy_c_half"` is rejected too.
+"""
+function _require_primary_label(label, where_::AbstractString, family::AbstractString)
+    label in KINETIC_NORMALIZATION_LABELS || throw(ArgumentError(
+        "$(where_): kinetic_normalization $(repr(label)) is not an allowed label"))
+    label == "sugra_c1" || throw(ArgumentError(
+        "$(where_): $(family) is a primary physical family and holds only " *
+        "\"sugra_c1\", found $(repr(label))"))
+    nothing
+end
+
+"""
+    f2_label(spectrum::HDF5.Group, path)
+
+Return `(kinetic_normalization, kinetic_normalization_inferred, cubic_basis)`
+for the F2 child groups of a geometry's `spectrum` group (CYAX-0232 R-007).
+
+- Current F2 (`spectrum/metadata/schema_version == "$(F2_SCHEMA_VERSION)"`):
+  `(:sugra_c1, false, :charge_basis)` or `(:sugra_c1, false,
+  :canonical_mass_basis)`.
+- Legacy F2 (`spectrum/masses/log10` present, no `spectrum/metadata`):
+  `(:legacy_c_half, true, :unknown)`. A legacy F2 layout records neither its
+  writer nor its cubic basis.
+
+Throws an `ArgumentError` naming `path` for a current-version F2 whose label
+or `cubic_basis` is missing or not allowed, for a label other than
+`"sugra_c1"` (F2 is a primary physical family), for an unknown schema version
+and for an unrecognized layout.
+"""
+function f2_label(spectrum::HDF5.Group, path::AbstractString)
+    where_ = "F2 spectrum groups in $(path)"
+    if haskey(spectrum, "metadata")
+        metadata = spectrum["metadata"]::HDF5.Group
+        haskey(metadata, "schema_version") || throw(ArgumentError(
+            "$(where_): spectrum/metadata has no schema_version"))
+        version = _read_dataset(metadata, "schema_version")
+        version == F2_SCHEMA_VERSION || throw(ArgumentError(
+            "$(where_): unknown F2 schema_version $(repr(version))"))
+        haskey(metadata, "kinetic_normalization") || throw(ArgumentError(
+            "$(where_): F2 $(version) has no kinetic_normalization label"))
+        _require_primary_label(_read_dataset(metadata, "kinetic_normalization"),
+            where_, "F2")
+        haskey(metadata, "cubic_basis") || throw(ArgumentError(
+            "$(where_): F2 $(version) has no cubic_basis"))
+        basis = _read_dataset(metadata, "cubic_basis")
+        basis in F2_CUBIC_BASES || throw(ArgumentError(
+            "$(where_): unknown cubic_basis $(repr(basis))"))
+        return (:sugra_c1, false, Symbol(basis))
+    end
+    if haskey(spectrum, "masses") && haskey(spectrum["masses"], "log10")
+        return (:legacy_c_half, true, :unknown)
+    end
+    throw(ArgumentError("$(where_): no F2 layout is recognized"))
+end
+
+# F1 (`spectrum/physical`) labels, CYAX-0232 R-006 and R-007.
+const F1_SCHEMA_VERSION = "cyaxiverse-physical-spectrum-4"
+const F1_LEGACY_SCHEMA_VERSION = "cyaxiverse-physical-spectrum-3"
+const F1_REQUIRED_DATASETS = ("m", "mode_indices", "fK_log10")
+const F1_REQUIRED_METADATA = ("threshold_log10", "prec", "provisional",
+    "runtime_seconds")
+
+"""
+    f1_label(physical::HDF5.Group, path) -> (label::Symbol, inferred::Bool)
+
+Return the kinetic-normalization label of a geometry's `spectrum/physical`
+group (F1, CYAX-0232 R-007) and whether it was inferred.
+
+- `schema_version == "$(F1_SCHEMA_VERSION)"`: the label
+  `metadata/kinetic_normalization` must be `"sugra_c1"`; returns
+  `(:sugra_c1, false)`.
+- `schema_version == "$(F1_LEGACY_SCHEMA_VERSION)"` with no label:
+  `(:legacy_c_half, true)`.
+- No `schema_version` and no label, with every dataset that
+  [`physical_spectrum`](@ref) requires (`m`, `mode_indices`, `fK_log10` and
+  `metadata/{threshold_log10, prec, provisional, runtime_seconds}`):
+  `(:legacy_c_half, true)`. Optional datasets such as `fpert_log10` do not
+  affect recognition. Data migrated by `migrate_legacy_spectra.jl` from an
+  unversioned source has this layout.
+
+Throws an `ArgumentError` naming `path` for a current-version F1 whose label is
+missing or not `"sugra_c1"`, for a legacy or unversioned F1 that carries a
+label, for an unknown schema version and for an unrecognized layout.
+"""
+function f1_label(physical::HDF5.Group, path::AbstractString)
+    where_ = "F1 spectrum/physical in $(path)"
+    haskey(physical, "metadata") || throw(ArgumentError(
+        "$(where_): no metadata group; no F1 layout is recognized"))
+    metadata = physical["metadata"]::HDF5.Group
+    labelled = haskey(metadata, "kinetic_normalization")
+    if haskey(metadata, "schema_version")
+        version = _read_dataset(metadata, "schema_version")
+        if version == F1_SCHEMA_VERSION
+            labelled || throw(ArgumentError(
+                "$(where_): F1 $(version) has no kinetic_normalization label"))
+            _require_primary_label(_read_dataset(metadata, "kinetic_normalization"),
+                where_, "F1")
+            return (:sugra_c1, false)
+        elseif version == F1_LEGACY_SCHEMA_VERSION
+            labelled && throw(ArgumentError(
+                "$(where_): legacy F1 $(version) carries a kinetic_normalization label"))
+            return (:legacy_c_half, true)
+        end
+        throw(ArgumentError("$(where_): unknown F1 schema_version $(repr(version))"))
+    end
+    labelled && throw(ArgumentError(
+        "$(where_): unversioned F1 carries a kinetic_normalization label"))
+    absent = [name for name in F1_REQUIRED_DATASETS if !haskey(physical, name)]
+    append!(absent, ["metadata/" * name for name in F1_REQUIRED_METADATA
+        if !haskey(metadata, name)])
+    isempty(absent) || throw(ArgumentError(
+        "$(where_): unversioned layout lacks $(join(absent, ", ")); " *
+        "no F1 layout is recognized"))
+    (:legacy_c_half, true)
+end
+
+# F3 (`spectrum/axion_photon`) labels, CYAX-0232 R-006 and R-007.
+const F3_IDENTITY_SCHEMA_VERSION = 2
+const F3_LEGACY_IDENTITY_SCHEMA_VERSION = 1
+
+"""
+    f3_identity_label(schema_version) -> (label::Symbol, inferred::Bool)
+
+Map an F3 identity version to its label (CYAX-0232 R-006): version
+$(F3_IDENTITY_SCHEMA_VERSION) is `(:sugra_c1, false)` and version
+$(F3_LEGACY_IDENTITY_SCHEMA_VERSION) is `(:legacy_c_half, true)`. Consumers of
+an in-memory `axion_photon.AxionPhotonResult` derive its label from
+`identity.schema_version` with this function. Throws an `ArgumentError` for any
+other version.
+"""
+function f3_identity_label(schema_version::Integer)
+    schema_version == F3_IDENTITY_SCHEMA_VERSION && return (:sugra_c1, false)
+    schema_version == F3_LEGACY_IDENTITY_SCHEMA_VERSION && return (:legacy_c_half, true)
+    throw(ArgumentError("unknown F3 identity schema_version $(schema_version)"))
+end
+
+"""
+    f3_label(identity::HDF5.Group, path) -> (label, inferred, schema_version)
+
+Return the kinetic-normalization label of a persisted
+`spectrum/axion_photon/identity` group (F3, CYAX-0232 R-007), whether it was
+inferred, and the stored identity version.
+
+- Identity `schema_version == $(F3_IDENTITY_SCHEMA_VERSION)`: the label
+  `identity/kinetic_normalization` must be `"sugra_c1"`; returns
+  `(:sugra_c1, false, $(F3_IDENTITY_SCHEMA_VERSION))`.
+- Identity `schema_version == $(F3_LEGACY_IDENTITY_SCHEMA_VERSION)` with no
+  label: `(:legacy_c_half, true, $(F3_LEGACY_IDENTITY_SCHEMA_VERSION))`.
+
+Throws an `ArgumentError` naming `path` for a missing or non-integer version, a
+version-$(F3_IDENTITY_SCHEMA_VERSION) identity whose label is missing or not
+`"sugra_c1"`, a version-$(F3_LEGACY_IDENTITY_SCHEMA_VERSION) identity that
+carries a label, and an unknown version.
+"""
+function f3_label(identity::HDF5.Group, path::AbstractString)
+    where_ = "F3 spectrum/axion_photon in $(path)"
+    haskey(identity, "schema_version") || throw(ArgumentError(
+        "$(where_): identity has no schema_version"))
+    version = _read_dataset(identity, "schema_version")
+    version isa Integer || throw(ArgumentError(
+        "$(where_): identity schema_version $(repr(version)) is not an integer"))
+    labelled = haskey(identity, "kinetic_normalization")
+    if version == F3_IDENTITY_SCHEMA_VERSION
+        labelled || throw(ArgumentError(
+            "$(where_): identity version $(version) has no kinetic_normalization label"))
+        _require_primary_label(_read_dataset(identity, "kinetic_normalization"),
+            where_, "F3")
+    elseif version == F3_LEGACY_IDENTITY_SCHEMA_VERSION
+        labelled && throw(ArgumentError(
+            "$(where_): legacy identity version $(version) carries a " *
+            "kinetic_normalization label"))
+    else
+        throw(ArgumentError("$(where_): unknown identity schema_version $(version)"))
+    end
+    (f3_identity_label(version)..., Int(version))
+end
+
+# F4 (`fuzzy_axion_model_stage_driver.jl` output HDF5) and the F5 model-stage
+# input HDF5 it reads, CYAX-0232 R-006 and R-007.
+const F4_SCHEMA_VERSION = "cyaxiverse-fuzzy-axion-model-stage-1"
+const F4_LEGACY_REQUIRED_DATASETS = ("total_model_count",
+    "model_mass_reference_log10_ev")
+const F5_MODEL_STAGE_INPUT_SCHEMA = "kaehler-point-provenance-2"
+const F5_LEGACY_MODEL_STAGE_INPUT_SCHEMA = "kaehler-point-provenance-1"
+
+"""
+    f4_label(file::HDF5.File, path) -> (label::Symbol, inferred::Bool)
+
+Return the kinetic-normalization label of a Fuzzy-axion model-stage output
+file (F4, CYAX-0232 R-007) and whether it was inferred.
+
+- Root `schema_version == "$(F4_SCHEMA_VERSION)"`: the root dataset
+  `kinetic_normalization` must be `"sugra_c1"`; returns `(:sugra_c1, false)`.
+- No `schema_version` and no label, with root `total_model_count` and
+  `model_mass_reference_log10_ev`: `(:legacy_c_half, true)`.
+
+Throws an `ArgumentError` naming `path` for a current-version file whose label
+is missing or not `"sugra_c1"`, an unversioned file that carries a label, an
+unknown version and an unrecognized layout.
+"""
+function f4_label(file::HDF5.File, path::AbstractString)
+    where_ = "F4 model-stage output $(path)"
+    labelled = haskey(file, "kinetic_normalization")
+    if haskey(file, "schema_version")
+        version = HDF5.read(file["schema_version"]::HDF5.Dataset)
+        version == F4_SCHEMA_VERSION || throw(ArgumentError(
+            "$(where_): unknown F4 schema_version $(repr(version))"))
+        labelled || throw(ArgumentError(
+            "$(where_): F4 $(version) has no kinetic_normalization label"))
+        _require_primary_label(HDF5.read(file["kinetic_normalization"]::HDF5.Dataset),
+            where_, "F4")
+        return (:sugra_c1, false)
+    end
+    labelled && throw(ArgumentError(
+        "$(where_): unversioned F4 carries a kinetic_normalization label"))
+    absent = [name for name in F4_LEGACY_REQUIRED_DATASETS if !haskey(file, name)]
+    isempty(absent) || throw(ArgumentError(
+        "$(where_): unversioned layout lacks $(join(absent, ", ")); " *
+        "no F4 layout is recognized"))
+    (:legacy_c_half, true)
+end
+
+"""
+    f5_model_stage_input_label(file::HDF5.File, path) -> (label::Symbol, inferred::Bool)
+
+Return the kinetic-normalization label of the model-stage input HDF5 written
+by `reproduce_fuzzy_axions_h11_4.py` `_write_model_stage_input` (F5,
+CYAX-0232 R-006) and whether it was inferred. Its version is the root
+attribute `record_metadata_schema`.
+
+- `"$(F5_MODEL_STAGE_INPUT_SCHEMA)"`: the root dataset
+  `kinetic_normalization` must be `"sugra_c1"`; returns `(:sugra_c1, false)`.
+- `"$(F5_LEGACY_MODEL_STAGE_INPUT_SCHEMA)"` with no label:
+  `(:legacy_c_half, true)`.
+
+Throws an `ArgumentError` naming `path` for a missing or unknown version, a
+current-version file whose label is missing or not `"sugra_c1"`, and a legacy
+file that carries a label.
+"""
+function f5_model_stage_input_label(file::HDF5.File, path::AbstractString)
+    where_ = "F5 model-stage input $(path)"
+    attributes = HDF5.attributes(file)
+    haskey(attributes, "record_metadata_schema") || throw(ArgumentError(
+        "$(where_): no record_metadata_schema attribute"))
+    version = HDF5.read(attributes["record_metadata_schema"])
+    labelled = haskey(file, "kinetic_normalization")
+    if version == F5_MODEL_STAGE_INPUT_SCHEMA
+        labelled || throw(ArgumentError(
+            "$(where_): $(version) has no kinetic_normalization label"))
+        _require_primary_label(HDF5.read(file["kinetic_normalization"]::HDF5.Dataset),
+            where_, "F5")
+        return (:sugra_c1, false)
+    elseif version == F5_LEGACY_MODEL_STAGE_INPUT_SCHEMA
+        labelled && throw(ArgumentError(
+            "$(where_): legacy $(version) carries a kinetic_normalization label"))
+        return (:legacy_c_half, true)
+    end
+    throw(ArgumentError("$(where_): unknown record_metadata_schema $(repr(version))"))
+end
+
+# F6 (`build_orientifold_vacua_inflation.jl` `inflation` group),
+# CYAX-0232 R-006 and R-007.
+const F6_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-2.4"
+const F6_LEGACY_SCHEMA_VERSIONS = ("cyaxiverse-phase3-orientifold-inflation-2.3",
+    "cyaxiverse-phase3-orientifold-inflation-2.2",
+    "cyaxiverse-phase3-orientifold-inflation-2.1",
+    "cyaxiverse-phase3-orientifold-inflation-2.0",
+    "cyaxiverse-phase3-orientifold-inflation-1.0")
+
+"""
+    f6_label(inflation::HDF5.Group, path) -> (label::Symbol, inferred::Bool)
+
+Return the kinetic-normalization label of a geometry's `inflation` group (F6,
+CYAX-0232 R-007) and whether it was inferred. The group version is
+`inflation/schema_version`; the nested compatibility marker
+`inflation/catastrophes/legacy_v1/schema_version` is not read.
+
+- `schema_version == "$(F6_SCHEMA_VERSION)"`: the label
+  `inflation/kinetic_normalization` must be `"sugra_c1"`; returns
+  `(:sugra_c1, false)`.
+- A historical group version (`…-2.3`, `…-2.2`, `…-2.1`, `…-2.0` or
+  `…-1.0`) with no label: `(:legacy_c_half, true)`.
+
+Throws an `ArgumentError` naming `path` for a missing or unknown version, a
+current-version group whose label is missing or not `"sugra_c1"`, and a
+historical version that carries a label.
+"""
+function f6_label(inflation::HDF5.Group, path::AbstractString)
+    where_ = "F6 inflation group in $(path)"
+    haskey(inflation, "schema_version") || throw(ArgumentError(
+        "$(where_): no schema_version"))
+    version = _read_dataset(inflation, "schema_version")
+    labelled = haskey(inflation, "kinetic_normalization")
+    if version == F6_SCHEMA_VERSION
+        labelled || throw(ArgumentError(
+            "$(where_): F6 $(version) has no kinetic_normalization label"))
+        _require_primary_label(_read_dataset(inflation, "kinetic_normalization"),
+            where_, "F6")
+        return (:sugra_c1, false)
+    elseif version in F6_LEGACY_SCHEMA_VERSIONS
+        labelled && throw(ArgumentError(
+            "$(where_): legacy F6 $(version) carries a kinetic_normalization label"))
+        return (:legacy_c_half, true)
+    end
+    throw(ArgumentError("$(where_): unknown F6 schema_version $(repr(version))"))
+end
+
+"""
+    stored_kinetic_normalization(path; family) -> (label::Symbol, inferred::Bool)
+
+Return the kinetic-normalization label of a persisted HDF5 output and whether
+it was inferred from a legacy layout (CYAX-0232 R-006), applying the R-007
+checks of the family's reader. `family` is the output family: `:f1`
+([`f1_label`](@ref)), `:f2` ([`f2_label`](@ref)), `:f3`
+([`f3_label`](@ref)), `:f4` ([`f4_label`](@ref)) or `:f6`
+([`f6_label`](@ref)). See the *Kinetic normalization* page of the manual for the convention,
+the persisted labels and how earlier outputs are read.
+"""
+function stored_kinetic_normalization(path::AbstractString; family::Symbol)
+    family in (:f1, :f2, :f3, :f4, :f6) || throw(ArgumentError(
+        "stored_kinetic_normalization: unsupported family $(repr(family))"))
+    h5open(path, "r") do file
+        family === :f4 && return f4_label(file, path)
+        if family === :f6
+            haskey(file, "inflation") || throw(ArgumentError(
+                "F6 inflation group in $(path): no inflation group"))
+            return f6_label(file["inflation"]::HDF5.Group, path)
+        end
+        if family === :f1
+            haskey(file, "spectrum/physical") || throw(ArgumentError(
+                "F1 spectrum/physical in $(path): no spectrum/physical group"))
+            return f1_label(file["spectrum/physical"]::HDF5.Group, path)
+        elseif family === :f3
+            haskey(file, "spectrum/axion_photon/identity") || throw(ArgumentError(
+                "F3 spectrum/axion_photon in $(path): no identity group"))
+            label, inferred, _ = f3_label(
+                file["spectrum/axion_photon/identity"]::HDF5.Group, path)
+            return (label, inferred)
+        end
+        haskey(file, "spectrum") || throw(ArgumentError(
+            "F2 spectrum groups in $(path): no spectrum group"))
+        label, inferred, _ = f2_label(file["spectrum"]::HDF5.Group, path)
+        (label, inferred)
+    end
+end
+
 """
     cubic_tensor(h11, tri, cy=1)
 
 Read the cubic interaction tensor saved by `pq_spectrum_save` or
-`hp_spectrum_save`.  Returns a named tuple with `tensor` and the evaluation
-`phase`; the tensor is stored in the corresponding saved spectrum basis.
+`hp_spectrum_save`. Returns a named tuple with `tensor`, the charge-basis
+evaluation point `phase` (ϑ₀), `cubic_basis` and the label fields
+`kinetic_normalization` and `kinetic_normalization_inferred` (CYAX-0232).
+
+`cubic_basis` is `:charge_basis` (`hp_spectrum_save`),
+`:canonical_mass_basis` (`pq_spectrum_save`) or `:unknown` for a legacy F2
+layout. A legacy tensor whose stored phase is nonzero is unreliable (it may be
+mis-oriented or evaluated at the wrong point); use [`require_cubic_basis`](@ref)
+before comparing or rescaling tensors.
 """
 function cubic_tensor(h11::Int, tri::Int, cy::Int=1)
-    h5open(cyax_file(h11, tri, cy), "r") do file
+    path = cyax_file(h11, tri, cy)
+    h5open(path, "r") do file
+        label, inferred, basis = f2_label(file["spectrum"]::HDF5.Group, path)
         tensor = HDF5.read(file, "spectrum/cubic/tensor")
         phase = HDF5.read(file, "spectrum/cubic/phase")
-        return (; tensor=tensor, phase=phase)
+        return (; tensor=tensor, phase=phase, cubic_basis=basis,
+            kinetic_normalization=label, kinetic_normalization_inferred=inferred)
     end
 end
 
 function cubic_tensor(geom_idx::GeometryIndex)
     cubic_tensor(geom_idx.h11, geom_idx.polytope, geom_idx.frst)
+end
+
+"""
+    require_cubic_basis(cubic) -> Symbol
+
+Return `cubic.cubic_basis` for a result of [`cubic_tensor`](@ref), and throw
+an `ArgumentError` for a legacy F2 tensor (`:unknown`), whose basis is not
+recorded. Consumers that compare or rescale cubic tensors call this first.
+"""
+function require_cubic_basis(cubic)
+    cubic.cubic_basis === :unknown && throw(ArgumentError(
+        "legacy F2 cubic tensor: its basis is not recorded, so it cannot be " *
+        "compared or rescaled"))
+    cubic.cubic_basis
 end
 
 
@@ -596,24 +1041,38 @@ end
 ##### HDF5.read Spectra data ###
 ################################
 
+"""
+    pq_spectrum(h11, tri, cy=1)
+
+Read the F2 masses and decay constants written by `pq_spectrum_save` or
+`hp_spectrum_save`, with the label fields `kinetic_normalization` and
+`kinetic_normalization_inferred` (CYAX-0232; see [`f2_label`](@ref)).
+"""
 function pq_spectrum(h11::Int,tri::Int,cy::Int=1)
-    Hvals::Vector{Float64}, fK::Vector{Float64}, fpert::Vector{Float64} = 
-    h5open(cyax_file(h11,tri,cy), "r") do file
-        HDF5.read(file, "spectrum/masses/log10"),
-        HDF5.read(file, "spectrum/decay/fK"), HDF5.read(file, "spectrum/decay/fpert")
+    path = cyax_file(h11, tri, cy)
+    h5open(path, "r") do file
+        label, inferred, _ = f2_label(file["spectrum"]::HDF5.Group, path)
+        Hvals::Vector{Float64} = HDF5.read(file, "spectrum/masses/log10")
+        fK::Vector{Float64} = HDF5.read(file, "spectrum/decay/fK")
+        fpert::Vector{Float64} = HDF5.read(file, "spectrum/decay/fpert")
+        (; m = Hvals, fK = fK, fpert = fpert, kinetic_normalization = label,
+            kinetic_normalization_inferred = inferred)
     end
-    return (; m = Hvals, fK = fK, fpert = fpert)
 end
 
 """
     physical_spectrum(h11, tri, cy=1)
 
 Read the persisted physical spectrum and its metadata from a geometry's
-`spectrum/physical` HDF5 group.
+`spectrum/physical` HDF5 group (F1), with the label fields
+`kinetic_normalization` and `kinetic_normalization_inferred` (CYAX-0232; see
+[`f1_label`](@ref), which applies the R-007 checks).
 """
 function physical_spectrum(h11::Int, tri::Int, cy::Int=1)
-    h5open(cyax_file(h11, tri, cy), "r") do file
+    path = cyax_file(h11, tri, cy)
+    h5open(path, "r") do file
         physical = file["spectrum/physical"]::HDF5.Group
+        label, inferred = f1_label(physical, path)
         metadata = physical["metadata"]::HDF5.Group
         return (; m = _read_dataset(physical, "m"),
             mode_indices = _read_dataset(physical, "mode_indices"),
@@ -643,7 +1102,9 @@ function physical_spectrum(h11::Int, tri::Int, cy::Int=1)
             threshold_log10 = _read_dataset(metadata, "threshold_log10"),
             prec = _read_dataset(metadata, "prec"),
             provisional = _read_dataset(metadata, "provisional"),
-            runtime_seconds = _read_dataset(metadata, "runtime_seconds"))
+            runtime_seconds = _read_dataset(metadata, "runtime_seconds"),
+            kinetic_normalization = label,
+            kinetic_normalization_inferred = inferred)
     end
 end
 
@@ -652,7 +1113,17 @@ function physical_spectrum(geom_idx::GeometryIndex)
     physical_spectrum(geom_idx.h11, geom_idx.polytope, geom_idx.frst)
 end
 
+"""
+    hp_spectrum(h11, tri, cy=1)
+
+Read the F2 spectrum and quartics written by `hp_spectrum_save`, with the
+label fields `kinetic_normalization` and `kinetic_normalization_inferred`
+(CYAX-0232; see [`f2_label`](@ref)).
+"""
 function hp_spectrum(h11::Int,tri::Int,cy::Int=1)
+    path = cyax_file(h11, tri, cy)
+    label, inferred, _ = h5open(file -> f2_label(file["spectrum"]::HDF5.Group, path),
+        path, "r")
     Hsign::Vector{Int64}, Hvals::Vector{Float64}, fK::Vector{Float64}, fpert::Vector{Float64},
     quartdiagsign::Vector{Int64},quartdiaglog::Vector{Float64},
     quart22_index,quart22_sign::Vector{Int},quart22_log10::Vector{Float64},quart31_index,
@@ -664,7 +1135,8 @@ function hp_spectrum(h11::Int,tri::Int,cy::Int=1)
         HDF5.read(file, "spectrum/quart31/log10"),HDF5.read(file, "spectrum/quart22/index"),HDF5.read(file, "spectrum/quart22/sign"),
         HDF5.read(file, "spectrum/quart22/log10")
     end
-    return (; m = Hvals, fK = fK, fpert = fpert, λself = quartdiaglog, λ31_i = quart31_index, λ31 = quart31_log10, λ22_i = quart22_index, λ22 = quart22_log10)
+    return (; m = Hvals, fK = fK, fpert = fpert, λself = quartdiaglog, λ31_i = quart31_index, λ31 = quart31_log10, λ22_i = quart22_index, λ22 = quart22_log10,
+        kinetic_normalization = label, kinetic_normalization_inferred = inferred)
 end
 
 """

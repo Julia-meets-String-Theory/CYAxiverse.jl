@@ -119,6 +119,11 @@ Validate oriented periodic/string-basis potential inputs and prepare a reusable 
 context.  With `precision_bits=nothing`, the context uses `Float64`; otherwise
 it uses `BigFloat` at the requested precision.  The kinetic matrix must be
 finite, symmetric after symmetrization, and positive definite.
+
+K-argument contract (CYAX-0232): `K` is the kinetic matrix in
+`-(1/2) M_pl² K ∂ϑ ∂ϑ` for period-one ϑ, used as given and never rescaled.
+For stored CYTools data at c = 1, pass `CYAxiverse.kinetic_matrix(Kinv)`,
+which is `2 Kinv⁻¹`.
 """
 function prepare_context(Q::AbstractMatrix{Int}, L::AbstractMatrix{<:Real},
         K::AbstractMatrix{<:Real}; precision_bits::Union{Nothing, Int}=nothing)
@@ -517,7 +522,13 @@ function _screen_pass(diagnostic::PointDiagnostics)
         diagnostic.epsilon < 1 && abs(minimum(diagnostic.eta_values)) < 1
 end
 
-"""Re-correct and compare one retained point at Float64 and BigFloat precision."""
+"""Re-correct and compare one retained point at Float64 and BigFloat precision.
+
+K-argument contract (CYAX-0232): `K` is the kinetic matrix in
+`-(1/2) M_pl² K ∂ϑ ∂ϑ` for period-one ϑ, used as given and never rescaled.
+For stored CYTools data at c = 1, pass `CYAxiverse.kinetic_matrix(Kinv)`,
+which is `2 Kinv⁻¹`.
+"""
 function compare_precision(seed::AbstractVector{<:Real}, Q::AbstractMatrix{Int},
         L::AbstractMatrix{<:Real}, K::AbstractMatrix{<:Real};
         precision_bits::Int=256, float_residual_tolerance::Real=1e-10,

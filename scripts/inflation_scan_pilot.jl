@@ -229,10 +229,12 @@ function _inflation_pilot_terminal_rows(shard_dir::AbstractString)
             (index, field) in enumerate(INFLATION_SHARD_FIELDS))
         open(path, "r") do io
             readline(io)
-            for line in eachline(io)
+            for (line_number, line) in enumerate(eachline(io))
                 isempty(strip(line)) && continue
                 fields = _inflation_shard_csv_fields(line)
-                length(fields) == length(INFLATION_SHARD_FIELDS) || continue
+                # CYAX-0232 R-007: every row passes the label check.
+                inflation_csv_row_label(string.(INFLATION_SHARD_FIELDS), fields;
+                    path, row=line_number + 1)
                 h11 = _inflation_pilot_parse_value(fields, positions, :h11, 0)
                 polytope = _inflation_pilot_parse_value(
                     fields, positions, :polytope, 0)
@@ -261,7 +263,8 @@ function _inflation_pilot_terminal_rows(shard_dir::AbstractString)
                         fields, positions, :stage_allocated_bytes, 0),
                     output_bytes=_inflation_pilot_parse_value(
                         fields, positions, :stage_output_bytes, 0),
-                    error=fields[positions[:error]])
+                    error=fields[positions[:error]],
+                    kinetic_normalization=fields[positions[:kinetic_normalization]])
                 previous = get(rows, key, nothing)
                 previous === nothing || row.attempt >= previous.attempt || continue
                 rows[key] = row
@@ -286,7 +289,21 @@ function _inflation_pilot_mean(rows, field)
     isempty(finite) ? NaN : mean(finite)
 end
 
+"""
+Group terminal shard rows into pilot report strata.
+
+The report is a derived output (CYAX-0232 R-006): every input row must carry
+the same non-empty `kinetic_normalization`, which each report row repeats.
+Rows whose labels differ raise an `ArgumentError` naming both labels.
+"""
 function _inflation_pilot_report_rows(rows)
+    labels = unique(String(row.kinetic_normalization) for row in rows)
+    any(isempty, labels) && throw(ArgumentError(
+        "pilot rows without a kinetic_normalization label"))
+    length(labels) <= 1 || throw(ArgumentError(
+        "cannot combine pilot rows with kinetic_normalization " *
+        "$(repr(labels[1])) and $(repr(labels[2]))"))
+    label = isempty(labels) ? "" : only(labels)
     groups = Dict{Tuple{Int, String, String, String}, Vector{NamedTuple}}()
     for row in rows
         key = (row.h11, _inflation_pilot_instanton_bin(row.instantons),
@@ -314,7 +331,8 @@ function _inflation_pilot_report_rows(rows)
             mean_total_seconds=_inflation_pilot_mean(group, :total_seconds),
             mean_allocated_bytes=_inflation_pilot_mean(group, :allocated_bytes),
             max_allocated_bytes=maximum(row.allocated_bytes for row in group),
-            mean_output_bytes=_inflation_pilot_mean(group, :output_bytes)))
+            mean_output_bytes=_inflation_pilot_mean(group, :output_bytes),
+            kinetic_normalization=label))
     end
     reports
 end
@@ -325,7 +343,7 @@ const INFLATION_PILOT_REPORT_FIELDS = (
     :refinement_eligible, :mean_instantons,
     :mean_leading_log_gap, :mean_log_scale_span, :mean_branch_count,
     :mean_candidate_count, :mean_total_seconds, :mean_allocated_bytes,
-    :max_allocated_bytes, :mean_output_bytes)
+    :max_allocated_bytes, :mean_output_bytes, :kinetic_normalization)
 
 function _inflation_pilot_write_report(path::AbstractString, reports)
     path = abspath(expanduser(path))

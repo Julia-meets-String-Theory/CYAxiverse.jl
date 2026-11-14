@@ -22,7 +22,8 @@ using SHA
 
 include(joinpath(@__DIR__, "inflation_scan_common.jl"))
 
-const PILOT_SCHEMA_VERSION = "6"
+# Version 7 rows carry `kinetic_normalization` (CYAX-0232 R-006).
+const PILOT_SCHEMA_VERSION = "7"
 const PILOT_DOMAIN_CERTIFICATE_VERSION = "physical-domain-certificate-3"
 const PILOT_PHYSICAL_NORMALIZATION = "homogeneous_full_volume_k32"
 const PILOT_PHYSICAL_UNITS = "M_s=M_Pl;k=dimensionless"
@@ -53,7 +54,7 @@ const PILOT_DEFAULT_CERTIFICATE_DIR = ""
 const PILOT_DEFAULT_CHECKPOINT_DIR = ""
 
 const PILOT_COMMON_FIELDS = (
-    :row_type, :schema_version, :run_id, :data_root, :geometry_path,
+    :row_type, :schema_version, :kinetic_normalization, :run_id, :data_root, :geometry_path,
     :h11, :polytope, :frst, :reference_scale, :sampled_scale,
     :scale_grid, :scale_source, :scale_status, :volume_normalization,
     :domain_certificate_version, :domain_status, :domain_reason,
@@ -728,9 +729,10 @@ function _pilot_physical_domain_certificate_big(geometry, Q, L, K, scale,
                 scale=k, precision_bits, normalization=raw_normalization,
                 source_identity=raw_source, configuration_digest=raw_config)
         identity = Matrix{BigFloat}(I, h11, h11)
-        inverse_residual = maximum(abs.(base_K * kinv - identity))
+        # c = 1 (CYAX-0232 R-011): the physical K is 2 Kinv⁻¹, so K * Kinv = 2I.
+        inverse_residual = maximum(abs.(base_K * kinv - 2 * identity))
         inverse_residual <= spd_tolerance || return cert_result(
-            :domain_failure, "K and Kinv are not reciprocal in one basis";
+            :domain_failure, "K and Kinv do not satisfy K * Kinv = 2I in one basis";
             scale=k, precision_bits, normalization=raw_normalization,
             source_identity=raw_source, configuration_digest=raw_config)
         scaled_K = base_K / k^2
@@ -1471,6 +1473,15 @@ function pilot_append_csv(path::AbstractString, row, fields)
     end
 end
 
+"""
+    _pilot_completed_scales(path)
+
+Return the `(h11, polytope, frst, sampled_scale)` keys of completed `scale`
+rows. CYAX-0232 A5: every row passes `inflation_csv_row_label`; a row
+labelled or inferred other than `"sugra_c1"` is not complete; a missing
+required column, a field-count mismatch and a parse error raise instead of
+being skipped.
+"""
 function _pilot_completed_scales(path::AbstractString)
     completed = Set{Tuple{Int, Int, Int, Float64}}()
     isfile(path) || return completed
@@ -1479,21 +1490,54 @@ function _pilot_completed_scales(path::AbstractString)
     header = _pilot_csv_fields(lines[1])
     positions = Dict(Symbol(name) => index for (index, name) in enumerate(header))
     required = (:row_type, :h11, :polytope, :frst, :sampled_scale)
-    all(name -> haskey(positions, name), required) || return completed
-    for line in @view lines[2:end]
+    missing_columns = [name for name in required if !haskey(positions, name)]
+    isempty(missing_columns) || throw(ArgumentError(
+        "pilot CSV $(path) lacks resume columns $(join(missing_columns, ", "))"))
+    for (line_number, line) in enumerate(lines)
+        line_number == 1 && continue
         isempty(strip(line)) && continue
         fields = _pilot_csv_fields(line)
-        length(fields) == length(header) || continue
+        label, _ = inflation_csv_row_label(header, fields; path, row=line_number)
+        label == "sugra_c1" || continue
         fields[positions[:row_type]] == "scale" || continue
-        try
-            push!(completed, (parse(Int, fields[positions[:h11]]),
-                parse(Int, fields[positions[:polytope]]),
-                parse(Int, fields[positions[:frst]]),
-                parse(Float64, fields[positions[:sampled_scale]])))
-        catch
-        end
+        push!(completed, (parse(Int, fields[positions[:h11]]),
+            parse(Int, fields[positions[:polytope]]),
+            parse(Int, fields[positions[:frst]]),
+            parse(Float64, fields[positions[:sampled_scale]])))
     end
     completed
+end
+
+"""
+    _pilot_resume_label_check(path)
+
+CYAX-0232 A5: refuse `--resume` on a report or shard file holding a row
+labelled or inferred other than `"sugra_c1"`, naming the label. A legacy file
+without rows is named by its header. Runs before the header comparison in
+`pilot_prepare_csv`; the remedy is a new report path and shard directory.
+"""
+function _pilot_resume_label_check(path::AbstractString)
+    isfile(path) || return nothing
+    lines = readlines(path)
+    isempty(lines) && return nothing
+    header = _pilot_csv_fields(lines[1])
+    refuse(label, inferred, where_) = throw(ArgumentError(
+        "--resume refused: $(where_) has kinetic_normalization $(label) " *
+        "(inferred=$(inferred)); use a new report path and shard directory"))
+    if length(lines) == 1
+        "kinetic_normalization" in header && return nothing
+        any(==(header), values(INFLATION_CSV_LEGACY_HEADERS)) &&
+            refuse("legacy_c_half", true, path)
+        return nothing
+    end
+    for (line_number, line) in enumerate(lines)
+        line_number == 1 && continue
+        isempty(strip(line)) && continue
+        label, inferred = inflation_csv_row_label(header, _pilot_csv_fields(line);
+            path, row=line_number)
+        label == "sugra_c1" || refuse(label, inferred, "$(path), row $(line_number)")
+    end
+    nothing
 end
 
 function _pilot_empty_classification()
@@ -1651,6 +1695,7 @@ function _pilot_context(geom, data_dir, geometry_path, scale, hierarchy,
         actual_scale_status == :unsupported ? "nonphysical_diagnostic" :
         "generic_log10_amplitude_exponent_stretch")
     (; row_type=:scale, schema_version=PILOT_SCHEMA_VERSION,
+       kinetic_normalization=INFLATION_PHYSICAL_KINETIC_NORMALIZATION,
        run_id=options[:run_id], data_root=data_dir, geometry_path,
        h11=geom.h11, polytope=geom.polytope, frst=geom.frst,
        reference_scale=1.0, sampled_scale=scale,
@@ -1826,6 +1871,34 @@ function pilot_augmented_catastrophe(initial_theta::AbstractVector{<:Real},
            factor \ data.hessian / factor')))
 end
 
+# CYAX-0232 Clarification A7: `pilot_benchmark_regression` combines the A96
+# `poly102_inflation.n8_degenerate_point` with the P96
+# `paper_benchmarks.n8_hilltop`, so it carries no top-level
+# `kinetic_normalization`. This map gives the sorted labels of each
+# K-dependent field by provenance; the `n5_*` fields come from K-free
+# functions (Clarification A4) and are omitted.
+const PILOT_BENCHMARK_A96 = (:a96_reproduction_raw_radian,)
+const PILOT_BENCHMARK_A96_P96 = (:a96_reproduction_raw_radian, :p96_reproduction_c_half)
+const PILOT_BENCHMARK_KINETIC_NORMALIZATION_BY_FIELD = (
+    n8_critical_scale=PILOT_BENCHMARK_A96,
+    n8_gradient_residual=PILOT_BENCHMARK_A96,
+    n8_null_residual=PILOT_BENCHMARK_A96,
+    n8_zero_mode=PILOT_BENCHMARK_A96,
+    n8_positive_heavy_modes=PILOT_BENCHMARK_A96,
+    n8_detuned_negative_modes=PILOT_BENCHMARK_A96_P96,
+    n8_detuned_eigenvalues=PILOT_BENCHMARK_A96_P96,
+    passed=PILOT_BENCHMARK_A96_P96,
+)
+
+"""
+    pilot_benchmark_regression()
+
+Replay the N=5 and N=8 benchmark anchors. The result combines the A96 and P96
+reproduction contracts (CYAX-0232 Clarification A7): it has no top-level
+`kinetic_normalization` and carries `kinetic_normalization_by_field`, which
+maps each K-dependent field to its sorted tuple of labels. It is not a
+physical result.
+"""
 function pilot_benchmark_regression()
     benchmark = CYAxiverse.paper_benchmarks.poly102_inflation
     n5_kc = benchmark.n5_critical_scale()
@@ -1893,7 +1966,8 @@ function pilot_benchmark_regression()
            isapprox(n8.k, benchmark.N8_KC; atol=1e-9) &&
            n8.gradient_residual < 1e-10 && n8.null_residual < 1e-10 &&
            abs(n8.eigenvalues[1]) < 1e-9 && all(>(0), n8.eigenvalues[2:end]) &&
-           count(<(0), detuned.eigenvalues) == 1)
+           count(<(0), detuned.eigenvalues) == 1,
+       kinetic_normalization_by_field=PILOT_BENCHMARK_KINETIC_NORMALIZATION_BY_FIELD)
 end
 
 function _pilot_parse_args(args)
@@ -2036,6 +2110,11 @@ function run_scale_continuation(options)
         isfile(report) || throw(ArgumentError("--resume requires an existing report: $report"))
         isfile(shard_path) || throw(ArgumentError("--resume requires an existing shard: $shard_path"))
     end
+    if options[:resume]
+        # CYAX-0232 A5: label checks on both files before either header check.
+        _pilot_resume_label_check(report)
+        _pilot_resume_label_check(shard_path)
+    end
     pilot_prepare_csv(report, PILOT_SUMMARY_FIELDS; append=options[:resume])
     pilot_prepare_csv(shard_path, PILOT_BRANCH_FIELDS; append=options[:resume])
     completed = options[:resume] ? _pilot_completed_scales(report) :
@@ -2167,6 +2246,7 @@ function run_scale_continuation(options)
                 key = (geom.h11, geom.polytope, geom.frst, scale)
                 key in completed && continue
                 fallback = (; row_type=:scale, schema_version=PILOT_SCHEMA_VERSION,
+                    kinetic_normalization=INFLATION_PHYSICAL_KINETIC_NORMALIZATION,
                     run_id, data_root=data_dir, geometry_path,
                     h11=geom.h11, polytope=geom.polytope, frst=geom.frst,
                     reference_scale=1.0, sampled_scale=scale,

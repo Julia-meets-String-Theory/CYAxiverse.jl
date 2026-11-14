@@ -14,11 +14,13 @@ using Random
 
 const GeometryIndex = CYAxiverse.structs.GeometryIndex
 const POINTS = CYAxiverse.inflation_points
-const REFINEMENT_SCHEMA_VERSION = "3"
-const FLOW_SCHEMA_VERSION = "1"
+# Refinement 4 and flow 2 rows carry `kinetic_normalization` (CYAX-0232 R-006).
+const REFINEMENT_SCHEMA_VERSION = "4"
+const FLOW_SCHEMA_VERSION = "2"
+const REFINEMENT_KINETIC_NORMALIZATION = String(CYAxiverse.KINETIC_NORMALIZATION)
 
 const REFINEMENT_FIELDS = (
-    :row_type, :schema_version, :run_id, :data_dir, :code_commit,
+    :row_type, :schema_version, :kinetic_normalization, :run_id, :data_dir, :code_commit,
     :max_branches, :negative_mode_range, :random_starts, :random_seed,
     :max_points, :float_tolerance, :high_tolerance, :duplicate_tolerance,
     :working_basis, :physical_basis, :physical_vectors, :scale_status,
@@ -39,7 +41,7 @@ const REFINEMENT_FIELDS = (
     :allocated_bytes, :output_bytes, :failure)
 
 const FLOW_FIELDS = (
-    :row_type, :schema_version, :run_id, :data_dir, :code_commit,
+    :row_type, :schema_version, :kinetic_normalization, :run_id, :data_dir, :code_commit,
     :h11, :polytope, :frst, :candidate_index, :branch_seed_index,
     :leading_negative_modes, :seed_theta, :float_theta, :high_theta,
     :precision_bits, :working_basis, :physical_basis, :scale_status,
@@ -166,6 +168,7 @@ function _point_row(geom, search, source::Symbol, index::Int, mode::Int,
         (float_screen ? "Float64 screen hit not accepted at precision boundary" :
          "corrected point does not pass the screening thresholds")
     merge((; row_type=:point, schema_version=REFINEMENT_SCHEMA_VERSION,
+        kinetic_normalization=REFINEMENT_KINETIC_NORMALIZATION,
         run_id=settings.run_id, data_dir=settings.data_dir,
         code_commit=settings.code_commit, max_branches=settings.max_branches,
         negative_mode_range=settings.negative_mode_range,
@@ -283,6 +286,7 @@ function _flow_row(geom, candidate, candidate_index::Int, flow, accepted::Bool,
     comparison = candidate.comparison
     high = comparison.high_correction
     (; row_type=:flow, schema_version=FLOW_SCHEMA_VERSION,
+        kinetic_normalization=REFINEMENT_KINETIC_NORMALIZATION,
         run_id=settings.run_id, data_dir=settings.data_dir,
         code_commit=settings.code_commit, h11=geom.h11,
         polytope=geom.polytope, frst=geom.frst, candidate_index,
@@ -389,6 +393,7 @@ function _summary_row(geom, search, rows, settings; wall_seconds=0.0,
     refined = count(row -> row.candidate_status == :refined_candidate, rows)
     screened = count(row -> row.candidate_status == :screen_candidate, rows)
     merge((; row_type=:summary, schema_version=REFINEMENT_SCHEMA_VERSION,
+        kinetic_normalization=REFINEMENT_KINETIC_NORMALIZATION,
         run_id=settings.run_id, data_dir=settings.data_dir,
         code_commit=settings.code_commit, max_branches=settings.max_branches,
         negative_mode_range=settings.negative_mode_range,

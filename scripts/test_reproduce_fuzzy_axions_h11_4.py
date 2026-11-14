@@ -155,6 +155,12 @@ class ReproduceFuzzyAxionsDriverTest(unittest.TestCase):
             summary = driver.reproduce(args)
 
         self.assertEqual(summary["schema_version"], driver.REPRODUCTION_SCHEMA_VERSION)
+        # CYAX-0232 R-006: reproduction-1.3 carries a top-level label.
+        self.assertEqual(
+            summary["schema_version"], "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.3"
+        )
+        self.assertEqual(summary["kinetic_normalization"], "sugra_c1")
+        self.assertEqual(json.loads(json.dumps(summary))["kinetic_normalization"], "sugra_c1")
         aliases = summary["schema_metadata"]["deprecated_aliases"]
         self.assertEqual(
             aliases["counts.source_vertex_evidence_inherited_orientifold_cys"],
@@ -404,6 +410,11 @@ class ReproduceFuzzyAxionsDriverTest(unittest.TestCase):
             )
 
         self.assertTrue(result["converged"])
+        # CYAX-0232 R-006: kaehler-production-1.1 objects carry the label.
+        self.assertEqual(
+            result["schema_version"], "cyaxiverse-fuzzy-axions-kaehler-production-1.1"
+        )
+        self.assertEqual(result["kinetic_normalization"], "sugra_c1")
         self.assertEqual(result["constraints"]["mass_log10"]["type"], "equality")
         self.assertEqual(result["constraints"]["qcd_volume"]["bounds"], [25.0, 40.0])
         self.assertTrue(result["constraints"]["prime_divisor_volumes"]["satisfied"])
@@ -493,6 +504,10 @@ class ReproduceFuzzyAxionsDriverTest(unittest.TestCase):
             )
 
         self.assertEqual(result["finite_search_status"], "completed")
+        self.assertEqual(
+            result["schema_version"], "cyaxiverse-fuzzy-axions-kaehler-production-1.1"
+        )
+        self.assertEqual(result["kinetic_normalization"], "sugra_c1")
         self.assertEqual(result["pair_count"], 6)
         self.assertEqual(result["converged_pair_count"], 6)
         self.assertEqual(result["deduplication"]["candidate_count"], 12)
@@ -904,6 +919,81 @@ class ReplayContractTests(unittest.TestCase):
             replay._zstd_jsonl_write_atomic(path, rows)
             with self.assertRaises(replay.ReplayResumeError):
                 replay._checkpoint_state(path, config, resume=True)
+
+
+class FuzzyAxionMassEvaluatorReexportTests(unittest.TestCase):
+    """CYAX-0232: the evaluator tests live in test_fuzzy_axion_mass_evaluator.py
+    (no CYTools needed); the driver must call that same function."""
+
+    def test_driver_reexports_the_cytools_free_evaluator(self):
+        import fuzzy_axion_mass_evaluator
+
+        self.assertIs(
+            driver._fuzzy_axion_mass_log10,
+            fuzzy_axion_mass_evaluator._fuzzy_axion_mass_log10,
+        )
+
+
+class ModelStageFileLabelTests(unittest.TestCase):
+    """CYAX-0232 T033, T034: F5 model-stage input and F4 output labels."""
+
+    def test_model_stage_input_is_labelled(self):
+        import h5py
+
+        record = {
+            "glsm_charge_matrix": [[1, 0, 1], [0, 1, 1]],
+            "prime_divisor_volumes": [1.0, 2.0, 3.0],
+            "cy_volume": 5.0,
+            "inverse_metric": [[2.0, 0.3], [0.3, 1.5]],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "input.h5"
+            driver._write_model_stage_input([record], path)
+            with h5py.File(path, "r") as file:
+                schema = file.attrs["record_metadata_schema"]
+                label = file["kinetic_normalization"][()]
+        schema = schema.decode() if isinstance(schema, bytes) else schema
+        label = label.decode() if isinstance(label, bytes) else label
+        self.assertEqual(schema, "kaehler-point-provenance-2")
+        self.assertEqual(label, "sugra_c1")
+
+    def _output_label(self, **datasets):
+        import h5py
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "output.h5"
+            with h5py.File(path, "w") as file:
+                for name, value in datasets.items():
+                    file.create_dataset(name, data=value)
+            with h5py.File(path, "r") as file:
+                return driver.model_stage_output_label(file, path)
+
+    def test_light_label_module_matches_driver(self):
+        import kinetic_normalization_labels as labels
+
+        self.assertEqual(labels.F5_REPRODUCTION_SCHEMA, driver.REPRODUCTION_SCHEMA_VERSION)
+        self.assertEqual(labels.KINETIC_NORMALIZATION, driver.KINETIC_NORMALIZATION)
+
+    def test_model_stage_output_label_rules(self):
+        legacy = {"total_model_count": 3, "model_mass_reference_log10_ev": [1.0]}
+        current = dict(
+            legacy,
+            schema_version="cyaxiverse-fuzzy-axion-model-stage-1",
+            kinetic_normalization="sugra_c1",
+        )
+        self.assertEqual(self._output_label(**current), ("sugra_c1", False))
+        self.assertEqual(self._output_label(**legacy), ("legacy_c_half", True))
+        rejected = [
+            {k: v for k, v in current.items() if k != "kinetic_normalization"},
+            dict(current, kinetic_normalization="legacy_c_half"),
+            dict(current, kinetic_normalization="bogus"),
+            dict(current, schema_version="cyaxiverse-fuzzy-axion-model-stage-2"),
+            dict(legacy, kinetic_normalization="sugra_c1"),
+            {"total_model_count": 3},
+        ]
+        for datasets in rejected:
+            with self.assertRaisesRegex(ValueError, "F4 model-stage output"):
+                self._output_label(**datasets)
 
 
 if __name__ == "__main__":

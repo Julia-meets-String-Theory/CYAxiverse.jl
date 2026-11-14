@@ -52,7 +52,10 @@ end
 `2 × M`: its first row contains signed coefficients, and its second row
 contains base-10 logarithms. Radian phases are a separate `phases` keyword to
 `prepare_model`; omitted phases are exactly zero. `K` is the exact symmetric
-`n × n` metric matrix. The supplied `theta0` is exactly normalized to a
+`n × n` kinetic matrix under the K-argument contract (CYAX-0232): the matrix
+in `-(1/2) M_pl² K ∂ϑ ∂ϑ` for period-one ϑ, used as given and never rescaled.
+For stored CYTools data at c = 1 it is `CYAxiverse.kinetic_matrix(Kinv)`, which
+is `2 Kinv⁻¹` and is what `read.oriented_potential` returns as `K`. The supplied `theta0` is exactly normalized to a
 centered periodic lift, with its integer translation retained in the result.
 Integer, rational, and finite binary floating-point values are captured as
 exact rationals before proof arithmetic begins.

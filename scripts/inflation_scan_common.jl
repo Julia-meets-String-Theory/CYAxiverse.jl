@@ -14,13 +14,16 @@ const INFLATION_SCAN_COMMON_LOADED = true
 if !isdefined(@__MODULE__, :INFLATION_DIAGNOSTIC_SCHEMA_VERSION)
     include(joinpath(@__DIR__, "inflation_diagnostics_common.jl"))
 end
+include(joinpath(@__DIR__, "inflation_csv_labels.jl"))
 
 using CYAxiverse
 using LinearAlgebra
 using Statistics
 
 const GeometryIndex = CYAxiverse.structs.GeometryIndex
-const INFLATION_SCAN_CONTRACT_VERSION = "4"
+# Contract 5 rows carry `kinetic_normalization` (CYAX-0232 R-006).
+const INFLATION_SCAN_CONTRACT_VERSION = "5"
+const INFLATION_PHYSICAL_KINETIC_NORMALIZATION = String(CYAxiverse.KINETIC_NORMALIZATION)
 
 """Parse `K` or `K:L` into an inclusive leading-index range."""
 function inflation_parse_negative_mode_range(value::AbstractString)
@@ -355,6 +358,7 @@ function run_geometry(geom_idx::GeometryIndex; max_branches::Int=1_000_000,
     flattest = branch_classification.flattest
     (; contract_version=INFLATION_SCAN_CONTRACT_VERSION,
        diagnostic_schema_version=INFLATION_DIAGNOSTIC_SCHEMA_VERSION,
+       kinetic_normalization=INFLATION_PHYSICAL_KINETIC_NORMALIZATION,
        measurement_scope=classified.measurement_scope,
        h11=geom_idx.h11, polytope=geom_idx.polytope, frst=geom_idx.frst,
        status=:success, instantons=size(Q, 2), selected_instantons=size(

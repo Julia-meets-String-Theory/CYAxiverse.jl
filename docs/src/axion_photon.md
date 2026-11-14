@@ -62,6 +62,15 @@ This is an adapted local scan, not a reproduction of the paper's 200,000-model
 ensemble. In particular, the local charge convention and local potential
 generator are recorded explicitly by the reader and result status.
 
+
+!!! note "Kinetic normalization"
+    Decay constants, masses, couplings and widths use the kinetic matrix
+    `K = 2 Kinv⁻¹` (the supergravity normalization, c = 1, CYAX-0232). A
+    persisted result records it in
+    `spectrum/axion_photon/identity/kinetic_normalization` (identity version 2);
+    results written at identity version 1 used c = 1/2 and are read as
+    `legacy_c_half`. See [Kinetic normalization](kinetic_normalization.md).
+
 ## Matrix layout and performance
 
 The input arrays keep the package layout exactly: `Q` is `h11 × N` and `L` is
@@ -80,7 +89,8 @@ column-oriented.
 For the local Float64-backed charge datasets, the loader converts to the
 package's `Matrix{Int}` convention in reusable 4096-column chunks. The scan
 also opens each selected HDF5 file once, reuses modular-rank work buffers,
-avoids forming `K = Kinv⁻¹`, and solves the EM expansion with a Float-valued
+works with the canonical factor of `Kinv/2` instead of forming the kinetic
+matrix `K = 2 Kinv⁻¹`, and solves the EM expansion with a Float-valued
 factorization. These choices reduce both temporary memory and generic integer
 factorization costs at larger h11.
 

@@ -48,7 +48,10 @@ include(joinpath(@__DIR__, "inflation_scan_common.jl"))
 isdefined(@__MODULE__, :scan_geometry_for_inflation) ||
     include(joinpath(@__DIR__, "inflation_candidate_refinement.jl"))
 
-const INFLATION_GROUP_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-2.3"
+# F6 version and label (CYAX-0232 R-006): `2.4` carries
+# `inflation/kinetic_normalization = "sugra_c1"`.
+const INFLATION_GROUP_SCHEMA_VERSION = CYAxiverse.read.F6_SCHEMA_VERSION
+const INFLATION_KINETIC_NORMALIZATION = String(CYAxiverse.KINETIC_NORMALIZATION)
 const INFLATION_LEGACY_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-1.0"
 const INFLATION_FLOW_ENCODING_SCHEMA_VERSION = "cyaxiverse-inflation-flow-decimal-string-1.0"
 const INFLATION_DOMAIN_CERTIFICATE_VERSION = "physical-domain-certificate-2"
@@ -96,9 +99,29 @@ function _phase3_git_commit()
     end
 end
 
-"""Return whether a geometry file already carries an `inflation` group."""
+"""
+    _existing_inflation_label(path) -> Union{Nothing, Tuple{Symbol, Bool}}
+
+Return the label of an existing `inflation` group (CYAX-0232 R-007,
+`CYAxiverse.read.f6_label`), or `nothing` when there is none. R-007 errors
+propagate.
+"""
+function _existing_inflation_label(path)
+    isfile(path) || return nothing
+    h5open(path, "r") do file
+        haskey(file, "inflation") || return nothing
+        CYAxiverse.read.f6_label(file["inflation"], path)
+    end
+end
+
+"""
+Return whether a geometry file already carries a complete `inflation` group.
+A group labelled or inferred other than `:sugra_c1` is never complete
+(CYAX-0232 R-007).
+"""
 function _has_inflation_group(path; config_digest=nothing)
     isfile(path) || return false
+    _existing_inflation_label(path) == (:sugra_c1, false) || return false
     h5open(path, "r") do file
         required = ("schema_version", "status", "terminal_status",
             "configuration_digest", "git_revision", "domain_certificate_version",
@@ -168,6 +191,7 @@ function write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
             haskey(file, "inflation") && HDF5.delete_object(file, "inflation")
             group = create_group(file, "inflation")
             group["schema_version"] = INFLATION_GROUP_SCHEMA_VERSION
+            group["kinetic_normalization"] = INFLATION_KINETIC_NORMALIZATION
             group["configuration_digest"] = config_digest
             group["status"] = phase3_status
             group["terminal_status"] = phase3_status
@@ -446,10 +470,23 @@ function run_pipeline2(data_dir::AbstractString; h11::Int=2, force::Bool=false,
         end
         if !force && (_pipeline_group_exists(target_path) ||
                 _inflation_write_blocked(target_path))
+            # CYAX-0232 R-007: keep :blocked, and name the stored F6 label when
+            # the blocking group is not a current "sugra_c1" group (an R-007
+            # rejection is reported in the message, not suppressed).
+            f6_note = try
+                label = _existing_inflation_label(target_path)
+                label === nothing || label == (:sugra_c1, false) ? "" :
+                    "; inflation group kinetic_normalization $(label[1]) " *
+                    "(inferred=$(label[2]))"
+            catch error
+                error isa ArgumentError || rethrow()
+                "; " * sprint(showerror, error)
+            end
             println("blocked: persisted vacua/inflation data exists; pass force=true")
             push!(results, (; h11, np, cy, vacua_status=:blocked,
                 vacua_vac=-1,
-                vacua_error="persisted pipeline data exists; explicit force=true required",
+                vacua_error="persisted pipeline data exists; explicit force=true required" *
+                    f6_note,
                 leading_branch_status=:blocked,
                 leading_branch_saddle_count=-1,
                 leading_minima_count=-1,
@@ -525,8 +562,9 @@ end
 
 """Resolve the Phase-3 database root without a machine-local fallback."""
 function _phase3_cli_data_dir(args)
+    args = filter(!=("--force"), collect(args))
     length(args) <= 1 || throw(ArgumentError(
-        "usage: julia --project=. scripts/build_orientifold_vacua_inflation.jl [DATA_DIR]"))
+        "usage: julia --project=. scripts/build_orientifold_vacua_inflation.jl [--force] [DATA_DIR]"))
     selected = isempty(args) ? strip(get(ENV, "CYAXIVERSE_DATA_DIR", "")) :
         strip(String(only(args)))
     isempty(selected) && throw(ArgumentError(
@@ -536,7 +574,7 @@ end
 
 if abspath(PROGRAM_FILE) == @__FILE__
     data_dir = _phase3_cli_data_dir(ARGS)
-    results = run_pipeline2(data_dir; h11=2)
+    results = run_pipeline2(data_dir; h11=2, force="--force" in ARGS)
     println("\n=== summary ===")
     println("geometries: ", length(results))
     println("vacua completed: ", count(r -> r.vacua_status == :completed, results))

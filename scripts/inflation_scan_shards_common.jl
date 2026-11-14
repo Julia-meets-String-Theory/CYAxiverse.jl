@@ -8,7 +8,9 @@ them.
 """
 
 if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
-    const INFLATION_SHARD_SCHEMA_VERSION = "2"
+    # Version 3 rows include the scan-prep `kinetic_normalization` column
+    # (CYAX-0232 R-006).
+    const INFLATION_SHARD_SCHEMA_VERSION = "3"
     const INFLATION_SHARD_METADATA_FIELDS = (
         :shard_schema_version, :run_id, :shard_index, :shard_count,
         :attempt, :started_unix_s, :finished_unix_s)
@@ -152,10 +154,13 @@ if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
                 throw(ArgumentError("inflation shard is missing resume fields: $path"))
             open(path, "r") do io
                 readline(io)
-                for line in eachline(io)
+                for (line_number, line) in enumerate(eachline(io))
                     isempty(strip(line)) && continue
                     fields = _inflation_shard_csv_fields(line)
-                    length(fields) == length(INFLATION_SHARD_FIELDS) || continue
+                    # CYAX-0232 R-007: checked outside the parse-error skip.
+                    label, _ = inflation_csv_row_label(string.(INFLATION_SHARD_FIELDS),
+                        fields; path, row=line_number + 1)
+                    label == "sugra_c1" || continue
                     fields[positions[:contract_version]] == contract_version || continue
                     fields[positions[:data_dir]] == data_dir || continue
                     try
@@ -179,9 +184,18 @@ if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
         completed
     end
 
-    """Deterministically concatenate validated shard rows into one CSV."""
+    """
+    Deterministically concatenate validated shard rows into one CSV.
+
+    Every row is validated with `inflation_csv_row_label` (label and version
+    columns, CYAX-0232 R-007) and must carry the same `kinetic_normalization`;
+    rows whose labels differ are not combined, and the error names both labels
+    and their files.
+    """
     function inflation_merge_shards(paths::AbstractVector{<:AbstractString},
             output::AbstractString; overwrite::Bool=false)
+        merged_label = nothing
+        merged_label_path = ""
         normalized = sort!(abspath.(expanduser.(String.(paths))))
         isempty(normalized) && throw(ArgumentError("no inflation shards supplied"))
         all(isfile, normalized) || throw(ArgumentError("an inflation shard is missing"))
@@ -198,11 +212,25 @@ if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
                     _inflation_shard_validate_header(path)
                     open(path, "r") do source
                         readline(source)
-                        for line in eachline(source)
-                            isempty(strip(line)) || begin
-                                write(destination, line)
-                                write(destination, '\n')
+                        for (line_number, line) in enumerate(eachline(source))
+                            isempty(strip(line)) && continue
+                            fields = _inflation_shard_csv_fields(line)
+                            # CYAX-0232 R-007 (G2): validate every row's label and
+                            # version columns, as the resume reader does; a label
+                            # outside R-006, an empty label or a contradicting
+                            # version throws before anything is written.
+                            label, _ = inflation_csv_row_label(
+                                string.(INFLATION_SHARD_FIELDS), fields;
+                                path, row=line_number + 1)
+                            if merged_label === nothing
+                                merged_label, merged_label_path = label, path
+                            elseif label != merged_label
+                                throw(ArgumentError("cannot merge inflation shards with " *
+                                    "kinetic_normalization $(repr(merged_label)) " *
+                                    "($(merged_label_path)) and $(repr(label)) ($(path))"))
                             end
+                            write(destination, line)
+                            write(destination, '\n')
                         end
                     end
                 end

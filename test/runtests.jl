@@ -44,6 +44,7 @@ include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "migrate_quartic_index_ordering.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "build_orientifold_vacua_inflation.jl"))
 include(joinpath(@__DIR__, "axion_photon.jl"))
+include(joinpath(@__DIR__, "kinetic_normalization.jl"))
 
 @testset "Slurm log directory resolution" begin
     withenv("SLURM_JOB_ID" => "42", "SLURM_ARRAY_TASK_ID" => nothing,
@@ -151,7 +152,8 @@ end
     @test base_L[2, 4] ≈ log10(abs(cross_coefficient)) -
         BigFloat(2) * BigFloat(π) * log10(exp(BigFloat(1))) *
         dot(base_Q[:, 1] + base_Q[:, 2], base_geometry.τ_volumes)
-    base_K = Matrix{BigFloat}(I, 2, 2)
+    # c = 1 (CYAX-0232 R-011): the physical K is 2 Kinv⁻¹; here Kinv = I.
+    base_K = 2 * Matrix{BigFloat}(I, 2, 2)
     scale = parse(BigFloat, "0.9")
     fixed = pilot_scaled_inputs(base_Q, base_L, base_K, 0.9;
         scale_status=:unsupported, geometry=base_geometry,
@@ -287,6 +289,12 @@ end
     bad_certificate = pilot_physical_domain_certificate(base_geometry, base_Q,
         base_L, bad_K, scale)
     @test bad_certificate.status == :domain_failure
+    # CYAX-0232 R-011 (T050): the c = ½ relation K = Kinv⁻¹ (here I, symmetric
+    # positive definite) fails the K * Kinv = 2I reciprocity check.
+    half_certificate = pilot_physical_domain_certificate(base_geometry, base_Q,
+        base_L, Matrix{BigFloat}(I, 2, 2), scale)
+    @test half_certificate.status == :domain_failure
+    @test occursin("K * Kinv = 2I", half_certificate.physical_scaling_gate_reason)
     empty_evidence = merge(base_geometry, (; curve_volumes=BigFloat[]))
     @test pilot_physical_domain_certificate(empty_evidence, base_Q, base_L,
         base_K, scale).status == :missing_evidence
@@ -401,7 +409,9 @@ end
     mktempdir() do root
         path = joinpath(root, "report.csv")
         pilot_prepare_csv(path, PILOT_SUMMARY_FIELDS)
-        pilot_append_csv(path, (; row_type=:scale, h11=8, polytope=1,
+        # CYAX-0232 A5: completed rows carry the current version and label.
+        pilot_append_csv(path, (; row_type=:scale, schema_version=PILOT_SCHEMA_VERSION,
+            kinetic_normalization="sugra_c1", h11=8, polytope=1,
             frst=1, sampled_scale=1.0), PILOT_SUMMARY_FIELDS)
         @test length(readlines(path)) == 2
         @test _pilot_completed_scales(path) == Set([(8, 1, 1, 1.0)])
@@ -698,6 +708,13 @@ end
             flow_report = joinpath(root, "flows.csv")
             _write_csv(flow_report, scan.flow.rows, FLOW_FIELDS)
             @test length(readlines(flow_report)) == length(scan.flow.rows) + 1
+            # CYAX-0232 R-006 (T036): flow 2 and refinement 4 rows are labelled.
+            @test startswith(readlines(flow_report)[1],
+                "row_type,schema_version,kinetic_normalization,")
+            @test all(row.schema_version == "2" &&
+                row.kinetic_normalization == "sugra_c1" for row in scan.flow.rows)
+            @test all(row.schema_version == "4" &&
+                row.kinetic_normalization == "sugra_c1" for row in scan.refinement.rows)
         end
     end
 end
@@ -724,7 +741,8 @@ end
             oriented = CYAxiverse.read.oriented_potential(geom_idx)
             @test oriented.Q == Int[1 0 1; 0 1 1]
             @test oriented.L == Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0]
-            @test Matrix(oriented.K) == Matrix{Float64}(I, 2, 2)
+            # c = 1 (CYAX-0232): K = 2 Kinv⁻¹, and the stored Kinv is I.
+            @test Matrix(oriented.K) == 2 * Matrix{Float64}(I, 2, 2)
             @test from_geometry.Qtilde == from_matrices.Qtilde
             @test from_geometry.Ltilde == from_matrices.Ltilde
             @test from_geometry.Qbar == from_matrices.Qbar
@@ -779,7 +797,7 @@ end
 
 @testset "Kinetic matrix construction and section-3 positive-definiteness invariant" begin
     # `.copilot/AGENTS.md` section 3 requires the kinetic matrix
-    # K = 1/2 g to be symmetric positive-definite, throwing a domain error
+    # K = 2 Kinv⁻¹ (c = 1, CYAX-0232) to be symmetric positive-definite, throwing a domain error
     # when it is not. `read.potential` previously built K as
     # `Hermitian(inv(Kinv))`: a plain, symmetry-unaware `inv` on the
     # `Matrix` read from HDF5, wrapped in `Hermitian` only afterwards. That
@@ -1720,7 +1738,7 @@ end
         m32_neutral = 1.0 / (8π)
         reference_neutral = PB.leading_axion_reference_data(
             Q, tau, V_neutral, P_neutral, m32_neutral, Kinv)
-        Kmetric = Hermitian(inv(Hermitian(Kinv)))
+        Kmetric = Hermitian(CYAxiverse.read.kinetic_matrix(Kinv))
         L_raw = PB.instanton_scales(tau, 1.0)
         established = G.pq_spectrum(Kmetric, L_raw, Q; mixing_correction=false)
         @test isapprox(
@@ -2492,12 +2510,13 @@ end
             geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
             factored = CYAxiverse.read.potential_factored(geom_idx)
             @test factored.Kinv ≈ Kinv
-            @test factored.C * transpose(factored.C) ≈ Kinv rtol=1e-12 atol=1e-15
+            # c = 1 (CYAX-0232 R-001): C = kinetic_factor(Kinv), C * C' = Kinv / 2.
+            @test factored.C * transpose(factored.C) ≈ Kinv / 2 rtol=1e-12 atol=1e-15
 
             hp = CYAxiverse.generate.hp_spectrum(geom_idx;
                 prec=200, quartics=false, selection=:raw)
             reference = setprecision(BigFloat, 400) do
-                Cbig = cholesky(Symmetric(BigFloat.(Kinv))).L
+                Cbig = cholesky(Symmetric(BigFloat.(Kinv) / 2)).L
                 Hbig = BigFloat.(Q) *
                     Diagonal(BigFloat.(L[1, :]) .* (BigFloat(10) .^ BigFloat.(L[2, :]))) *
                     transpose(BigFloat.(Q))
@@ -3473,6 +3492,13 @@ end
         @test diagnostic_row.serialization_status == :completed
         @test diagnostic_row.serialization_measurement_scope == :warm
         @test diagnostic_row.serialization_output_bytes > 0
+        # CYAX-0232 R-006 (T036): the A96 refinement row carries its own label.
+        @test refined.summary.kinetic_normalization == "a96_reproduction_raw_radian"
+        @test diagnostic_row.kinetic_normalization == "a96_reproduction_raw_radian"
+        @test diagnostic_row.diagnostic_schema_version == "2"
+        @test_throws ArgumentError inflation_refinement_diagnostic_row(
+            refinement_candidate, (; summary=Base.structdiff(refined.summary,
+                NamedTuple{(:kinetic_normalization,)})))
         @test occursin("candidate_id", inflation_diagnostic_csv_line(
             diagnostic_row; header=true))
         diagnostic_path = joinpath(mktempdir(), "stage4.csv")
@@ -3482,6 +3508,7 @@ end
         @test written.measurement_scope == :warm
         @test isfile(diagnostic_path)
         @test count(==('\n'), read(diagnostic_path, String)) == 2
+        @test occursin(",a96_reproduction_raw_radian,", read(diagnostic_path, String))
         failed_measurement = inflation_stage_measure(
             () -> throw(ArgumentError("stage-4 failure"));
             measurement_scope=:warm, capture_errors=true)
@@ -3977,7 +4004,7 @@ end
                 )
                 @test raw_or_transposed_matches
 
-                # Kinetic matrix K = (1/2) g must be symmetric positive-definite.
+                # Kinetic matrix K = 2 Kinv⁻¹ must be symmetric positive-definite.
                 @test isposdef(normalised.K)
                 @test issymmetric(Matrix(normalised.K))
 

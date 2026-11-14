@@ -18,8 +18,8 @@ include(joinpath(@__DIR__, "inflation_scan_common.jl"))
 using Printf
 
 const SCAN_PREP_FIELDS = (
-    :contract_version, :diagnostic_schema_version, :measurement_scope,
-    :data_dir, :max_branches,
+    :contract_version, :diagnostic_schema_version, :kinetic_normalization,
+    :measurement_scope, :data_dir, :max_branches,
     :h11, :polytope, :frst, :status, :error,
     :instantons, :selected_instantons, :qtilde_det, :negative_mode_range,
     :structured_charge_validated, :structured_fallback_reason,
@@ -276,10 +276,14 @@ function _scan_prep_completed(path::AbstractString; data_dir, max_branches,
         :negative_mode_range, :h11, :polytope, :frst, :status)
     all(name -> haskey(positions, name), required) ||
         throw(ArgumentError("summary is missing scan-prep resume fields: $path"))
-    for line in @view lines[2:end]
+    for (line_number, line) in enumerate(lines)
+        line_number == 1 && continue
         isempty(strip(line)) && continue
         fields = _scan_prep_csv_fields(line)
-        length(fields) >= length(header) || continue
+        # CYAX-0232 R-007: the row label is checked outside the parse-error
+        # skip below, so an invalid row raises; only "sugra_c1" rows count.
+        label, _ = inflation_csv_row_label(header, fields; path, row=line_number)
+        label == "sugra_c1" || continue
         fields[positions[:contract_version]] == INFLATION_SCAN_CONTRACT_VERSION || continue
         fields[positions[:data_dir]] == data_dir || continue
         try
@@ -404,6 +408,7 @@ function run_scan_prep(options)
                 failure = _scan_prep_error_status(error)
                 (; contract_version=INFLATION_SCAN_CONTRACT_VERSION,
                    diagnostic_schema_version=INFLATION_DIAGNOSTIC_SCHEMA_VERSION,
+                   kinetic_normalization=INFLATION_PHYSICAL_KINETIC_NORMALIZATION,
                    measurement_scope,
                    h11=geom_idx.h11, polytope=geom_idx.polytope, frst=geom_idx.frst,
                    status=failure.status, total_seconds=time() - started), failure.message

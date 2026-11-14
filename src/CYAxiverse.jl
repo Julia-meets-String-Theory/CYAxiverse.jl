@@ -14,6 +14,19 @@ built for that interpreter. It never rebuilds PyCall automatically.
 """
 module CYAxiverse
 
+"""
+    KINETIC_NORMALIZATION
+
+The axion kinetic normalization of every physical result CYAxiverse computes
+from the stored inverse Kähler metric `Kinv`: `:sugra_c1`, the literal
+𝒩 = 1 supergravity normalization (CYAX-0232). The kinetic term is
+`-(1/2) M_pl² K ∂ϑ ∂ϑ` with `K = 2 Kinv⁻¹` and period-one ϑ; see
+`read.kinetic_factor` and `read.kinetic_matrix`, and the *Kinetic
+normalization* page of the manual for the persisted labels and how earlier
+outputs are read.
+"""
+const KINETIC_NORMALIZATION = :sugra_c1
+
 include("structs.jl")
 include("python_interpreter.jl")
 include("filestructure.jl")
@@ -40,7 +53,10 @@ if haskey(ENV, "SLURM_JOB_ID")
     include("slurm.jl")
 end
 
-export greet_CYAxiverse
+using .read: kinetic_factor, kinetic_matrix, stored_kinetic_normalization
+
+export greet_CYAxiverse, KINETIC_NORMALIZATION, kinetic_factor, kinetic_matrix,
+    stored_kinetic_normalization
 
 """
     greet_CYAxiverse()

@@ -17,7 +17,7 @@ function load_potential(path::AbstractString)
     h5open(path, "r") do file
         Q = Int.(HDF5.read(file, "cytools/potential/Q"))
         L = HDF5.read(file, "cytools/potential/L")
-        K = Hermitian(inv(HDF5.read(file, "cytools/geometric/Kinv")))
+        K = Hermitian(CYAxiverse.read.kinetic_matrix(HDF5.read(file, "cytools/geometric/Kinv")))
         return K, L, Q
     end
 end

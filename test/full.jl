@@ -140,12 +140,12 @@ end
                 instantons=40, strong_hierarchy=true, leading_log_gap=5.0,
                 log_scale_span=12.0, branch_count=8, candidate_count=2,
                 total_seconds=0.25, allocated_bytes=1000, output_bytes=200,
-                error=""),
+                error="", kinetic_normalization="sugra_c1"),
             (h11=4, polytope=2, frst=1, status=:failed, attempt=2,
                 instantons=42, strong_hierarchy=false, leading_log_gap=2.0,
                 log_scale_span=6.0, branch_count=0, candidate_count=0,
                 total_seconds=0.5, allocated_bytes=0, output_bytes=0,
-                error="synthetic failure")]
+                error="synthetic failure", kinetic_normalization="sugra_c1")]
         reports = _inflation_pilot_report_rows(rows)
         @test length(reports) == 2
         @test sum(report.geometries for report in reports) == 2
@@ -449,7 +449,8 @@ end
                 @test read(file["inflation/terminal_status"]) == "completed"
                 @test read(file["inflation/configuration_digest"]) == "fixture-digest"
                 @test read(file["inflation/schema_version"]) ==
-                    "cyaxiverse-phase3-orientifold-inflation-2.3"
+                    "cyaxiverse-phase3-orientifold-inflation-2.4"
+                @test read(file["inflation/kinetic_normalization"]) == "sugra_c1"
                 @test read(file["inflation/domain_certificate_version"]) ==
                     "physical-domain-certificate-2"
                 @test read(file["inflation/scale_status"]) == "homotopy_only"
@@ -548,7 +549,9 @@ end
         loaded = CYAxiverse.read.physical_spectrum(geom_idx)
         @test loaded.m == spectrum.m
         @test loaded.fpert ≈ [-9.5, -9.0]
-        @test loaded.schema_version == "cyaxiverse-physical-spectrum-3"
+        @test loaded.schema_version == "cyaxiverse-physical-spectrum-4"
+        @test loaded.kinetic_normalization === :sugra_c1
+        @test loaded.kinetic_normalization_inferred === false
         @test loaded.fpert_log10_unit == "GeV"
         @test loaded.fpert_convention == "lambda_self_abs_log10"
         @test loaded.mass_signs_or_inertia == Int[]

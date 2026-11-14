@@ -83,6 +83,8 @@ from trilayer_involutions import (
     reconstruct_trilayer_actions,
 )
 from orientifold_population_preflight import run_population_preflight
+# CYAX-0232: the F5 mass evaluator lives in a CYTools-free module; re-exported.
+from fuzzy_axion_mass_evaluator import _fuzzy_axion_mass_log10  # noqa: F401
 
 
 PAPER_TARGETS_BY_H11 = {
@@ -136,7 +138,12 @@ PAPER_TARGETS_BY_H11 = {
     },
 }
 
-REPRODUCTION_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.2"
+REPRODUCTION_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.3"
+# CYAX-0232 R-006: every versioned output whose content depends on the mass
+# evaluator carries this label (top-level JSON key, root HDF5 dataset).
+KINETIC_NORMALIZATION = "sugra_c1"
+MODEL_STAGE_INPUT_SCHEMA = "kaehler-point-provenance-2"
+MODEL_STAGE_OUTPUT_SCHEMA = "cyaxiverse-fuzzy-axion-model-stage-1"
 DEPRECATED_COUNT_ALIASES = {
     "counts.source_vertex_evidence_inherited_orientifold_cys": (
         "counts.source_evidence_inherited_orientifold_cys"
@@ -1046,7 +1053,7 @@ KAEHLER_DIAGNOSTIC_POLICY = (
 KAEHLER_DIAGNOSTIC_ATTEMPTS = 4
 KAEHLER_OPTIMIZER_POLICY = "diagnostic_only_scipy_slsqp_from_existing_point"
 KAEHLER_PRODUCTION_POLICY = "finite_deterministic_multistart_pairwise_slsqp"
-KAEHLER_PRODUCTION_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-kaehler-production-1.0"
+KAEHLER_PRODUCTION_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-kaehler-production-1.1"
 KAEHLER_PRODUCTION_DEFAULT_SEED = 0
 KAEHLER_PRODUCTION_DEFAULT_STARTS = 8
 KAEHLER_PRODUCTION_MAX_STARTS = 32
@@ -1069,102 +1076,6 @@ KAEHLER_VOLUME_DEFAULT_BURNIN = 100
 KAEHLER_VOLUME_DEFAULT_THIN = 5
 KAEHLER_VOLUME_DEFAULT_RADIUS_FACTOR = 10.0
 
-
-def _fuzzy_axion_mass_log10(
-    values,
-    glsm_charge_matrix,
-    *,
-    axion_index,
-    gs=0.5,
-    w0=1.0 + 0.0j,
-):
-    """Compute one leading-instanton mass in the model-stage convention.
-
-    Keep this evaluator local to the diagnostic optimizer.  The canonical
-    model-stage path remains the Julia implementation and all-prime-divisor
-    selection.
-    """
-    tau = np.asarray(values["prime_divisor_volumes"], dtype=float).reshape(-1)
-    inverse_metric = np.asarray(values["inverse_metric"], dtype=float)
-    charge_matrix = np.asarray(glsm_charge_matrix, dtype=int)
-    cy_volume = float(values["cy_volume"])
-    if tau.size == 0 or charge_matrix.shape != (inverse_metric.shape[0], tau.size):
-        raise ValueError("optimizer mass inputs have inconsistent Q, tau, and metric shapes")
-    if not np.all(np.isfinite(tau)) or np.any(tau <= 0.0):
-        raise ValueError("optimizer mass inputs require positive finite divisor volumes")
-    if not np.isfinite(cy_volume) or cy_volume <= 0.0:
-        raise ValueError("optimizer mass inputs require a positive finite CY volume")
-    if not np.isfinite(gs) or gs <= 0.0:
-        raise ValueError("optimizer mass inputs require a positive finite gs")
-
-    metric = 0.5 * (inverse_metric + inverse_metric.T)
-    try:
-        cholesky = np.linalg.cholesky(metric)
-    except np.linalg.LinAlgError as exc:
-        raise ValueError("optimizer mass inputs require a positive-definite inverse metric") from exc
-
-    prefactor = float(gs) ** 4 / 128.0
-    superpotential = complex(w0) + np.exp(-2.0 * np.pi * tau).sum()
-    gravitino_mass_planck = np.sqrt(prefactor) * abs(superpotential) / cy_volume
-    if not np.isfinite(gravitino_mass_planck) or gravitino_mass_planck <= 0.0:
-        raise ValueError("optimizer mass prefactor is non-finite or non-positive")
-    log10_prefactor = (
-        np.log10(8.0 * np.pi)
-        + 0.5 * np.log10(prefactor)
-        + np.log10(gravitino_mass_planck)
-        - np.log10(cy_volume)
-    )
-    scale_logs = np.log10(tau) - 2.0 * np.pi * tau * np.log10(np.e)
-    scale_logs = scale_logs + log10_prefactor
-    order = np.argsort(-scale_logs, kind="stable")
-
-    h11 = charge_matrix.shape[0]
-    selected = []
-    orthogonal = []
-    for column_index in order:
-        direction = charge_matrix[:, int(column_index)].astype(float)
-        original_norm_squared = float(direction @ direction)
-        if original_norm_squared == 0.0:
-            continue
-        residual = direction.copy()
-        for _ in range(2):
-            for basis_vector in orthogonal:
-                residual -= float(residual @ basis_vector) * basis_vector
-        residual_norm_squared = float(residual @ residual)
-        if residual_norm_squared > np.finfo(float).eps * original_norm_squared:
-            selected.append(int(column_index))
-            orthogonal.append(residual / np.sqrt(residual_norm_squared))
-            if len(selected) == h11:
-                break
-    if len(selected) != h11:
-        raise ValueError("optimizer mass charge matrix has fewer than h11 independent columns")
-    if not 1 <= int(axion_index) <= h11:
-        raise ValueError(f"axion_index must be in [1, {h11}]")
-
-    qleading = charge_matrix[:, selected].T @ cholesky
-    pq_basis = []
-    mass_logs = []
-    for row_index, row in enumerate(qleading):
-        direction = row.copy()
-        for basis_vector in pq_basis:
-            direction -= float(direction @ basis_vector) * basis_vector
-        direction_norm = float(np.linalg.norm(direction))
-        if direction_norm == 0.0:
-            raise ValueError("optimizer mass charge rows are linearly dependent")
-        pq_basis.append(direction / direction_norm)
-        f_log10 = np.log10(1.0 / (2.0 * np.pi * direction_norm**2))
-        mass_logs.append(
-            0.5
-            * (
-                scale_logs[selected[row_index]]
-                - f_log10
-                - np.log10(2.0 * np.pi)
-            )
-            + 9.0
-            + np.log10(2.435e18)
-            + np.log10(2.0 * np.pi)
-        )
-    return float(mass_logs[int(axion_index) - 1])
 
 
 def _diagnostic_constrained_kaehler_optimizer(
@@ -1420,6 +1331,7 @@ def _production_constrained_kaehler_optimizer(
     optimizer_name = str(optimizer).upper()
     result = {
         "schema_version": KAEHLER_PRODUCTION_SCHEMA_VERSION,
+        "kinetic_normalization": KINETIC_NORMALIZATION,
         "mode": "production",
         "statistical_framework": "frequentist",
         "diagnostic_only": False,
@@ -1795,6 +1707,7 @@ def _production_kaehler_search(
     ).upper()
     summary = {
         "schema_version": KAEHLER_PRODUCTION_SCHEMA_VERSION,
+        "kinetic_normalization": KINETIC_NORMALIZATION,
         "mode": "production",
         "statistical_framework": "frequentist",
         "finite_search_status": "not_run",
@@ -2837,11 +2750,17 @@ def _write_model_stage_input(records: list[dict], path: Path) -> None:
     driver is responsible for undoing HDF5.jl's dimension-order reversal on
     read (see its module docstring -- confirmed empirically, not assumed,
     before writing that script).
+
+    The file carries ``record_metadata_schema = MODEL_STAGE_INPUT_SCHEMA`` and
+    the root dataset ``kinetic_normalization`` (CYAX-0232 R-006): in
+    production mode the exported points are optimizer-selected and so depend
+    on the mass evaluator.
     """
 
     with h5py.File(path, "w") as file:
         file.create_dataset("record_count", data=len(records))
-        file.attrs["record_metadata_schema"] = "kaehler-point-provenance-1"
+        file.attrs["record_metadata_schema"] = MODEL_STAGE_INPUT_SCHEMA
+        file.create_dataset("kinetic_normalization", data=KINETIC_NORMALIZATION)
         file.attrs["qcd_divisor_domain"] = (
             str(records[0].get("qcd_divisor_domain", "all_prime"))
             if records
@@ -2889,6 +2808,51 @@ def _write_model_stage_input(records: list[dict], path: Path) -> None:
             group.create_dataset(
                 "inverse_metric", data=np.array(record["inverse_metric"], dtype=np.float64)
             )
+
+
+def model_stage_output_label(file, path) -> tuple[str, bool]:
+    """Return ``(label, inferred)`` for a Julia model-stage output file (F4).
+
+    CYAX-0232 R-007: a root ``schema_version == MODEL_STAGE_OUTPUT_SCHEMA``
+    needs the root label ``"sugra_c1"``; an unversioned, unlabelled file with
+    ``total_model_count`` and ``model_mass_reference_log10_ev`` is the legacy
+    layout, read as ``("legacy_c_half", True)``. Anything else raises a
+    ``ValueError`` naming the file.
+    """
+
+    where = f"F4 model-stage output {path}"
+
+    def scalar(name):
+        value = file[name][()]
+        return value.decode() if isinstance(value, bytes) else value
+
+    labelled = "kinetic_normalization" in file
+    if "schema_version" in file:
+        version = scalar("schema_version")
+        if version != MODEL_STAGE_OUTPUT_SCHEMA:
+            raise ValueError(f"{where}: unknown F4 schema_version {version!r}")
+        if not labelled:
+            raise ValueError(f"{where}: F4 {version} has no kinetic_normalization label")
+        label = scalar("kinetic_normalization")
+        if label != KINETIC_NORMALIZATION:
+            raise ValueError(
+                f"{where}: F4 is a primary physical family and holds only "
+                f"{KINETIC_NORMALIZATION!r}, found {label!r}"
+            )
+        return (label, False)
+    if labelled:
+        raise ValueError(f"{where}: unversioned F4 carries a kinetic_normalization label")
+    absent = [
+        name
+        for name in ("total_model_count", "model_mass_reference_log10_ev")
+        if name not in file
+    ]
+    if absent:
+        raise ValueError(
+            f"{where}: unversioned layout lacks {', '.join(absent)}; "
+            "no F4 layout is recognized"
+        )
+    return ("legacy_c_half", True)
 
 
 def _run_model_stage(records: list[dict], args) -> dict[str, Any]:
@@ -3017,6 +2981,12 @@ def _run_model_stage(records: list[dict], args) -> dict[str, Any]:
         )
 
         with h5py.File(output_path, "r") as file:
+            label, inferred = model_stage_output_label(file, output_path)
+            if (label, inferred) != (KINETIC_NORMALIZATION, False):
+                raise ValueError(
+                    f"model-stage output {output_path} is {label} "
+                    f"(inferred={inferred}), not {KINETIC_NORMALIZATION}"
+                )
             total_model_count = int(file["total_model_count"][()])
             model_count_per_record = np.asarray(file["model_count_per_record"]).tolist()
             prefactor_P = float(file["prefactor_P"][()])
@@ -3549,6 +3519,7 @@ def _legacy_reproduce(args):
 
     summary = {
         "schema_version": REPRODUCTION_SCHEMA_VERSION,
+        "kinetic_normalization": KINETIC_NORMALIZATION,
         "schema_metadata": {
             "deprecated_aliases": DEPRECATED_COUNT_ALIASES,
         },
@@ -3802,6 +3773,7 @@ def _legacy_reproduce(args):
             }
             summary["kaehler_production_search"] = {
                 "schema_version": KAEHLER_PRODUCTION_SCHEMA_VERSION,
+                "kinetic_normalization": KINETIC_NORMALIZATION,
                 "mode": "production",
                 "statistical_framework": "frequentist",
                 "policy": KAEHLER_PRODUCTION_POLICY,

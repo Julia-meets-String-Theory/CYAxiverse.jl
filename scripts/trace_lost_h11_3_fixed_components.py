@@ -26,6 +26,7 @@ from compare_fixed_component_sets import (  # noqa: E402
     _old_fixed_component_records,
 )
 import inherited_orientifold_candidates as candidates  # noqa: E402
+from kinetic_normalization_labels import f5_reproduction_label  # noqa: E402
 
 
 LOST_WITNESSES = {
@@ -205,9 +206,22 @@ def _parse_args(argv=None):
     return args
 
 
+def _load_pre_summary(path: Path) -> dict:
+    """Load the pre-change reproduction JSON and apply the CYAX-0232 F5 checks.
+
+    The trace reads only K-free candidate details, so any valid F5 label is
+    accepted; a file that fails the R-007 checks (for a 1.0 or 1.1 file, one
+    that matches no recorded layout) raises a ``ValueError``.
+    """
+
+    summary = json.loads(path.read_text())
+    f5_reproduction_label(summary, path)
+    return summary
+
+
 def main(argv=None):
     args = _parse_args(argv)
-    pre = json.loads(args.pre_json.read_text())
+    pre = _load_pre_summary(args.pre_json)
     pre_contexts = {
         context["candidate_id"]: context
         for context in _walk_candidate_contexts(pre.get("details", []))
