@@ -255,7 +255,10 @@ An eligible candidate must provide:
 - `accepted=true`, supplied by the Float64 screening policy.
 
 `inflation_refinement_config` makes precision, tolerances, displacement,
-solver horizon, step limits, sample count, basis, and `maxiters` explicit. The
+solver horizon, step limits, sample count, basis, and `maxiters` explicit.
+`reltol` and `abstol` have no defaults: building a configuration without both
+raises `ArgumentError`, so `refine_inflation_candidate(candidate)` without a
+`config` fails closed (Issue #234). The
 refiner returns a scalar summary plus the compact trajectory result. The
 summary records `:not_selected`, `:unsupported_model`, `:completed`, or
 `:failed`, along with the final-finite-exit event policy, solver counters,

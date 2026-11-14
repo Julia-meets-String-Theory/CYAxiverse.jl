@@ -1155,8 +1155,24 @@ function _n8_big_bisect(f, left::BigFloat, right::BigFloat;
     (left + right) / 2
 end
 
+# CYAX-0234 (Issue #234): `n8_author_trajectory` has no default tolerances.
+function _n8_require_tolerances(reltol, abstol;
+        caller::AbstractString="n8_author_trajectory")
+    missing_names = String[]
+    reltol === nothing && push!(missing_names, "reltol")
+    abstol === nothing && push!(missing_names, "abstol")
+    isempty(missing_names) && return nothing
+    throw(ArgumentError(
+        "$caller requires explicit reltol and abstol " *
+        "(missing: $(join(missing_names, ", "))). There are no default " *
+        "tolerances: the former precision-derived defaults " *
+        "(10^-(precision_bits ÷ 2), 10^-(2 precision_bits ÷ 3)) were below " *
+        "the BigFloat working precision 2^-precision_bits, so the solver " *
+        "could not converge (Issue #234)."))
+end
+
 """
-    n8_physical_gradient_flow(delta_k; ...)
+    n8_physical_gradient_flow(delta_k; reltol, abstol, ...)
 
 Reproduce the author's physical-time gradient flow with an arbitrary-precision
 stiff solver. The hilltop direction is constructed once and remains fixed;
@@ -1166,6 +1182,13 @@ refined with dense-output bisection. The longest completed window is selected
 to avoid counting a transient crossing. `efolds` is the total accumulated
 e-fold coordinate at the selected exit; `slow_roll_efolds` retains the
 duration of the selected window.
+
+`reltol` and `abstol` are required keywords and are recorded in `solver`.
+Omitting either throws an `ArgumentError` before any solving (CYAX-0234,
+Issue #234). The former defaults, `10^-(precision_bits ÷ 2)` and
+`10^-(2 precision_bits ÷ 3)`, were below the working precision
+`2^-precision_bits` for every allowed `precision_bits`, so Rodas5P could not
+converge (at 64 bits, `reltol = 1e-32` against `5.4e-20`).
 """
 function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
         displacement_sign::Real=-1, max_time::Real=1e6,
@@ -1189,6 +1212,7 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
     basis in (:canonical_hessian, :mass_eigenbasis) ||
         throw(ArgumentError("unsupported basis: $basis"))
     precision_bits >= 64 || throw(ArgumentError("precision_bits must be at least 64"))
+    _n8_require_tolerances(reltol, abstol)
     setprecision(BigFloat, precision_bits) do
         T = BigFloat
         k = T(N8_KC) + T(delta_k)
@@ -1238,10 +1262,8 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
         problem = ODEProblem(ODEFunction(rhs!; jac=jac!, tgrad=tgrad!,
                 jac_prototype=zeros(T, 9, 9)),
             initial_vector, (zero(T), tmax))
-        default_reltol = T(10)^(-precision_bits ÷ 2)
-        default_abstol = T(10)^(-precision_bits * 2 ÷ 3)
-        used_reltol = reltol === nothing ? default_reltol : T(reltol)
-        used_abstol = abstol === nothing ? default_abstol : T(abstol)
+        used_reltol = T(reltol)
+        used_abstol = T(abstol)
         algorithm = Rodas5P(autodiff=AutoFiniteDiff(),
             linsolve=GenericLUFactorization())
         solution = solve(problem, algorithm;

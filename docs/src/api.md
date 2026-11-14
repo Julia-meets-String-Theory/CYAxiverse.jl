@@ -126,3 +126,8 @@ direction; it is distinct from the kinetic eigenbasis.
 `n8_hilltop_normal_form_efolds` reports the separate one-dimensional local
 normal-form estimate. If the physical solver reaches `max_time` while still
 inflating, it reports `end_event=:tmax` and `terminated=false`.
+`n8_physical_gradient_flow` has no default solver tolerances: pass `reltol`
+and `abstol` explicitly.
+Omitting either raises `ArgumentError` before solving, because the former
+precision-derived defaults were below the BigFloat working precision
+`2^-precision_bits` and the solver could not converge (Issue #234).

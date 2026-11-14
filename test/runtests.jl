@@ -3530,6 +3530,58 @@ end
     end
 end
 
+@testset "CYAX-0234 n8 trajectory tolerances are required (Issue #234)" begin
+    ai = CYAxiverse.paper_benchmarks.author_inflation
+    pb = CYAxiverse.paper_benchmarks
+    # The check runs before any BigFloat setup or solving. A solve with the
+    # former defaults never finished, so a generous wall-clock bound
+    # distinguishes the early throw from a hang even on a cold runner.
+    function throws_tolerance_error(call)
+        thrown = nothing
+        seconds = @elapsed try
+            call()
+        catch error
+            thrown = error
+        end
+        thrown isa ArgumentError &&
+            occursin("requires explicit reltol and abstol", thrown.msg) &&
+            occursin("working precision", thrown.msg) && seconds < 60
+    end
+    for trajectory in (ai.n8_author_trajectory, ai.n8_physical_gradient_flow,
+            pb.n8_author_trajectory, pb.n8_physical_gradient_flow)
+        @test throws_tolerance_error(() -> trajectory(1e-7))
+        @test throws_tolerance_error(() -> trajectory(1e-7; precision_bits=64))
+        @test throws_tolerance_error(() -> trajectory(1e-7; reltol=1e-8))
+        @test throws_tolerance_error(() -> trajectory(1e-7; abstol=1e-10))
+    end
+    missing_message = try
+        ai.n8_author_trajectory(1e-7; reltol=1e-8)
+        ""
+    catch error
+        sprint(showerror, error)
+    end
+    @test occursin("(missing: abstol)", missing_message)
+
+    @test throws_tolerance_error(() -> inflation_refinement_config())
+    @test throws_tolerance_error(
+        () -> inflation_refinement_config(precision_bits=64, reltol=1e-8))
+    @test throws_tolerance_error(
+        () -> inflation_refinement_config(precision_bits=64, abstol=1e-10))
+    @test_throws ArgumentError inflation_refinement_config(
+        reltol=-1e-8, abstol=1e-10)
+    @test_throws ArgumentError inflation_refinement_config(
+        reltol=1e-8, abstol=0.0)
+    explicit = inflation_refinement_config(precision_bits=64,
+        reltol=1e-8, abstol=1e-10)
+    @test explicit.reltol === 1e-8
+    @test explicit.abstol === 1e-10
+    # The default config is built at call time, so the refiner fails closed
+    # with the error instead of returning a captured `:failed` summary.
+    candidate = inflation_refinement_candidate("issue-234-default-config";
+        delta_k=1.5320548620798324e-3)
+    @test throws_tolerance_error(() -> refine_inflation_candidate(candidate))
+end
+
 @testset "CatastrophicInflationPopulationStudy (Issue #133)" begin
     include(joinpath(@__DIR__, "..", "scripts", "catastrophic_inflation_population_study.jl"))
     using .CatastrophicInflationPopulationStudy
