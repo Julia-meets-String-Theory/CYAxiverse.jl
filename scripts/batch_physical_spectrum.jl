@@ -418,15 +418,20 @@ function run_batch(options)
             # CYAX-0232 R-007 batch resume, inside the per-geometry `try`: an
             # output labelled or inferred other than :sugra_c1 is not complete;
             # it is recomputed only with --force, otherwise reported as failed.
-            existing = _existing_physical_label(path)
-            if existing !== nothing && existing != (:sugra_c1, false) && !options[:force]
-                throw(ArgumentError("existing spectrum/physical has kinetic_normalization " *
-                    "$(existing[1]) (inferred=$(existing[2])); pass --force to recompute"))
-            end
-            if _has_physical_spectrum(path; config=spectrum_config) && !options[:force]
-                println("skipped")
-                _append_summary(summary, geom_idx; status="skipped", prec=options[:prec], threshold_log10=threshold, quartics=options[:quartics], output=path)
-                continue
+            # With --force the existing group is neither read nor trusted: the
+            # writer deletes and rewrites it, so an invalid stored label (which
+            # `_existing_physical_label` rejects) can still be repaired.
+            if !options[:force]
+                existing = _existing_physical_label(path)
+                if existing !== nothing && existing != (:sugra_c1, false)
+                    throw(ArgumentError("existing spectrum/physical has kinetic_normalization " *
+                        "$(existing[1]) (inferred=$(existing[2])); pass --force to recompute"))
+                end
+                if _has_physical_spectrum(path; config=spectrum_config)
+                    println("skipped")
+                    _append_summary(summary, geom_idx; status="skipped", prec=options[:prec], threshold_log10=threshold, quartics=options[:quartics], output=path)
+                    continue
+                end
             end
             potential = CYAxiverse.read.potential(geom_idx)
             warning_messages = String[]

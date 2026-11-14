@@ -803,6 +803,8 @@ runtests.jl:131–146 with `base_K = 2I` (passes) and `base_K = I`
 | full.jl:551 `schema_version == "…-3"` | `"…-4"`, plus the label fields | R-006 (T031) |
 | full.jl:451 `inflation/schema_version == "…-2.3"` | `"…-2.4"`, plus the label | R-006 (T035) |
 | runtests.jl:405 pilot report row | the appended `scale` row carries `schema_version` and `kinetic_normalization` | A5: unlabelled rows now raise (T066) |
+| runtests.jl:2519 reference `Cbig = cholesky(BigFloat.(Kinv) / 2)` | factor of `Kinv/2` | R-001 (with the 2495 row) |
+| kinetic_normalization.jl T037 merge: `legacy_c_half` shard | message names `legacy_c_half` only | G2 finding 2: rejected by per-row validation, not as a two-label mix |
 | axion_photon.jl:38 one-axion canonical charge | `3/2` → `3·sqrt(0.25/2)` | R-001 (factor `sqrt(Kinv/2)`) |
 | axion_photon.jl:83 QED threshold | `+ 0.5·log10(0.5)` | R-001 (QED norm `qᵀ(Kinv/2)q`) |
 | axion_photon.jl:128 rank-certificate hand case | `q`, `theta_from_canonical` divided by √2 | R-001 |
@@ -1009,24 +1011,62 @@ not change: their assertions do not depend on K, and the full suite passes.
 found two gaps, both fixed in `90f6f43`: `stored_kinetic_normalization` was
 not exported (spec *Interfaces*), and T050's `base_K = I` case had no test.
 Remaining partial or unmet items, none declared complete:
-- R-008 / T071: closed. The `write_comparison` CSV is labelled per field
-  under Clarification B2 (tested in the T071 testset), and the owner committed
-  the regenerated `validation/` files in `e172f9f` (B4 check below).
-- R-005: the inflation and F6 rows use the `infl` fixture instead of the
-  R-004/R-003 pins (*R-005 row map*). This deviation was made in the plan,
-  not by a spec amendment.
+- R-005 "reported" rows missing from the count report: e-folds, F6
+  `n_candidates`, `n_qualified`, flow e-folds, F4 `model_lambda` and model
+  counts, F5 optimizer outputs.
 - R-005 F4: the persisted `model_mass_reference_log10_ev` is checked only
   through the in-memory route.
-- No test: the A7 physical-consumer rejection (no physical consumer exists).
-  Closed after `90f6f43` on owner direction: the A5 shard-file refusal
-  (T066 testset), the label columns of `analyze_inflation_candidates.jl` and
-  `compare_reduction_inflation_scan.jl` (*analysis-script label columns*
-  testset), and the R-001 F5 evaluator equivalence test, now in
-  `scripts/test_fuzzy_axion_mass_evaluator.py` on the CYTools-free
-  `scripts/fuzzy_axion_mass_evaluator.py` (function moved verbatim and
-  re-exported by `reproduce_fuzzy_axions_h11_4.py`), so it runs in CI.
-- G1-6 docstrings added to `n8_hilltop_efolds`, `n5_hilltop_efolds` and
-  `reference_efolds` (`poly102_inflation.jl`).
+- A7: the physical-consumer rejection is untested, because no physical
+  consumer exists.
+- A2: the record-matching tests are generated from the recorded layouts
+  themselves, so their fidelity to history rests on `layouts/*.md` (G2 note).
+
+Closed during G1 and G2:
+- R-008 / T071: the `write_comparison` CSV is labelled per field under
+  Clarification B2 (T071 testset). The owner committed the regenerated
+  `validation/` files in `e172f9f` (B4 check below).
+- R-005 inflation and F6 fixture: the `infl` substitution is ratified by
+  Clarification B5.
+- On owner direction after `90f6f43`:
+  - the A5 shard-file refusal (T066 testset);
+  - the label columns of `analyze_inflation_candidates.jl` and
+    `compare_reduction_inflation_scan.jl` (*analysis-script label columns*
+    testset);
+  - the R-001 F5 evaluator equivalence test, now in
+    `scripts/test_fuzzy_axion_mass_evaluator.py` on the CYTools-free
+    `scripts/fuzzy_axion_mass_evaluator.py` (function moved verbatim,
+    re-exported), which runs in CI;
+  - the G1-6 docstrings.
+- G2 findings 1–3 (fixed after `a3294ab`):
+  1. `run_batch --force` now repairs an F1 output whose label is invalid. Both
+     label reads sit behind the `--force` check (T065 testset).
+  2. `inflation_merge_shards` validates every row with
+     `inflation_csv_row_label`, so an unknown label, a legacy label in a
+     current layout, or a contradicting version throws before writing (T037
+     testset).
+  3. The statistics notebook requires each row's F1 and F6 labels to agree,
+     and pools only one label and one schema version per family (T064
+     testset). The pre-change exact version gates (F1 `-3`, F6 `2.0`) had
+     already been out of date at the base, which wrote F6 `2.3`.
+
+Recorded, not changed (G2 nits):
+- `orientifold_population_preflight.py` re-raises R-007 errors as
+  `PopulationPreflightError` (a `RuntimeError`), not `ValueError`. The error
+  is not suppressed.
+- `f5_reproduction_label` checks the top-level label of a 1.3 summary, not the
+  labels inside its nested `kaehler-production-1.1` objects.
+- `_has_axion_photon(path)` opens the HDF5 file twice per call.
+- `n8_potential_derivatives` labels a K-free derivative result P96, which A4
+  allows but does not require.
+- `run_pipeline2` catches the R-007 `ArgumentError` from `f6_note` into
+  `vacua_error`; the geometry stays `:blocked`, so nothing is skipped
+  silently.
+- G2 finding 4: `validation/inflation_reproduction_results.md` quotes
+  `n8_hilltop_normal_form_efolds` (464970.49 / 63.857). That is still the A96
+  normal form's value, so the note is correct. The comparison CSV's N8 column
+  holds the P96 value since `828d2ff` (#235).
+- The *Left to later tasks* notes under T030–T037 record the state at those
+  tasks; T037 and T061–T066 closed them.
 
 **B4 check (owner-local, macOS, candidate `e34ab6e`).** All three
 `validation/` files were regenerated at the base `10aa3dc` (separate worktree)
@@ -1043,14 +1083,9 @@ restructured the benchmarks. That drift predates CYAX-0232. In particular,
 since `828d2ff` the N8 `reduced_model_efolds` column holds the P96
 `n8_local_hilltop_efolds` (6818.66 and 1.2924) rather than the A96 normal form
 (464970.49 and 63.857) of the committed file, while its `method` text still
-reads "local normal form". This is out of CYAX-0232 scope and is tracked in #235.
-- R-005 "reported" rows missing from the count report: e-folds, F6
-  `n_candidates`, `n_qualified`, flow e-folds, F4 `model_lambda` and model
-  counts, F5 optimizer outputs.
-- `run_pipeline2` catches the R-007 `ArgumentError` from `f6_note` into
-  `vacua_error`; the geometry stays `:blocked`, so nothing is skipped silently.
-- The *Left to later tasks* notes under T030–T037 record the state at those
-  tasks; T037 and T061–T066 closed them.
+reads "local normal form". This is out of CYAX-0232 scope and is tracked in
+#235. The JSON's ulp-level differences from the committed copy (G2) are
+likewise relative to that older file.
 
 ## Task decomposition
 

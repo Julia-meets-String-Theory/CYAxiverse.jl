@@ -1158,11 +1158,26 @@ end
         catch e
             e
         end
+        # A current-layout shard row may carry only sugra_c1 (R-007), so the
+        # legacy_c_half row is rejected by per-row validation (G2), before any
+        # write; its message names the label.
         @test err isa ArgumentError
-        @test occursin("sugra_c1", sprint(showerror, err)) &&
-            occursin("legacy_c_half", sprint(showerror, err))
+        @test occursin("legacy_c_half", sprint(showerror, err))
         @test !isfile(merged)
         @test_throws ArgumentError inflation_merge_shards([current, unlabelled], merged)
+        @test !isfile(merged)
+        # An unknown label and a contradicting version are rejected too.
+        bogus = shard_with_label(joinpath(root, "d"), "bogus"; frst=4)
+        @test_throws ArgumentError inflation_merge_shards([bogus], merged)
+        @test !isfile(merged)
+        stale = joinpath(root, "e", "shard.csv")
+        mkpath(dirname(stale))
+        lines = readlines(current)
+        columns = split(lines[1], ',')
+        fields = split(lines[2], ',')
+        fields[findfirst(==("contract_version"), columns)] = "4"
+        write(stale, lines[1] * "\n" * join(fields, ',') * "\n")
+        @test_throws ArgumentError inflation_merge_shards([stale], merged)
         @test !isfile(merged)
 
         rows = _inflation_pilot_terminal_rows(joinpath(root, "a"))
@@ -1499,22 +1514,38 @@ end
     # ArgumentError naming both; the others are tested with their writers:
     # write_scan_csv (T032), appendix B, inflation_merge_shards and the pilot
     # report (T037), the gap analysis and both shard merges (Python, T037/T061).
-    row(f1, f6) = (; kinetic_normalization_f1=f1, kinetic_normalization_f6=f6)
-    rows = [row((:sugra_c1, false), (:sugra_c1, false)),
-        row((:sugra_c1, false), (:sugra_c1, false))]
+    F1V, F6V = "cyaxiverse-physical-spectrum-4", "cyaxiverse-phase3-orientifold-inflation-2.4"
+    row(f1, f6; v1=F1V, v6=F6V) = (; h11=2, tri=1, cy=1,
+        kinetic_normalization_f1=f1, kinetic_normalization_f6=f6,
+        schema_version_f1=v1, schema_version_f6=v6)
+    c1, legacy = (:sugra_c1, false), (:legacy_c_half, true)
+    rows = [row(c1, c1), row(c1, c1)]
     @test CYAX0232Notebook.check_pooled_labels(rows) === rows
-    for mixed in ([rows[1], row((:legacy_c_half, true), (:sugra_c1, false))],
-            [rows[1], row((:sugra_c1, false), (:legacy_c_half, true))])
-        err = try
-            CYAX0232Notebook.check_pooled_labels(mixed)
-            nothing
-        catch e
-            e
-        end
-        @test err isa ArgumentError
-        @test occursin("sugra_c1", sprint(showerror, err)) &&
-            occursin("legacy_c_half", sprint(showerror, err))
+    legacy_rows = [row(legacy, legacy; v1="cyaxiverse-physical-spectrum-3",
+        v6="cyaxiverse-phase3-orientifold-inflation-2.3") for _ in 1:2]
+    @test CYAX0232Notebook.check_pooled_labels(legacy_rows) === legacy_rows
+    names_both(err, a, b) = err isa ArgumentError &&
+        occursin(a, sprint(showerror, err)) && occursin(b, sprint(showerror, err))
+    caught(f) = try
+        f(); nothing
+    catch e
+        e
     end
+    # Across rows: one label per family (T064).
+    for mixed in ([rows[1], row(legacy, legacy)], [legacy_rows[1], row(c1, c1)])
+        @test names_both(caught(() -> CYAX0232Notebook.check_pooled_labels(mixed)),
+            "sugra_c1", "legacy_c_half")
+    end
+    # Within a row: the F1 and F6 labels must agree (G2).
+    for disagreeing in (row(c1, legacy), row(legacy, c1))
+        @test names_both(caught(() -> CYAX0232Notebook.check_pooled_labels([disagreeing])),
+            "sugra_c1", "legacy_c_half")
+    end
+    # Across rows: one schema version per family, even with equal labels (G2).
+    @test names_both(caught(() -> CYAX0232Notebook.check_pooled_labels([legacy_rows[1],
+            row(legacy, legacy; v1="cyaxiverse-physical-spectrum-3",
+                v6="cyaxiverse-phase3-orientifold-inflation-2.0")])),
+        "inflation-2.3", "inflation-2.0")
 end
 
 @testset "CYAX-0232 batch resume (T065)" begin
@@ -1552,6 +1583,9 @@ end
             "kinetic_normalization"), path, "r+")
         @test !run(false)                                  # invalid: failed, no crash
         @test last_row()["status"] == "failed"
+        @test run(true)                                    # --force repairs it (G2)
+        @test CYAxiverse.read.stored_kinetic_normalization(path; family=:f1) ==
+            (:sugra_c1, false)
     end
 
     # F3: run_batch_axion_photon.

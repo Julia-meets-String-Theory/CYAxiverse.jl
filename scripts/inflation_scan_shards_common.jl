@@ -187,13 +187,13 @@ if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
     """
     Deterministically concatenate validated shard rows into one CSV.
 
-    Every row must carry the same non-empty `kinetic_normalization`; rows whose
-    labels differ are not combined (CYAX-0232 R-007), and the error names both
-    labels and their files.
+    Every row is validated with `inflation_csv_row_label` (label and version
+    columns, CYAX-0232 R-007) and must carry the same `kinetic_normalization`;
+    rows whose labels differ are not combined, and the error names both labels
+    and their files.
     """
     function inflation_merge_shards(paths::AbstractVector{<:AbstractString},
             output::AbstractString; overwrite::Bool=false)
-        label_index = findfirst(==(:kinetic_normalization), INFLATION_SHARD_FIELDS)
         merged_label = nothing
         merged_label_path = ""
         normalized = sort!(abspath.(expanduser.(String.(paths))))
@@ -212,13 +212,16 @@ if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
                     _inflation_shard_validate_header(path)
                     open(path, "r") do source
                         readline(source)
-                        for line in eachline(source)
+                        for (line_number, line) in enumerate(eachline(source))
                             isempty(strip(line)) && continue
                             fields = _inflation_shard_csv_fields(line)
-                            label = length(fields) == length(INFLATION_SHARD_FIELDS) ?
-                                fields[label_index] : ""
-                            isempty(label) && throw(ArgumentError(
-                                "inflation shard row has no kinetic_normalization: $path"))
+                            # CYAX-0232 R-007 (G2): validate every row's label and
+                            # version columns, as the resume reader does; a label
+                            # outside R-006, an empty label or a contradicting
+                            # version throws before anything is written.
+                            label, _ = inflation_csv_row_label(
+                                string.(INFLATION_SHARD_FIELDS), fields;
+                                path, row=line_number + 1)
                             if merged_label === nothing
                                 merged_label, merged_label_path = label, path
                             elseif label != merged_label

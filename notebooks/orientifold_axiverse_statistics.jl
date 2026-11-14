@@ -176,15 +176,23 @@ begin
     """
         check_pooled_labels(rows)
 
-    CYAX-0232 R-007 combination: pooled rows must share one F1 and one F6
-    label (stored or inferred). Throw an `ArgumentError` naming both labels
-    otherwise; return `rows`.
+    CYAX-0232 R-007 combination: each row's F1 and F6 labels must agree, and
+    pooled rows must share one F1 label, one F6 label, one F1 schema version
+    and one F6 schema version, so layouts with different meanings are never
+    mixed. Throw an `ArgumentError` naming both values otherwise; return `rows`.
     """
     function check_pooled_labels(rows)
-        for field in (:kinetic_normalization_f1, :kinetic_normalization_f6)
-            pooled_labels = unique(getproperty(row, field) for row in rows)
-            length(pooled_labels) <= 1 || throw(ArgumentError(
-                "cannot pool geometries with $(field) $(pooled_labels[1]) and $(pooled_labels[2])"))
+        for row in rows
+            f1, f6 = row.kinetic_normalization_f1, row.kinetic_normalization_f6
+            (f1 === nothing || f6 === nothing || f1[1] == f6[1]) || throw(ArgumentError(
+                "cannot combine an F1 spectrum with kinetic_normalization $(f1[1]) and an " *
+                "F6 inflation group with $(f6[1]) (h11=$(row.h11), tri=$(row.tri), cy=$(row.cy))"))
+        end
+        for field in (:kinetic_normalization_f1, :kinetic_normalization_f6,
+                :schema_version_f1, :schema_version_f6)
+            pooled = unique(getproperty(row, field) for row in rows)
+            length(pooled) <= 1 || throw(ArgumentError(
+                "cannot pool geometries with $(field) $(pooled[1]) and $(pooled[2])"))
         end
         rows
     end
@@ -196,11 +204,18 @@ begin
         # CYAX-0232 R-007: the F1 and F6 label checks run outside the
         # exclusion handler below, so an invalid label raises instead of
         # excluding the file. Current and inferred legacy outputs are read.
+        # The schema versions are recorded so pooling never mixes layouts.
         labels = HDF5.h5open(path, "r") do file
+            version(group, name) = haskey(group, name) ?
+                String(HDF5.read(group[name])) : "unversioned"
             (; f1 = haskey(file, "spectrum/physical") ?
                     CYAxiverse.read.f1_label(file["spectrum/physical"], path) : nothing,
                f6 = haskey(file, "inflation") ?
-                    CYAxiverse.read.f6_label(file["inflation"], path) : nothing)
+                    CYAxiverse.read.f6_label(file["inflation"], path) : nothing,
+               f1_version = haskey(file, "spectrum/physical/metadata") ?
+                    version(file["spectrum/physical/metadata"], "schema_version") : nothing,
+               f6_version = haskey(file, "inflation") ?
+                    version(file["inflation"], "schema_version") : nothing)
         end
         try
             spectrum = CYAxiverse.read.physical_spectrum(h11, tri, cy)
@@ -264,6 +279,8 @@ begin
                 qcd_divisor_volume = extra.qcd_divisor_volume,
                 kinetic_normalization_f1 = labels.f1,
                 kinetic_normalization_f6 = labels.f6,
+                schema_version_f1 = labels.f1_version,
+                schema_version_f6 = labels.f6_version,
             ))
         catch error
             @warn "Could not read a geometry file; skipping it" h11 tri cy path error
