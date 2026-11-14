@@ -1563,6 +1563,97 @@ end
         "inflation-2.3", "inflation-2.0")
 end
 
+@testset "CYAX-0232 notebook schema gate (owner option 1)" begin
+    # `read_geometry_row` pools F1 `-4`/`-3` and F6 `2.4`/`2.3` only. Other
+    # versions that R-007 recognizes are an ordinary exclusion; versions it
+    # does not recognize, and invalid labels, still raise.
+    F1V, F1L = "cyaxiverse-physical-spectrum-4", "cyaxiverse-physical-spectrum-3"
+    F6 = "cyaxiverse-phase3-orientifold-inflation-"
+    spectrum = CYAxiverse.structs.PhysicalAxionSpectrum(
+        [1.0, 2.0], [0, 1], zeros(2, 2), [1, -1], [3.0, 4.0],
+        reshape([1, 1, 1, 2], 4, 1), [1], [0.5],
+        reshape([1, 1, 2, 2], 4, 1), [-1], [0.7],
+        -30.0, 200)
+    set_or_delete!(group, name, value) = begin
+        haskey(group, name) && HDF5.delete_object(group, name)
+        value === nothing || (group[name] = value)
+    end
+    function gate_row(; f1_version=F1V, f1_label="sugra_c1",
+            f6_version=F6 * "2.4", f6_label="sugra_c1")
+        mktempdir() do root
+            path = joinpath(root, "h11_002", "np_0000001", "cy_0000001", "cyax.h5")
+            mkpath(dirname(path))
+            h5open(file -> create_group(file, "cytools"), path, "cw")
+            _write_result(path, CYAxiverse.structs.GeometryIndex(2, 1, 1), spectrum;
+                prec=200, threshold_log10=-30.0, quartics=true, runtime_seconds=0.1,
+                provisional=false, fK=[5.0, 6.0])
+            h5open(path, "r+") do file
+                metadata = file["spectrum/physical/metadata"]
+                set_or_delete!(metadata, "schema_version", f1_version)
+                set_or_delete!(metadata, "kinetic_normalization", f1_label)
+                vacua = create_group(file, "vacua_pipeline")
+                vacua["threshold"], vacua["estimate"], vacua["issquare"] = 0.01, 3, 1
+                vmeta = create_group(vacua, "metadata")
+                vmeta["model_scope"] = "hierarchy_truncated_axion_potential"
+                vmeta["full_potential_status"] = "not_validated"
+                vmeta["search_classification"] = "exhaustive"
+                inflation = create_group(file, "inflation")
+                set_or_delete!(inflation, "schema_version", f6_version)
+                set_or_delete!(inflation, "kinetic_normalization", f6_label)
+                inflation["scale_status"] = "homotopy_only"
+                inflation["claim_boundary"] = "diagnostic"
+                catastrophes = create_group(inflation, "catastrophes")
+                catastrophes["leading_branch_saddle_count"] = 2
+                catastrophes["leading_branch_saddles_present"] = 1
+                catastrophes["leading_minima_count"] = 1
+                efolds = create_group(inflation, "efolds")
+                efolds["n_candidates"], efolds["n_qualified"] = 4, 1
+                create_group(file, "orientifold")["h11_minus"] = 0
+            end
+            withenv("CYAXIVERSE_DATA_DIR" => root) do
+                CYAX0232Notebook.read_geometry_row(root, 2, 1, 1)
+            end
+        end
+    end
+
+    current = gate_row()
+    @test current.status == "included"
+    @test current.row.kinetic_normalization_f1 == (:sugra_c1, false)
+    @test current.row.kinetic_normalization_f6 == (:sugra_c1, false)
+    @test (current.row.schema_version_f1, current.row.schema_version_f6) == (F1V, F6 * "2.4")
+    @test current.row.n_efold_candidates == 4 && current.row.n_qualified_efolds == 1
+
+    legacy = gate_row(; f1_version=F1L, f1_label=nothing,
+        f6_version=F6 * "2.3", f6_label=nothing)
+    @test legacy.status == "included"
+    @test legacy.row.kinetic_normalization_f1 == (:legacy_c_half, true)
+    @test legacy.row.kinetic_normalization_f6 == (:legacy_c_half, true)
+    # Each pool is all-current or all-legacy, never mixed.
+    @test_throws ArgumentError CYAX0232Notebook.check_pooled_labels(
+        [current.row, legacy.row])
+
+    # Recognized but unaudited F6 layouts: excluded, not raised.
+    for v in ("2.2", "2.1", "2.0", "1.0")
+        excluded = gate_row(; f1_version=F1L, f1_label=nothing,
+            f6_version=F6 * v, f6_label=nothing)
+        @test excluded.status == "excluded"
+        @test excluded.reason == "unsupported_f6_schema"
+    end
+    # Unversioned F1 (inferred legacy): excluded, not raised.
+    excluded = gate_row(; f1_version=nothing, f1_label=nothing,
+        f6_version=F6 * "2.3", f6_label=nothing)
+    @test (excluded.status, excluded.reason) == ("excluded", "unsupported_f1_schema")
+
+    # R-007 errors still propagate: invalid labels and unrecognized versions.
+    @test_throws ArgumentError gate_row(; f6_version=F6 * "2.2")          # labelled legacy
+    @test_throws ArgumentError gate_row(; f6_label="bogus")
+    @test_throws ArgumentError gate_row(; f6_label=nothing)               # 2.4 unlabelled
+    @test_throws ArgumentError gate_row(; f1_label="legacy_c_half")
+    @test_throws ArgumentError gate_row(; f1_version="cyaxiverse-physical-spectrum-2",
+        f1_label=nothing)
+    @test_throws ArgumentError gate_row(; f6_version=F6 * "2.5")
+end
+
 @testset "CYAX-0232 batch resume (T065)" begin
     fixture = first(r005_fixtures())
 
