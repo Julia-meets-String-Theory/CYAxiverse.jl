@@ -946,10 +946,16 @@ default tolerances from `precision_bits`: `reltol = 10^-(precision_bits ÷ 2)`,
 `abstol = 10^-(2·precision_bits ÷ 3)` (line 1237). For every allowed
 `precision_bits ≥ 64` this `reltol` is below the BigFloat working precision
 `2^-precision_bits` (64 bits: 1e-32 against 5e-20; the default 100 bits:
-1e-50 against 8e-31). The behaviour is unchanged from the base `10aa3dc`. Its
-only caller in the repository is the T070 label test, which hung at 64 bits
-with the defaults and now passes explicit `reltol`, `abstol` and `maxiters`
-(`5b5c4c0`). That the default call does not converge is inferred from that
+1e-50 against 8e-31). The behaviour is unchanged from the base `10aa3dc`. It is
+also called through the alias `n8_physical_gradient_flow`: by
+`scripts/inflation_refinement_common.jl` (`refine_inflation_candidate`, whose
+default `inflation_refinement_config()` leaves `reltol` and `abstol` as
+`nothing` at 100 bits) and by `scripts/benchmark_inflation_scalability.jl`.
+Every call site in the repository passes explicit tolerances: the T070 label
+test (since `5b5c4c0`, after it hung at 64 bits with the defaults), the
+refinement test (`runtests.jl:3456`) and the benchmark script. No production
+CLI calls `refine_inflation_candidate`. (Corrected after G2: an earlier version
+of this note said the T070 test was the only caller.) That the default call does not converge is inferred from that
 hang and is untested at the default 100 bits. Changing the defaults changes a
 reproduction path's numerics, which the spec's non-scope excludes, so it is
 left for the owner.
