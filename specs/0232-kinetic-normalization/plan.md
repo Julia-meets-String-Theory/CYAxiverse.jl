@@ -994,6 +994,24 @@ Remaining partial or unmet items, none declared complete:
   re-exported by `reproduce_fuzzy_axions_h11_4.py`), so it runs in CI.
 - G1-6 docstrings added to `n8_hilltop_efolds`, `n5_hilltop_efolds` and
   `reference_efolds` (`poly102_inflation.jl`).
+
+**B4 check (owner-local, macOS, candidate `e34ab6e`).** All three
+`validation/` files were regenerated at the base `10aa3dc` (separate worktree)
+and at the candidate, in the same Julia and miniforge environments:
+- `inflation_fixtures.jls`: no differing path, labels ignored.
+- `inflation_comparison.csv`: the 7 value columns are identical. The candidate
+  adds the 4 B2 label columns with the B2 values.
+- `author_poly102_reference_miniforge.json`: 0 numeric and 0 structural
+  differences, label ignored.
+
+So CYAX-0232 adds labels only (B4). All three files differ from the committed
+copies, which `fccb1ea` (2026-08-06) wrote before `828d2ff` (2026-08-07)
+restructured the benchmarks. That drift predates CYAX-0232. In particular,
+since `828d2ff` the N8 `reduced_model_efolds` column holds the P96
+`n8_local_hilltop_efolds` (6818.66 and 1.2924) rather than the A96 normal form
+(464970.49 and 63.857) of the committed file, while its `method` text still
+reads "local normal form". This is out of CYAX-0232 scope and is reported to
+the owner.
 - R-005 "reported" rows missing from the count report: e-folds, F6
   `n_candidates`, `n_qualified`, flow e-folds, F4 `model_lambda` and model
   counts, F5 optimizer outputs.
