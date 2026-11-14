@@ -2030,6 +2030,8 @@ end
     # loaded; restore it so later tests see the original value.
     saved = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
     scan = Module(:CYAX0232CompareReduction)
+    # A bare `Module` has no `include`; the script calls it at top level.
+    Core.eval(scan, :(include(path::AbstractString) = Base.include($scan, path)))
     try
         Base.include(scan, joinpath(@__DIR__, "..", "scripts",
             "compare_reduction_inflation_scan.jl"))
