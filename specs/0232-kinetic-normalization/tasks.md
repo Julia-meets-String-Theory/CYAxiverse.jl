@@ -213,7 +213,7 @@ follow `clarification-a.md`, approved at `1ada61d` (Issue #232 comment
 - [x] **T090 [R-002, G1] Bitwise comparison at the implementation SHA**
   - Escalate if: any artifact differs.
 
-- [ ] **T091 (CI evidence done at `90f6f43`; docs build, CYTools Python tests and R-005 report need an owner-local run) [G1] Evidence bundle**
+- [x] **T091 (CI at `90f6f43`; docs, CYTools Python and R-005 report owner-local at `0a22a56`) [G1] Evidence bundle**
   - Output: fast and full suites, Python regressions, docs, `agent_verify.py` at
     the exact SHA; changed-test list with reasons; R-005 count report.
 

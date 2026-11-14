@@ -923,6 +923,22 @@ recorded decisions. Each is left as implemented and is not declared complete.
 | G1-6 | Hard-coded normal-form functions (`n5_hilltop_efolds`, `poly102_inflation.n8_hilltop_efolds`, `reference_efolds`) | unlabelled as K-free under A4, although their constants were derived under a kinetic convention | *R-008 search record* |
 | G1-7 | `n8_author_trajectory` default tolerances | see below | this section |
 
+**Owner direction (2026-11-14, given in the working session; the durable
+record is the Clarification B comment on Issue #232):**
+- G1-1, G1-2, G1-5: ratified as implemented.
+- G1-3: extend A7 to the comparison CSV with per-field labels (Clarification B).
+- G1-4: regenerate the three `validation/` files on the owner's machine and
+  check that only the label changes.
+- G1-6: one docstring line per function naming its source contract (P96/A96);
+  no API or result change.
+- G1-7: a separate follow-up Issue; no change in this PR.
+- The `infl` fixture substitution for the R-005 inflation and F6 rows is
+  ratified (Clarification B).
+- Before G2: add a test for the A5 shard-file refusal, assert the label columns of
+  the two analysis scripts, and move the R-001 F5 evaluator equivalence
+  test out of the CYTools-gated module.
+- `impl/0232-kinetic-normalization` is fast-forwarded to the `-xaimz1` head.
+
 **G1-7.** `n8_author_trajectory` (`poly102_inflation.jl:1166`) derives its
 default tolerances from `precision_bits`: `reltol = 10^-(precision_bits ÷ 2)`,
 `abstol = 10^-(2·precision_bits ÷ 3)` (line 1237). For every allowed
@@ -948,9 +964,9 @@ Code candidate: `90f6f43`. Later commits on the branch change only
 | Certification (R-010) | same run, *Process-isolated scientific qualification* (watchdog self-test, fast and public suites) | PASS |
 | Portable Python tests | same run, *Python tests*; and `python3 scripts/run_python_regression_tests.py` in a cloud container (41 tests, 1 module skipped for CYTools) | PASS |
 | `agent_verify.py` | `snapshot`, `diff-check` (clean tree), `python-regressions`; `package` is covered by the CI full suite | PASS |
-| CYTools Python tests | `scripts/test_reproduce_fuzzy_axions_h11_4.py` and the other CYTools-gated modules | not run at `90f6f43`; owner-local run at `602a8b6`/`5b5c4c0` reported 105 passed. No Python file changed after `602a8b6` |
-| Docs build | `julia --project=docs/ docs/make.jl` | not run at `90f6f43`; owner-local pass reported at `602a8b6`/`5b5c4c0`. `90f6f43` adds one export (documented by the `read.jl` autodocs block) and one sentence on the conventions page |
-| R-005 count report | `julia --project=. scripts/r005_scaling_harness.jl report` | not run at `90f6f43` |
+| CYTools Python tests | `python scripts/run_python_regression_tests.py test_reproduce_fuzzy_axions_h11_4.py test_fuzzy_axion_model_stage_driver.py test_trace_lost_h11_3_fixed_components.py test_build_orientifold_axion_database.py` in the owner's CYTools environment | PASS (owner-local, macOS, at `0a22a56`): 88 tests, 0 skipped, which equals the 41 + 4 + 2 + 41 test methods in those modules. The default set gave 41 passed, 1 skipped (CYTools module, run separately). The earlier record of "105" was a different module set |
+| Docs build | `julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'`, then `julia --project=docs/ docs/make.jl` | PASS (owner-local, macOS, at `0a22a56`), including `checkdocs = :exports`. Warnings: `edit_link` could not query the git remote (local environment); search index 540.76 KiB above the 500 KiB warning threshold (warning only; not compared with the base) |
+| R-005 count report | `julia --startup-file=no --project=. scripts/r005_scaling_harness.jl report <out_dir>` | owner-local at `0a22a56`: `evidence/r005_report.md`. Every gated factor matches; every reported count is equal. Not covered by the harness: e-folds, F6 `n_candidates`/`n_qualified`/flow e-folds, F4 `model_lambda` and model counts, F5 optimizer outputs |
 
 Changed tests: *Tests expected to change* (all rows, including the G1
 additions). The R-005 rows at runtests.jl:645–704 and full.jl:784–840 did
@@ -973,6 +989,9 @@ Remaining partial or unmet items, none declared complete:
   (no physical consumer exists).
 - The R-001 F5 evaluator equivalence test is in a CYTools-gated module and
   skips in CI, although it needs only NumPy.
+- R-005 "reported" rows missing from the count report: e-folds, F6
+  `n_candidates`, `n_qualified`, flow e-folds, F4 `model_lambda` and model
+  counts, F5 optimizer outputs.
 - `run_pipeline2` catches the R-007 `ArgumentError` from `f6_note` into
   `vacua_error`; the geometry stays `:blocked`, so nothing is skipped silently.
 - The *Left to later tasks* notes under T030–T037 record the state at those
