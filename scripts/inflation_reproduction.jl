@@ -141,12 +141,12 @@ function write_fixture(path)
     path
 end
 
-# CYAX-0232 Clarification B2: the comparison CSV mixes A96 and P96 values, so
-# it carries one label column per K-dependent value column, set from each
-# value's provenance, and no row-level `kinetic_normalization` column. Physical
-# readers must reject it (A7).
+# CYAX-0232 Clarification B2: the comparison CSV carries one label column per
+# K-dependent value column, set from each value's provenance, and no row-level
+# `kinetic_normalization` column. Physical readers must reject it (A7).
+# Issue #235: every value is now an A96 reproduction; the N=8 reduced-model
+# column is the A96 normal form `n8_hilltop_normal_form_efolds`.
 const COMPARISON_A96 = String(Poly102.A96_KINETIC_NORMALIZATION)
-const COMPARISON_P96 = String(Bench.P96_KINETIC_NORMALIZATION)
 const COMPARISON_HEADER = "benchmark,delta_k," *
     "reduced_model_efolds,normal_form_efolds,independent_physical_flow_efolds," *
     "reference_efolds,method," *
@@ -164,7 +164,7 @@ function write_comparison(path)
     # Label columns, in value-column order: reduced model, normal form,
     # independent physical flow (empty where there is no value), reference.
     n5_labels = (COMPARISON_A96, COMPARISON_A96, "", COMPARISON_A96)
-    n8_labels = (COMPARISON_P96, COMPARISON_A96, COMPARISON_A96, COMPARISON_A96)
+    n8_labels = (COMPARISON_A96, COMPARISON_A96, COMPARISON_A96, COMPARISON_A96)
     rows = (
         ("N5", 1e-7, Poly102.n5_hilltop_normal_form_efolds(1e-7).efolds,
             reference.n5[1].efolds, "", reference.n5[1].efolds,
@@ -172,12 +172,12 @@ function write_comparison(path)
         ("N5", 6.65e-5, Poly102.n5_hilltop_normal_form_efolds(6.65e-5).efolds,
             reference.n5[2].efolds, "", reference.n5[2].efolds,
             "local reduced model; no independent author trajectory", n5_labels...),
-        ("N8_poly102", 1e-7, Bench.n8_local_hilltop_efolds(1e-7).efolds,
+        ("N8_poly102", 1e-7, Poly102.n8_hilltop_normal_form_efolds(1e-7).efolds,
             reference.n8[1].efolds, independent_physical_flow[1e-7],
             reference.n8[1].efolds,
             "local normal form; miniforge Python physical flow", n8_labels...),
         ("N8_poly102", 1.5320548620798324e-3,
-            Bench.n8_local_hilltop_efolds(1.5320548620798324e-3).efolds,
+            Poly102.n8_hilltop_normal_form_efolds(1.5320548620798324e-3).efolds,
             reference.n8[2].efolds,
             independent_physical_flow[1.5320548620798324e-3],
             reference.n8[2].efolds,

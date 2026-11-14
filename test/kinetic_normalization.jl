@@ -1998,10 +1998,13 @@ end
             lines = readlines(csv)
             header = split(lines[1], ',')
             @test !("kinetic_normalization" in header)
-            a96, p96 = "a96_reproduction_raw_radian", "p96_reproduction_c_half"
-            expected = Dict("N5" => (a96, a96, "", a96), "N8_poly102" => (p96, a96, a96, a96))
+            a96 = "a96_reproduction_raw_radian"
+            # Issue #235: the N8 reduced-model column is the A96 normal form.
+            expected = Dict("N5" => (a96, a96, "", a96), "N8_poly102" => (a96, a96, a96, a96))
             value_columns = ("reduced_model_efolds", "normal_form_efolds",
                 "independent_physical_flow_efolds", "reference_efolds")
+            n8_normal_form(row) =
+                ai.n8_hilltop_normal_form_efolds(parse(Float64, row["delta_k"])).efolds
             @test length(lines) == 5
             for line in lines[2:end]
                 row = Dict(zip(header, split(line, ',')))
@@ -2010,6 +2013,21 @@ end
                 # A label is present exactly where a value is present.
                 @test all(isempty(row[c]) == isempty(row[c * "_kinetic_normalization"])
                     for c in value_columns)
+                if row["benchmark"] == "N8_poly102"
+                    @test parse(Float64, row["reduced_model_efolds"]) == n8_normal_form(row)
+                end
+            end
+            # The committed CSV holds the same A96 N8 values and labels (#235).
+            committed = readlines(joinpath(@__DIR__, "..", "validation",
+                "inflation_comparison.csv"))
+            @test committed[1] == lines[1]
+            n8_rows = filter(l -> startswith(l, "N8_poly102,"), committed)
+            @test length(n8_rows) == 2
+            for line in n8_rows
+                row = Dict(zip(header, split(line, ',')))
+                @test row["reduced_model_efolds_kinetic_normalization"] == a96
+                @test isapprox(parse(Float64, row["reduced_model_efolds"]),
+                    n8_normal_form(row); rtol=1e-12)
             end
             # A physical inflation-CSV reader rejects the file (A7, B2).
             @test_throws ArgumentError inflation_csv_row_label(
