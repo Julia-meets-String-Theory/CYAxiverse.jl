@@ -544,6 +544,7 @@ notebook reader still requires F6 `2.0`.
   `appendix_b_quantiles.csv` gains `kinetic_normalization` and
   `kinetic_normalization_inferred` columns.
 - `inflation_merge_shards`: every row must carry the same non-empty label.
+  (After G2: every row is also validated with `inflation_csv_row_label`.)
 - Pilot report (`inflation_scan_pilot.jl`): terminal rows keep the shard label;
   `_inflation_pilot_report_rows` rejects mixed or empty labels; the report adds
   a last `kinetic_normalization` column. Its shard inputs pass the exact-header
@@ -708,7 +709,8 @@ and R ∪ O files) and the rejections.
   version tests (F1 `-3`, F6 `2.0`) are replaced by the label rules, so
   current and inferred legacy outputs are read; each row carries both labels,
   and the pooled rows must share one label per family (T064 rule for this
-  combiner).
+  combiner). (After G2: each row's F1 and F6 labels must also agree, and the
+  pooled rows must share one schema version per family.)
 - `reproduce_appendix_b_spectra.jl` was done in T037.
 - Inflation resume readers: below.
 
@@ -728,8 +730,9 @@ reader `_pilot_completed_scales` is T066 (A5).
 
 **T064.** Every combiner in the reader inventory rejects mixed labels with an
 `ArgumentError` naming both: `write_scan_csv` (T032), Appendix B,
-`inflation_merge_shards`, the pilot report and `merge_orientifold_shards.py`
-(T037), the gap analysis (T061), and the notebook's pooled rows, now
+`inflation_merge_shards` (T037; after G2 tested with `sugra_c1` against the
+A96 label, since `legacy_c_half` is now rejected per row), the pilot report and
+`merge_orientifold_shards.py` (T037), the gap analysis (T061), and the notebook's pooled rows, now
 `check_pooled_labels` (tested by extracting it from the notebook). The
 inflation resume readers do not combine values: after T063 their rows are
 `sugra_c1` or filtered out.
@@ -951,9 +954,10 @@ also called through the alias `n8_physical_gradient_flow`: by
 `scripts/inflation_refinement_common.jl` (`refine_inflation_candidate`, whose
 default `inflation_refinement_config()` leaves `reltol` and `abstol` as
 `nothing` at 100 bits) and by `scripts/benchmark_inflation_scalability.jl`.
-Every call site in the repository passes explicit tolerances: the T070 label
-test (since `5b5c4c0`, after it hung at 64 bits with the defaults), the
-refinement test (`runtests.jl:3456`) and the benchmark script. No production
+Every call site in the repository that solves passes explicit tolerances: the
+T070 label test (since `5b5c4c0`, after it hung at 64 bits with the
+defaults), the refinement test (`runtests.jl:3456`) and the benchmark script.
+`runtests.jl:3527` passes none, but it throws on `method=:FBDF` before solving. No production
 CLI calls `refine_inflation_candidate`. (Corrected after G2: an earlier version
 of this note said the T070 test was the only caller.) That the default call does not converge is inferred from that
 hang and is untested at the default 100 bits. Changing the defaults changes a
@@ -1060,14 +1064,21 @@ Closed during G1 and G2:
      label reads sit behind the `--force` check (T065 testset).
   2. `inflation_merge_shards` validates every row with
      `inflation_csv_row_label`, so an unknown label, a legacy label in a
-     current layout, or a contradicting version throws before writing (T037
-     testset).
+     current layout, or a contradicting version throws before the output
+     file is written (the partial temporary file is removed; T037 testset).
+     Two individually valid labels are still rejected as a mix.
   3. The statistics notebook requires each row's F1 and F6 labels to agree,
      and pools only one label and one schema version per family (T064
      testset). The pre-change exact version gates (F1 `-3`, F6 `2.0`) had
      already been out of date at the base, which wrote F6 `2.3`.
 
-Recorded, not changed (G2 nits):
+Recorded, not changed (G2 nits, and the follow-up G2 at `92c4df1`):
+- Follow-up G2 item 3 (PLAUSIBLE): the notebook now pools any single
+  recognized F1 and F6 version. A database made only of F6 `2.1`, `2.2` or
+  `2.3` rows would pool. Whether those layouts mean something different for the
+  fields the notebook reads (`catastrophes/*`, `efolds/*`) is not established.
+  The pre-change gates accepted only F6 `2.0`, which the base no longer wrote.
+  Left for the owner.
 - `orientifold_population_preflight.py` re-raises R-007 errors as
   `PopulationPreflightError` (a `RuntimeError`), not `ValueError`. The error
   is not suppressed.

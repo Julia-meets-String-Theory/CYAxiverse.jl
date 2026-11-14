@@ -1158,13 +1158,28 @@ end
         catch e
             e
         end
-        # A current-layout shard row may carry only sugra_c1 (R-007), so the
-        # legacy_c_half row is rejected by per-row validation (G2), before any
-        # write; its message names the label.
+        # legacy_c_half is not a valid label for a current-layout shard row
+        # (R-007), so per-row validation rejects it (G2) before the output is
+        # written; its message names the label.
         @test err isa ArgumentError
         @test occursin("legacy_c_half", sprint(showerror, err))
         @test !isfile(merged)
         @test_throws ArgumentError inflation_merge_shards([current, unlabelled], merged)
+        @test !isfile(merged)
+        # Two labels that are each valid for a shard row (sugra_c1 and, since
+        # shard rows carry diagnostic_schema_version, the A96 label) are still
+        # not merged: the error names both (R-007 combination rule).
+        a96_shard = shard_with_label(joinpath(root, "f"),
+            "a96_reproduction_raw_radian"; frst=5)
+        mixed_err = try
+            inflation_merge_shards([current, a96_shard], merged)
+            nothing
+        catch e
+            e
+        end
+        @test mixed_err isa ArgumentError
+        @test occursin("sugra_c1", sprint(showerror, mixed_err)) &&
+            occursin("a96_reproduction_raw_radian", sprint(showerror, mixed_err))
         @test !isfile(merged)
         # An unknown label and a contradicting version are rejected too.
         bogus = shard_with_label(joinpath(root, "d"), "bogus"; frst=4)
