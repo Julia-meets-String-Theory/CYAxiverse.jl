@@ -962,7 +962,19 @@ left for the owner.
 
 ## G1 evidence (T090–T092)
 
-**Current code candidate: `a3294ab`.** It adds the G1 follow-ups to `90f6f43`:
+**Current code candidate: `92c4df1`** (G2 findings 1–3 on top of `a3294ab`;
+later commits change only `specs/0232-kinetic-normalization/`).
+
+| Check | Run | Result at `92c4df1` |
+|---|---|---|
+| R-002 bitwise | `R002Invariance.yml` run 43609966744 (push); also run 43615116405 at `7417ad9`, same code | PASS: all 8 hashes equal between base and candidate and equal to the pinned hashes in *Baseline* |
+| Full suite (`CYAXIVERSE_TEST_FULL=1`) | `CI.yml` run 43609970720, attempt 1 | PASS ("CYAxiverse tests passed") |
+| Certification (R-010) | same run, *Process-isolated scientific qualification* | PASS |
+| Portable Python tests | same run, *Python tests* | PASS |
+| `agent_verify.py` | `snapshot`, `diff-check` (clean tree), `python-regressions` at `92c4df1` (cloud) | PASS |
+| Docs build, CYTools Python tests, R-005 report | owner-local results below | not re-run: `a3294ab..92c4df1` touches no docs, no Python and no R-005 route |
+
+**Previous candidate `a3294ab`.** It adds the G1 follow-ups to `90f6f43`:
 the export, T050, the A5 shard test, the analysis-label tests, the portable F5
 evaluator test, G1-6, Clarification B2 and the `validation/` regeneration.
 Later commits change only `specs/0232-kinetic-normalization/`. Base: `10aa3dc`.
