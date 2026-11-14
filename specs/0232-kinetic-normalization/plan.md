@@ -980,13 +980,13 @@ Earlier candidates:
   testsets after `kinetic_normalization.jl` unrun.
 - `e34ab6e`: its run was cancelled because it carried the same test.
 
-**Owner-local checks (below) ran at `0a22a56`, whose code is `90f6f43`.**
-They have not been re-run at `a3294ab`. Since then:
-- the F5 evaluator moved to `scripts/fuzzy_axion_mass_evaluator.py`; its
-  equivalence test now runs in CI, but the CYTools module's re-export test has
-  not run;
-- the conventions page gained one sentence;
-- the R-005 routes are unchanged.
+**Owner-local checks at `8f1dbd7` (code `a3294ab`, macOS):**
+
+| Check | Result |
+|---|---|
+| Docs build (`julia --project=docs/ docs/make.jl`) | PASS, including `checkdocs = :exports`. Same two warnings as before: `edit_link` could not query the git remote (local environment), and the search index is 541.67 KiB, above the 500 KiB warning threshold (a warning only) |
+| CYTools Python tests (the four CYTools modules, CYTools environment) | PASS: 87 tests, 0 skipped. That is 88 − 2 + 1: the two evaluator tests moved to the portable module and one re-export test was added |
+| R-005 count report | not re-run: none of its routes changed after `90f6f43`; the `0a22a56` report stands |
 
 **Previous candidate `90f6f43`:**
 
