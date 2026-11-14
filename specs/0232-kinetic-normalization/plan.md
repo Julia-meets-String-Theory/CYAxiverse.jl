@@ -966,7 +966,30 @@ left for the owner.
 
 ## G1 evidence (T090–T092)
 
-**Current code candidate: `92c4df1`** (G2 findings 1–3 on top of `a3294ab`;
+**Final code candidate: `0c4d523`.** It is `92c4df1` plus one merge test and
+plan text (follow-up G2 nits). Later commits change only
+`specs/0232-kinetic-normalization/`.
+
+| Check | Run | Result at `0c4d523` |
+|---|---|---|
+| R-002 bitwise | `R002Invariance.yml` run 43616776411 (push) | PASS: all 8 hashes equal between base and candidate and equal to the pinned hashes in *Baseline* |
+| Full suite (`CYAXIVERSE_TEST_FULL=1`) | `CI.yml` run 43616779528, attempt 1 | PASS ("CYAxiverse tests passed"); same existing Pipeline 2 real-data skip |
+| Certification (R-010) | same run, *Process-isolated scientific qualification* | PASS |
+| Portable Python tests | same run, *Python tests* | PASS |
+| `agent_verify.py` | `snapshot`, `diff-check` (clean tree), `python-regressions` at `0c4d523` (cloud) | PASS |
+| Docs build, CYTools Python tests, R-005 report | owner-local results below (`a3294ab`) | not re-run: `a3294ab..0c4d523` touches no docs, no Python and no R-005 route |
+
+## G2 (T093)
+
+- **Full review** of `10aa3dc..3050ddb` (code `a3294ab`), fresh context:
+  APPROVE_WITH_NITS. No blocking or significant finding. Minor findings 1–3
+  were fixed in `92c4df1`; finding 4 and the nits are recorded above.
+- **Follow-up review** of `a3294ab..92c4df1` plus `plan.md`: APPROVE_WITH_NITS.
+  All three fixes are confirmed closed, with no new fail-open path. Its minor
+  items were addressed in `0c4d523`: the merge mixed-label test and the stale
+  text. The notebook version-gate question is left for the owner.
+
+**Previous candidate `92c4df1`** (G2 findings 1–3 on top of `a3294ab`;
 later commits change only `specs/0232-kinetic-normalization/`).
 
 | Check | Run | Result at `92c4df1` |

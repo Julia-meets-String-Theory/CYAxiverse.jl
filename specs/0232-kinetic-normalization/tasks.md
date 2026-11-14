@@ -222,7 +222,7 @@ follow `clarification-a.md`, approved at `1ada61d` (Issue #232 comment
 
 ## Phase 7 — Independent verification
 
-- [ ] **T093 [G2] Fresh-context review of the whole PR at the exact SHA**
+- [x] **T093 [G2] Fresh-context review of the whole PR at the exact SHA**
   - Must not rely on the implementation worker's report.
   - Escalate if: a blocking finding needs an implementation change (new
     candidate; repeat T090–T093).
