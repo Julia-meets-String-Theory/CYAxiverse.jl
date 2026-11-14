@@ -983,12 +983,16 @@ Remaining partial or unmet items, none declared complete:
   not by a spec amendment.
 - R-005 F4: the persisted `model_mass_reference_log10_ev` is checked only
   through the in-memory route.
-- No test: the A5 shard-file refusal (the report refusal is tested); the
-  label columns of `analyze_inflation_candidates.jl` and
-  `compare_reduction_inflation_scan.jl`; the A7 physical-consumer rejection
-  (no physical consumer exists).
-- The R-001 F5 evaluator equivalence test is in a CYTools-gated module and
-  skips in CI, although it needs only NumPy.
+- No test: the A7 physical-consumer rejection (no physical consumer exists).
+  Closed after `90f6f43` on owner direction: the A5 shard-file refusal
+  (T066 testset), the label columns of `analyze_inflation_candidates.jl` and
+  `compare_reduction_inflation_scan.jl` (*analysis-script label columns*
+  testset), and the R-001 F5 evaluator equivalence test, now in
+  `scripts/test_fuzzy_axion_mass_evaluator.py` on the CYTools-free
+  `scripts/fuzzy_axion_mass_evaluator.py` (function moved verbatim and
+  re-exported by `reproduce_fuzzy_axions_h11_4.py`), so it runs in CI.
+- G1-6 docstrings added to `n8_hilltop_efolds`, `n5_hilltop_efolds` and
+  `reference_efolds` (`poly102_inflation.jl`).
 - R-005 "reported" rows missing from the count report: e-folds, F6
   `n_candidates`, `n_qualified`, flow e-folds, F4 `model_lambda` and model
   counts, F5 optimizer outputs.

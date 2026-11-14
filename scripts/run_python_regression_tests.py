@@ -27,6 +27,7 @@ DEFAULT_TESTS = (
     "test_orientifold_population_preflight.py",
     "test_f5_legacy_layouts.py",
     "test_author_poly102_reference.py",
+    "test_fuzzy_axion_mass_evaluator.py",
     "test_merge_orientifold_shards.py",
 )
 

@@ -935,6 +935,10 @@ The author-supplied local normal-form check.  It is independent of the
 integration parameterization and reproduces the two poly-102 reference
 scales.  The parameters are retained explicitly because they are part of the
 Mathematica numerical specification.
+
+Source contract (CYAX-0232 A4, G1-6): the constants are taken as given from the
+A96 author source (`a96_reproduction_raw_radian` convention). No kinetic matrix is
+evaluated and the result carries no `kinetic_normalization` field.
 """
 function n8_hilltop_efolds(delta_k::Real; displacement::Real=1e-8)
     delta_k > 0 || throw(ArgumentError("delta_k must be positive"))
@@ -1356,7 +1360,15 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
     end
 end
 
-"""N=5 hilltop normal-form reference for the two benchmark anchors."""
+"""
+    n5_hilltop_efolds(delta_k; displacement=1e-8)
+
+N=5 hilltop normal-form reference for the two benchmark anchors.
+
+Source contract (CYAX-0232 A4, G1-6): the constants are taken as given from the
+A96 author source (`a96_reproduction_raw_radian` convention). No kinetic matrix is
+evaluated and the result carries no `kinetic_normalization` field.
+"""
 function n5_hilltop_efolds(delta_k::Real; displacement::Real=1e-8)
     delta_k > 0 || throw(ArgumentError("delta_k must be positive"))
     displacement > 0 || throw(ArgumentError("displacement must be positive"))
@@ -1367,7 +1379,15 @@ function n5_hilltop_efolds(delta_k::Real; displacement::Real=1e-8)
        alpha_over_vc=2589.3499862235153, g_over_vc=1.8288577346700535e6)
 end
 
-"""Return the representative draft detunings and reference efold counts."""
+"""
+    reference_efolds()
+
+Return the representative draft detunings and reference efold counts.
+
+Source contract (CYAX-0232 A4, G1-6): the constants are taken as given from the
+A96 author source (`a96_reproduction_raw_radian` convention). No kinetic matrix is
+evaluated and the result carries no `kinetic_normalization` field.
+"""
 function reference_efolds()
     (; n5=[(delta_k=1e-7, efolds=27349.0), (delta_k=6.65e-5, efolds=60.0)],
        n8=[(delta_k=1e-7, efolds=463115.0), (delta_k=1.5320548620798324e-3, efolds=60.0)])

@@ -1667,6 +1667,22 @@ end
         fields[findfirst(==("h11"), columns)] = "not-an-int"
         write(report, header * "\n" * join(fields, ',') * "\n")
         @test_throws ArgumentError _pilot_completed_scales(report)   # parse error
+
+        # A5 also applies to the shard: a current report with a legacy shard
+        # is refused by the shard's label, before either header check.
+        cp(report * ".current", report; force=true)
+        shard = only(filter(endswith(".csv"), readdir(shards; join=true)))
+        write(shard, join(legacy_header, ',') * "\n" * join(legacy_row, ',') * "\n")
+        shard_err = try
+            run_scale_continuation(args("--resume"))
+            nothing
+        catch e
+            e
+        end
+        @test shard_err isa ArgumentError
+        @test occursin("legacy_c_half", sprint(showerror, shard_err))
+        @test occursin(basename(shard), sprint(showerror, shard_err))
+        @test !occursin("schema mismatch", sprint(showerror, shard_err))
     end
 end
 
@@ -1972,4 +1988,51 @@ end
             end
         end
     end
+end
+
+# CYAX-0232 G1: the label columns of the two inflation analysis scripts (T036
+# follow-up). Each script is loaded into its own module, as runtests.jl does
+# for analyze_inflation_candidates.jl, to avoid name collisions.
+@testset "CYAX-0232 analysis-script label columns (G1)" begin
+    candidates = Module(:CYAX0232AnalyzeCandidates)
+    Base.include(candidates, joinpath(@__DIR__, "..", "scripts",
+        "analyze_inflation_candidates.jl"))
+    r005_with_geometry(T035_INFL, 1) do geom_idx, path, root
+        summary, point_rows = candidates.analyze_geometry(geom_idx; starts=64)
+        @test summary.kinetic_normalization == "sugra_c1"
+        @test !isempty(point_rows)
+        @test all(row.kinetic_normalization == "sugra_c1" for row in point_rows)
+    end
+
+    # compare_reduction_inflation_scan.jl sets CYAXIVERSE_DATA_DIR when it is
+    # loaded; restore it so later tests see the original value.
+    saved = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+    scan = Module(:CYAX0232CompareReduction)
+    try
+        Base.include(scan, joinpath(@__DIR__, "..", "scripts",
+            "compare_reduction_inflation_scan.jl"))
+    finally
+        saved === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+            (ENV["CYAXIVERSE_DATA_DIR"] = saved)
+    end
+    geometry = (; h11=4, polytope=1, frst=1)
+    loaded = (; reference_max_log10_error=0.0, reference_sign_mismatches=0,
+        reference_nonfinite_compatible=true)
+    solved = (; critical_count=1, found_minima=1, total_minima=1,
+        full_nonnegative=1, reduced_full_minima=missing,
+        reduced_full_negative=missing, reduced_full_zeroish=missing,
+        reduction_dimension=missing, reduction_signature="", multiplicity=1,
+        extra_rows=0, solver_status="converged", residual_max=0.0)
+    options = (; starts=1, residual_tolerance=1e-8, merge_tolerance=1e-4,
+        fixed_control=false)
+    row = merge(scan.result_row(geometry, 1.0, :full, :full, loaded, solved, 0.1,
+        options), Dict{Symbol,Any}(:sample_rank => 1))
+    @test row[:kinetic_normalization] == "sugra_c1"
+    summary = only(scan.summarize([row], [geometry], [1.0], options))
+    @test summary[:kinetic_normalization] == "sugra_c1"
+    # Both CSV field lists in `main` end with the label column.
+    source = read(joinpath(@__DIR__, "..", "scripts",
+        "compare_reduction_inflation_scan.jl"), String)
+    @test occursin(":reference_nonfinite_compatible, :kinetic_normalization)", source)
+    @test occursin(":rows_completed,\n        :kinetic_normalization)", source)
 end
