@@ -1,0 +1,97 @@
+{
+ "description": "Driver changes of engine/relic/compute_relic_abundance.jl relative to the frozen 2026-10-01 production script, as (new, old) text blocks (each tagged [G2]..[G6]); replacing every new block by its old block and then G1 restores the frozen body (sha256 9f73b9c6...). Checked by tests/test_static.py. The physics block is not touched. || G7 (2026-11-04, methodology v2: per-scenario constant w_R): blocks added after the original G1-G6 ones; the physics block above the driver banner is untouched.",
+ "G1": {
+  "new": "is_population=haskey(RUN,\"expected_modes\") && N==RUN[\"expected_modes\"]   # [G1] expected counts optional",
+  "old": "is_population=N==RUN[\"expected_modes\"]"
+ },
+ "blocks": [
+  {
+   "new": "end\n# [G2] general run on the A1 canonical table: its checksum is always verified (not only for the reference population), and the\n# geometry population comes from the A1 canonical geometry table, so a geometry without mode above H0 is never dropped\nconst CANON=haskey(CFG[\"input\"],\"canonical_mode_table\") && abspath(String(CFG[\"input\"][\"canonical_mode_table\"]))==TABLE_PATH\nCANON && (filesha(TABLE_PATH)==CFG[\"input\"][\"canonical_mode_table_sha256\"] ||\n    error(\"canonical mode table checksum differs from run_config.json (the table changed after A1); rerun the relic stage\"))\nfunction csvsplit(l)   # comma-separated line with optional double quotes (pandas)\n    out=String[]; buf=IOBuffer(); q=false; i=1; c=collect(l)\n    while i<=length(c)\n        ch=c[i]\n        if q && ch=='\"' && i<length(c) && c[i+1]=='\"'; write(buf,'\"'); i+=1\n        elseif ch=='\"'; q=!q\n        elseif ch==',' && !q; push!(out,String(take!(buf)))\n        else write(buf,ch) end\n        i+=1\n    end\n    push!(out,String(take!(buf))); out\nend\nfunction load_population(path)\n    L=readlines(path); h=csvsplit(L[1]); ix=Dict(String(k)=>i for (i,k) in enumerate(h))\n    pop=NamedTuple[]\n    for l in L[2:end]\n        isempty(strip(l)) && continue\n        x=csvsplit(l)\n        push!(pop,(geometry_id=x[ix[\"geometry_id\"]],h11=parse(Int,x[ix[\"h11\"]]),vacuum_status=x[ix[\"vacuum_status\"]],\n            n_modes=parse(Int,x[ix[\"n_modes\"]]),vol=parse(Float64,x[ix[\"cy_volume\"]])))\n    end\n    pop\nend\nconst POP=if CANON && haskey(CFG[\"input\"],\"canonical_geometry_table\")\n    gp=String(CFG[\"input\"][\"canonical_geometry_table\"])\n    haskey(CFG[\"input\"],\"canonical_geometry_table_sha256\") && (filesha(gp)==CFG[\"input\"][\"canonical_geometry_table_sha256\"] ||\n        error(\"canonical geometry table checksum differs from run_config.json\"))\n    load_population(gp)\nelse nothing end\nif POP!==nothing\n    pg=Dict(p.geometry_id=>p for p in POP); length(pg)==length(POP) || error(\"duplicate geometry in the canonical geometry table\")\n    pcnt=Dict{String,Int}(); for r in modes; haskey(pg,r.geometry_id) || error(\"mode of unknown geometry $(r.geometry_id)\"); pcnt[r.geometry_id]=get(pcnt,r.geometry_id,0)+1; end\n    all(get(pcnt,p.geometry_id,0)==p.n_modes for p in POP) || error(\"mode counts differ from the canonical geometry table\")\n    all(r->r.vacuum_status==pg[r.geometry_id].vacuum_status && r.vol==pg[r.geometry_id].vol,modes) || error(\"geometry fields differ from the canonical geometry table\")\nend\nconst PG=POP===nothing ? nothing : Dict(p.geometry_id=>p for p in POP)\n",
+   "old": "end\n"
+  },
+  {
+   "new": "        isfinite(tosc) && tosc>T_CMB_GEV || error(\"T_osc not found for $(r.geometry_id) mode $(r.mode_index)\")\n        ((tosc<=teq)==(cat==\"LATE\") || abs(log(tosc/teq))<=1e-10) ||   # [G3] class from the exact threshold; T_osc and T_eq carry |dlnT|<1e-11\n            error(\"threshold class $cat disagrees with solved T_osc for $(r.geometry_id) mode $(r.mode_index)\")\n",
+   "old": "        isfinite(tosc) && tosc>T_CMB_GEV || error(\"T_osc not found for $(r.geometry_id) mode $(r.mode_index)\")\n        (tosc<=teq)==(cat==\"LATE\") || error(\"threshold class $cat disagrees with solved T_osc for $(r.geometry_id) mode $(r.mode_index)\")\n"
+  },
+  {
+   "new": "    for (k,r) in enumerate(rows); haskey(idx,r[\"geometry_id\"]) || push!(order,r[\"geometry_id\"]); push!(get!(idx,r[\"geometry_id\"],Int[]),k); end\n    POP===nothing || (order=[p.geometry_id for p in POP])   # [G4] every A1 geometry, in A1 order (the same order as the mode table)\n",
+   "old": "    for (k,r) in enumerate(rows); haskey(idx,r[\"geometry_id\"]) || push!(order,r[\"geometry_id\"]); push!(get!(idx,r[\"geometry_id\"],Int[]),k); end\n"
+  },
+  {
+   "new": "    for gid in order\n        if !haskey(idx,gid)                                  # [G4] validated spectrum without mode above H0: evaluated, empty\n            p=PG[gid]; mKK=MPL_KK_GEV/p.vol^(2/3)\n            push!(out,Dict{String,Any}(\"geometry_id\"=>gid,\"h11\"=>p.h11,\"vacuum_status\"=>p.vacuum_status,\"scenario\"=>lab,\"T_reh_GeV\"=>treh,\n                \"theta_ref\"=>THETA_INITIAL,\"number_of_modes\"=>0,\"number_frozen\"=>0,\"number_late\"=>0,\"number_post_reheating\"=>0,\n                \"number_pre_reheating\"=>0,\"number_pre_reheating_valid\"=>0,\"number_inflation_excluded\"=>0,\"number_included\"=>0,\n                \"Omega_geometry_h2_at_theta_ref\"=>with_omega ? 0.0 : nothing,\"Omega_post_reheating_h2_at_theta_ref\"=>nothing,\n                \"Omega_pre_reheating_h2_at_theta_ref\"=>nothing,\"omega_total_excludes_invalid_modes\"=>false,\"dominant_mode_index\"=>nothing,\n                \"dominant_fraction\"=>nothing,\"Omega_late_census_only_h2_at_theta_ref\"=>nothing,\"number_above_mKK\"=>0,\"number_above_fpert\"=>0,\n                \"number_included_above_mKK\"=>0,\"number_included_above_fpert\"=>0,\"Omega_included_above_mKK_h2_at_theta_ref\"=>nothing,\n                \"Omega_included_above_fpert_h2_at_theta_ref\"=>nothing,\"cy_volume\"=>p.vol,\"m_KK_GeV\"=>mKK))\n            continue\n        end\n",
+   "old": "    for gid in order\n"
+  },
+  {
+   "new": "        oms=with_omega ? Float64[r[\"Omega_h2_at_theta_ref\"] for r in inc] : Float64[]\n        nexc=cnt(r->r[\"abundance_state\"]==\"INFLATIONARY_VALIDITY_EXCLUDED\")\n        tot=with_omega ? (!isempty(oms) ? sum(oms) : nexc==0 ? 0.0 : nothing) : nothing   # [G4] empty CDM set: 0 if every mode was evaluated, NA if a mode is not evaluated (inflation cut)\n        dom=isempty(oms) ? nothing : inc[argmax(oms)]\n",
+   "old": "        oms=with_omega ? Float64[r[\"Omega_h2_at_theta_ref\"] for r in inc] : Float64[]\n        tot=sumornothing(oms); dom=isempty(oms) ? nothing : inc[argmax(oms)]\n"
+  },
+  {
+   "new": "    exc=filter(r->!r[\"inflation_valid\"],rows)\n    cb=OD([\"modes\"=>length(rows),\"geometries\"=>length(G),\"by_category\"=>byc,\"category_sum\"=>sum(last.(byc)),\"by_abundance_state\"=>bys,   # [G5]\n",
+   "old": "    exc=filter(r->!r[\"inflation_valid\"],rows)\n    OD([\"modes\"=>length(rows),\"geometries\"=>length(G),\"by_category\"=>byc,\"category_sum\"=>sum(last.(byc)),\"by_abundance_state\"=>bys,\n"
+  },
+  {
+   "new": "        \"geometries_without_included_modes\"=>count(g->g[\"number_included\"]==0,G),\n        \"geometries_without_included_modes_all_frozen_or_late\"=>count(g->g[\"number_included\"]==0 && g[\"number_inflation_excluded\"]==0 && g[\"number_of_modes\"]>0,G),   # [G5]\n",
+   "old": "        \"geometries_without_included_modes\"=>count(g->g[\"number_included\"]==0,G),\n        \"geometries_without_included_modes_all_frozen_or_late\"=>count(g->g[\"number_included\"]==0 && g[\"number_inflation_excluded\"]==0,G),\n"
+  },
+  {
+   "new": "        \"geometries_partially_excluded_keep_valid_modes\"=>count(g->g[\"number_inflation_excluded\"]>0 && g[\"number_inflation_excluded\"]<g[\"number_of_modes\"],G)])\n    nz=count(g->g[\"number_of_modes\"]==0,G); nz>0 && push!(cb,\"geometries_without_modes_above_threshold\"=>nz)   # [G5] key present only when such geometries exist\n    cb\n",
+   "old": "        \"geometries_partially_excluded_keep_valid_modes\"=>count(g->g[\"number_inflation_excluded\"]>0 && g[\"number_inflation_excluded\"]<g[\"number_of_modes\"],G)])\n"
+  },
+  {
+   "new": "end\n# [G6] abundance validity of every geometry (abundance runs; approved 2026-10-31):\n#   EVALUATED_POSITIVE     no mode excluded, >= 1 mode in the CDM sum: complete abundance > 0          -> theta PRIMARY\n#   EVALUATED_ZERO         no mode excluded, none in the CDM sum (no mode above H0, or all FROZEN/LATE):\n#                          complete abundance = 0 (evaluated empty sum)                                 -> theta PRIMARY\n#   PARTIAL_VALIDITY       some, not all, modes above 3H_I,max (abundance not evaluated for them): only a\n#                          partial sum over the valid modes, not the complete abundance                 -> theta SENSITIVITY_ONLY\n#   INFLATION_INVALID_ALL  every mode above 3H_I,max: abundance not evaluated (NA)                     -> theta EXCLUDED_NOT_EVALUATED\nconst VALIDITY_COLS=[\"geometry_id\",\"h11\",\"scenario\",\"number_of_modes\",\"number_included\",\"number_inflation_excluded\",\"abundance_validity\",\"reason\",\n    \"Omega_complete_h2_at_theta_ref\",\"Omega_valid_modes_partial_h2_at_theta_ref\",\"theta_population\"]\nfunction validity_rows(G)\n    map(G) do g\n        n=g[\"number_of_modes\"]; ni=g[\"number_included\"]; fl=g[\"number_frozen\"]+g[\"number_late\"]; ex=g[\"number_inflation_excluded\"]; om=g[\"Omega_geometry_h2_at_theta_ref\"]\n        cls=ex==0 ? (ni>0 ? \"EVALUATED_POSITIVE\" : \"EVALUATED_ZERO\") : ex==n ? \"INFLATION_INVALID_ALL\" : \"PARTIAL_VALIDITY\"\n        reason=cls==\"EVALUATED_POSITIVE\" ? nothing : cls==\"EVALUATED_ZERO\" ? (n==0 ? \"NO_MODES_ABOVE_THRESHOLD\" : \"ALL_MODES_FROZEN_OR_LATE\") :\n            cls==\"PARTIAL_VALIDITY\" ? \"SOME_MODES_INFLATION_EXCLUDED\" : \"ALL_MODES_INFLATION_EXCLUDED\"\n        Dict{String,Any}(\"geometry_id\"=>g[\"geometry_id\"],\"h11\"=>g[\"h11\"],\"scenario\"=>g[\"scenario\"],\"number_of_modes\"=>n,\"number_included\"=>ni,\n            \"number_inflation_excluded\"=>ex,\"abundance_validity\"=>cls,\"reason\"=>reason,\n            \"Omega_complete_h2_at_theta_ref\"=>startswith(cls,\"EVALUATED_\") ? om : nothing,\n            \"Omega_valid_modes_partial_h2_at_theta_ref\"=>cls==\"PARTIAL_VALIDITY\" ? (om===nothing ? 0.0 : om) : nothing,\n            \"theta_population\"=>startswith(cls,\"EVALUATED_\") ? \"PRIMARY\" : cls==\"PARTIAL_VALIDITY\" ? \"SENSITIVITY_ONLY\" : \"EXCLUDED_NOT_EVALUATED\")\n    end\nend\nvalidity_counts(V)=OD([c=>count(v->v[\"abundance_validity\"]==c,V) for c in (\"EVALUATED_POSITIVE\",\"EVALUATED_ZERO\",\"PARTIAL_VALIDITY\",\"INFLATION_INVALID_ALL\")])\n",
+   "old": "end\n"
+  },
+  {
+   "new": "# ---------------------------------------------------------------- run\n# [G7] v2: column w_R appended to every table (schema relic_abundance_production_outputs/2); v1 tables are unchanged\ntagw(X,lab)=(for x in X; x[\"w_R\"]=WR_OF[lab]; end; X)\nMETHOD_VERSION>=2 && for c in (MASTER_COLS,GEOM_COLS,VALIDITY_COLS,H11_COLS); push!(c,\"w_R\"); end\nsummary=OD(); POPSUM=OD(); census_cols=[\"geometry_id\",\"h11\",\"mode_index\",\"mode_rank_desc\",\"log10_mass_eV\",\"vacuum_status\",\"inflation_valid\",\"above_mKK\",\"above_fpert\"]   # [G6]\n",
+   "old": "# ---------------------------------------------------------------- run\nsummary=OD(); census_cols=[\"geometry_id\",\"h11\",\"mode_index\",\"mode_rank_desc\",\"log10_mass_eV\",\"vacuum_status\",\"inflation_valid\",\"above_mKK\",\"above_fpert\"]\n"
+  },
+  {
+   "new": "        write_table(joinpath(OUTDIR,\"h11_summary_$lab.csv\"),H11_COLS,tagw(h11_rows(G,lab,true),lab))\n        VR=tagw(validity_rows(G),lab); write_table(joinpath(OUTDIR,\"geometry_abundance_validity_$lab.csv\"),VALIDITY_COLS,VR)   # [G6]\n        push!(POPSUM,lab=>OD([\"geometries\"=>length(VR),\"by_abundance_validity\"=>validity_counts(VR),   # [G6]\n            \"theta_primary_geometries\"=>count(v->v[\"theta_population\"]==\"PRIMARY\",VR),\"theta_sensitivity_geometries\"=>count(v->v[\"theta_population\"]!=\"EXCLUDED_NOT_EVALUATED\",VR),\n            \"theta_excluded_not_evaluated\"=>count(v->v[\"theta_population\"]==\"EXCLUDED_NOT_EVALUATED\",VR)]))\n",
+   "old": "        write_table(joinpath(OUTDIR,\"h11_summary_$lab.csv\"),H11_COLS,h11_rows(G,lab,true))\n"
+  },
+  {
+   "new": "MODE==\"census\" && write_table(joinpath(OUTDIR,\"census_modes.csv\"),census_cols,census_rows)\nMODE==\"abundance\" && json_write(joinpath(OUTDIR,\"population_validity_summary.json\"),OD([\"definition\"=>\"abundance validity classes (METHODOLOGY.md); theta primary = EVALUATED_POSITIVE + EVALUATED_ZERO, sensitivity adds PARTIAL_VALIDITY (partial sums), INFLATION_INVALID_ALL is not evaluated\",\n    \"scenarios\"=>POPSUM]))   # [G6]\n",
+   "old": "MODE==\"census\" && write_table(joinpath(OUTDIR,\"census_modes.csv\"),census_cols,census_rows)\n"
+  },
+  {
+   "old": "(\"w_R\",W_REHEAT,CFG[\"reheating\"][\"w_R\"],0.0)",
+   "new": "(\"w_R\",W_REHEAT,get(CFG[\"reheating\"],\"w_R\",get(CFG[\"reheating\"],\"w_R_default\",NaN)),0.0)"
+  },
+  {
+   "old": "        pr=pre_reheating_abundance(tab,r.logm,r.logf,treh)          # (2.10)+(2.15), w_R = 0\n        branch=\"fuzzy_wR0_eq2.10_2.15\"; z=1/pr.a_osc-1; Hosc=pr.H_osc; om=pr.omega",
+   "new": "        pr=try pre_reheating_abundance_w(tab,r.logm,r.logf,treh,WR_OF[lab]) catch e   # (2.10)+(2.15); [G7] w_R of the scenario (0 in v1)\n            error(\"scenario $lab, geometry $(r.geometry_id), mode $(r.mode_index): \"*(e isa ErrorException ? e.msg : sprint(showerror,e)))\n        end\n        branch=WR_OF[lab]==0.0 ? \"fuzzy_wR0_eq2.10_2.15\" : \"fuzzy_wR_general_eq2.10_2.15\"; z=1/pr.a_osc-1; Hosc=pr.H_osc; om=pr.omega"
+  },
+  {
+   "old": "",
+   "new": "# [G7] methodology version and per-scenario constant pre-reheating equation of state w_R (methodology v2). A v1 configuration has\n# no methodology_version and no per-scenario w_R: every scenario then uses w_R = W_REHEAT = 0 through the frozen v1 function.\nconst METHOD_VERSION=Int(get(CFG,\"methodology_version\",1))\nMETHOD_VERSION in (1,2) || error(\"unsupported methodology_version $(get(CFG,\"methodology_version\",1)) (this script implements 1 and 2)\")\nfunction scenario_wR(lab,s)\n    if METHOD_VERSION==1\n        haskey(s,\"w_R\") && error(\"scenario $lab: w_R is fixed at 0 in methodology v1; use methodology v2 to choose it\")\n        return W_REHEAT\n    end\n    w=get(s,\"w_R\",CFG[\"reheating\"][\"w_R_default\"])\n    (w isa Real && !(w isa Bool) && isfinite(w) && -1<w<=1) ||\n        error(\"scenario $lab: w_R must be a finite number with -1 < w_R <= 1 (H ~ a^(-3(1+w_R)/2) must fall with expansion; causal fluid), got $(repr(w))\")\n    Float64(w)\nend\nconst WR_OF=Dict(lab=>scenario_wR(lab,s) for (lab,treh,s) in SCEN)\nlength(unique((treh,WR_OF[lab]) for (lab,treh,s) in SCEN))==length(SCEN) ||\n    error(\"two scenarios share the same (T_reh_GeV, w_R): identical physics under two labels is ambiguous\")\n# [G7] constant-w_R PRE_REHEATING abundance, (2.10)+(2.15) evaluated in logarithms (no overflow of (1+z_a)^3). w_R == 0 calls the\n# frozen v1 function, so a v2 run at w_R = 0 is bit-identical to v1. An abundance outside the float64 range stops the run: never clamped.\nfunction pre_reheating_abundance_w(tab,logm_ev,logf_gev,treh,w)\n    w==0.0 && return pre_reheating_abundance(tab,logm_ev,logf_gev,treh)\n    m=10.0^(logm_ev-9); HR=hubble_reheat(tab,treh)\n    lnopz_a=log(onepz_reheat(tab,treh))+(2/(3*(1+w)))*log(m/(3HR))                                   # (2.15)\n    lnom=log(0.5)+2*log(m)+2*(logf_gev*log(10.0))+2*log(THETA_INITIAL)-log(RHO_CRIT_OVER_H2_GEV4)-3*lnopz_a   # (2.10)\n    (isfinite(lnom) && isfinite(lnopz_a) && -708<lnom<708 && lnopz_a<708) ||\n        error(\"PRE_REHEATING abundance outside the float64 normal range (ln Omega = $lnom, ln(1+z_a) = $lnopz_a) for log10 m = $logm_ev eV, log10 f = $logf_gev GeV, w_R = $w, T_reh = $treh GeV; it is not clamped to 0 or to a bound. Use a w_R closer to 0 or a higher T_reh (METHODOLOGY.md, numerical range of the PRE prescription)\")\n    (;omega=exp(lnom),a_osc=exp(-lnopz_a),H_osc=m/3,HR)\nend\n"
+  },
+  {
+   "old": "write_table(joinpath(OUTDIR,\"census_h11_$lab.csv\"),H11_COLS,h11_rows(G,lab,false))",
+   "new": "write_table(joinpath(OUTDIR,\"census_h11_$lab.csv\"),H11_COLS,tagw(h11_rows(G,lab,false),lab))"
+  },
+  {
+   "old": "        rows=[evaluate(r,lab,treh,HR) for r in modes]\n        G=geometry_rows(rows,lab,treh)\n",
+   "new": "        rows=tagw([evaluate(r,lab,treh,HR) for r in modes],lab)\n        G=tagw(geometry_rows(rows,lab,treh),lab)\n"
+  },
+  {
+   "old": "        push!(summary,lab=>OD([\"T_reh_GeV\"=>treh,\"three_H_R_eV\"=>3HR*1e9,\"census\"=>census_block(rows,G),\"abundance\"=>\"NOT COMPUTED (census/dry-run mode)\"]))",
+   "new": "        push!(summary,lab=>OD([\"T_reh_GeV\"=>treh,\"three_H_R_eV\"=>3HR*1e9,\"census\"=>census_block(rows,G),\"abundance\"=>\"NOT COMPUTED (census/dry-run mode)\"]))\n        METHOD_VERSION>=2 && (push!(summary[end].second,\"w_R\"=>WR_OF[lab]))   # [G7]"
+  },
+  {
+   "old": "        push!(summary,lab=>OD([\"T_reh_GeV\"=>treh,\"three_H_R_eV\"=>3HR*1e9,\"census\"=>census_block(rows,G),\"abundance\"=>ab]))",
+   "new": "        push!(summary,lab=>OD([\"T_reh_GeV\"=>treh,\"three_H_R_eV\"=>3HR*1e9,\"census\"=>census_block(rows,G),\"abundance\"=>ab]))\n        METHOD_VERSION>=2 && (push!(summary[end].second,\"w_R\"=>WR_OF[lab]))   # [G7]"
+  },
+  {
+   "old": "        \"rel_diff_three_H_R_vs_config\"=>e1,\"rel_diff_one_plus_z_R_vs_config\"=>e2]))\nend",
+   "new": "        \"rel_diff_three_H_R_vs_config\"=>e1,\"rel_diff_one_plus_z_R_vs_config\"=>e2]))\n    METHOD_VERSION>=2 && (push!(scen_derived[end].second,\"w_R\"=>WR_OF[lab]))   # [G7]\nend"
+  },
+  {
+   "old": "json_write(joinpath(OUTDIR,\"run_metadata.json\"),meta)",
+   "new": "METHOD_VERSION>=2 && pushfirst!(meta,\"methodology_version\"=>METHOD_VERSION)   # [G7] v1 metadata keeps its frozen key set\njson_write(joinpath(OUTDIR,\"run_metadata.json\"),meta)"
+  },
+  {
+   "old": "\"w_R\"=>W_REHEAT,\n        \"pre_reheating\"=>\"Fuzzy (2.10)+(2.15); printed (2.16) normalisation not used\"",
+   "new": "\"w_R\"=>(METHOD_VERSION==1 ? W_REHEAT : \"per scenario: see scenarios[].w_R\"),\n        \"pre_reheating\"=>\"Fuzzy (2.10)+(2.15); printed (2.16) normalisation not used\""
+  }
+ ]
+}
