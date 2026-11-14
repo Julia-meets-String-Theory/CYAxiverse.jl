@@ -20,7 +20,14 @@ using OrdinaryDiffEq
 const Poly102RefinementModel = CYAxiverse.axion_benchmarks.poly102_inflation
 const N8_POLY102_REFINEMENT_MODEL = :n8_poly102
 
-"""Build a validated, serializable configuration for one refinement call."""
+"""Build a validated, serializable configuration for one refinement call.
+
+`reltol` and `abstol` are required: omitting either throws an `ArgumentError`
+when the configuration is built (CYAX-0234, Issue #234). The trajectory solver
+has no default tolerances because its former precision-derived defaults were
+below the BigFloat working precision. `refine_inflation_candidate(candidate)`
+without a `config` therefore throws as well.
+"""
 function inflation_refinement_config(; precision_bits::Int=100,
         max_time::Real=1e6, scan_step::Real=5.0, max_step::Real=100.0,
         initial_step::Real=1e-5, sample_count::Int=20,
@@ -45,12 +52,13 @@ function inflation_refinement_config(; precision_bits::Int=100,
     _inflation_validate_measurement_scope(measurement_scope)
     all(isfinite, basis_theta) && length(basis_theta) == 8 ||
         throw(DimensionMismatch("poly-102 refinement requires eight finite basis coordinates"))
-    reltol === nothing || reltol > 0 || throw(ArgumentError("reltol must be positive"))
-    abstol === nothing || abstol > 0 || throw(ArgumentError("abstol must be positive"))
+    Poly102RefinementModel._n8_require_tolerances(reltol, abstol;
+        caller="inflation_refinement_config")
+    reltol > 0 || throw(ArgumentError("reltol must be positive"))
+    abstol > 0 || throw(ArgumentError("abstol must be positive"))
     (; precision_bits, max_time=Float64(max_time), scan_step=Float64(scan_step),
        max_step=Float64(max_step), initial_step=Float64(initial_step),
-       sample_count, reltol=reltol === nothing ? nothing : Float64(reltol),
-       abstol=abstol === nothing ? nothing : Float64(abstol), maxiters,
+       sample_count, reltol=Float64(reltol), abstol=Float64(abstol), maxiters,
        displacement=Float64(displacement),
        displacement_sign=Float64(displacement_sign), basis,
        measurement_scope,
