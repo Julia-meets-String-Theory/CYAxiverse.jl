@@ -954,8 +954,41 @@ left for the owner.
 
 ## G1 evidence (T090–T092)
 
-Code candidate: `90f6f43`. Later commits on the branch change only
-`specs/0232-kinetic-normalization/`. Base: `10aa3dc`.
+**Current code candidate: `a3294ab`.** It adds the G1 follow-ups to `90f6f43`:
+the export, T050, the A5 shard test, the analysis-label tests, the portable F5
+evaluator test, G1-6, Clarification B2 and the `validation/` regeneration.
+Later commits change only `specs/0232-kinetic-normalization/`. Base: `10aa3dc`.
+
+| Check | Run | Result at `a3294ab` |
+|---|---|---|
+| R-002 bitwise | `R002Invariance.yml` run 43557670776 (push) | PASS |
+| Full suite (`CYAXIVERSE_TEST_FULL=1`) | `CI.yml` run 43557674635, attempt 2 | PASS ("CYAxiverse tests passed"); same existing Pipeline 2 real-data skip |
+| Certification (R-010) | same run, attempt 1, *Process-isolated scientific qualification* | PASS |
+| Portable Python tests | same run, attempt 1, *Python tests* (now includes `test_fuzzy_axion_mass_evaluator.py`) | PASS |
+
+Attempt 1 of the full suite failed in `test/path_remediation.jl`
+("Changed notebook initialization runtime smoke"). Its PyCall/Conda child
+precompile reported `Path to conda environment is not valid`. This aborted
+`runtests.jl` before the CYAX-0232 tests. Nothing in `90f6f43..a3294ab`
+touches the notebooks that test launches, PyCall, Conda or `Project.toml`.
+The re-run of that job alone passed, so this is recorded as a CI depot-cache
+failure. Its root cause was not established.
+
+Earlier candidates:
+- `836c988`: the full suite errored in the new analysis-label testset (a bare
+  `Module` has no `include`; fixed in `a3294ab`). That abort also left the
+  testsets after `kinetic_normalization.jl` unrun.
+- `e34ab6e`: its run was cancelled because it carried the same test.
+
+**Owner-local checks (below) ran at `0a22a56`, whose code is `90f6f43`.**
+They have not been re-run at `a3294ab`. Since then:
+- the F5 evaluator moved to `scripts/fuzzy_axion_mass_evaluator.py`; its
+  equivalence test now runs in CI, but the CYTools module's re-export test has
+  not run;
+- the conventions page gained one sentence;
+- the R-005 routes are unchanged.
+
+**Previous candidate `90f6f43`:**
 
 | Check | Command or run | Result at `90f6f43` |
 |---|---|---|
