@@ -1101,7 +1101,13 @@ Recorded, not changed (G2 nits, and the follow-up G2 at `92c4df1`):
   `2.3` rows would pool. Whether those layouts mean something different for the
   fields the notebook reads (`catastrophes/*`, `efolds/*`) is not established.
   The pre-change gates accepted only F6 `2.0`, which the base no longer wrote.
-  Left for the owner.
+  Left for the owner. Resolved after merge (owner decision, option 1,
+  2026-11-14): the notebook pools only F1 `-4`/`-3` and F6 `2.4`/`2.3`; a
+  present group at any other version that R-007 recognizes (F6 `2.2`–`1.0`,
+  unversioned F1) is excluded as `unsupported_f6_schema` /
+  `unsupported_f1_schema`. Unrecognized versions and invalid labels still
+  raise (R-007). Tested in the "notebook schema gate (owner option 1)"
+  testset of `test/kinetic_normalization.jl`.
 - `orientifold_population_preflight.py` re-raises R-007 errors as
   `PopulationPreflightError` (a `RuntimeError`), not `ValueError`. The error
   is not suppressed.

@@ -197,14 +197,24 @@ begin
         rows
     end
 
+    # Owner decision (option 1, 2026-11-14): pool only the current layouts and
+    # their immediate predecessors, read as inferred `legacy_c_half`. Older F6
+    # layouts (2.0–2.2) are unaudited for the fields read below. The values are
+    # spelled out so a writer bump does not widen the gate.
+    const POOLED_F1_SCHEMAS = ("cyaxiverse-physical-spectrum-4",
+        "cyaxiverse-physical-spectrum-3")
+    const POOLED_F6_SCHEMAS = ("cyaxiverse-phase3-orientifold-inflation-2.4",
+        "cyaxiverse-phase3-orientifold-inflation-2.3")
+
     function read_geometry_row(root::AbstractString, h11::Int, tri::Int, cy::Int)
         ENV["CYAXIVERSE_DATA_DIR"] = root
         path = CYAxiverse.filestructure.cyax_file(h11, tri, cy)
         isfile(path) || return (; status="excluded", reason="missing_file", row=nothing)
         # CYAX-0232 R-007: the F1 and F6 label checks run outside the
         # exclusion handler below, so an invalid label raises instead of
-        # excluding the file. Current and inferred legacy outputs are read.
-        # The schema versions are recorded so pooling never mixes layouts.
+        # excluding the file. Only the current layouts and their immediate
+        # predecessors (inferred legacy) are pooled; the schema versions are
+        # recorded so pooling never mixes layouts.
         labels = HDF5.h5open(path, "r") do file
             version(group, name) = haskey(group, name) ?
                 String(HDF5.read(group[name])) : "unversioned"
@@ -216,6 +226,17 @@ begin
                     version(file["spectrum/physical/metadata"], "schema_version") : nothing,
                f6_version = haskey(file, "inflation") ?
                     version(file["inflation"], "schema_version") : nothing)
+        end
+        # Schema gate, after the label reads so label errors still raise. A
+        # present group at any other version (including "unversioned") is an
+        # ordinary exclusion; an absent group falls through to the read below.
+        for (label, schema, supported, reason) in (
+                (labels.f1, labels.f1_version, POOLED_F1_SCHEMAS, "unsupported_f1_schema"),
+                (labels.f6, labels.f6_version, POOLED_F6_SCHEMAS, "unsupported_f6_schema"))
+            if label !== nothing && !(schema in supported)
+                @warn "Excluding a geometry with an unsupported schema version" h11 tri cy path schema
+                return (; status="excluded", reason, row=nothing)
+            end
         end
         try
             spectrum = CYAxiverse.read.physical_spectrum(h11, tri, cy)
