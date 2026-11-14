@@ -188,7 +188,7 @@ follow `clarification-a.md`, approved at `1ada61d` (Issue #232 comment
     search record.
   - Verify: reproduction tests numerically unchanged; label assertions.
 
-- [ ] **T071 (partial: comparison CSV unlabelled, G1-3; committed `validation/` files not regenerated, G1-4) [R-008] Bare-array contracts and persisted reproduction outputs**
+- [ ] **T071 (comparison CSV labelled per Clarification B2; committed `validation/` files await the B4 regeneration) [R-008] Bare-array contracts and persisted reproduction outputs**
   - Output: docstrings for `n5_kinetic_matrix`, `n8_kinetic_matrix`; labels in
     the `.jls` fixture, the A96 JSON and the comparison CSV.
   - Verify: label assertions; physical readers reject reproduction labels.

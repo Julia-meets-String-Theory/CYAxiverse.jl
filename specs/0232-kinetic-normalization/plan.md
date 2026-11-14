@@ -923,10 +923,10 @@ recorded decisions. Each is left as implemented and is not declared complete.
 | G1-6 | Hard-coded normal-form functions (`n5_hilltop_efolds`, `poly102_inflation.n8_hilltop_efolds`, `reference_efolds`) | unlabelled as K-free under A4, although their constants were derived under a kinetic convention | *R-008 search record* |
 | G1-7 | `n8_author_trajectory` default tolerances | see below | this section |
 
-**Owner direction (2026-11-14, given in the working session; the durable
-record is the Clarification B comment on Issue #232):**
+**Owner direction (2026-11-14), approved as Clarification B
+(`clarification-b.md`; Issue #232 comment `6871292308`):**
 - G1-1, G1-2, G1-5: ratified as implemented.
-- G1-3: extend A7 to the comparison CSV with per-field labels (Clarification B).
+- G1-3: extend A7 to the comparison CSV with per-field labels (Clarification B2, implemented).
 - G1-4: regenerate the three `validation/` files on the owner's machine and
   check that only the label changes.
 - G1-6: one docstring line per function naming its source contract (P96/A96);
@@ -976,8 +976,9 @@ not change: their assertions do not depend on K, and the full suite passes.
 found two gaps, both fixed in `90f6f43`: `stored_kinetic_normalization` was
 not exported (spec *Interfaces*), and T050's `base_K = I` case had no test.
 Remaining partial or unmet items, none declared complete:
-- R-008 / T071: the `write_comparison` CSV is unlabelled (G1-3); the
-  committed `validation/` files carry no label (G1-4).
+- R-008 / T071: the committed `validation/` files carry no label until the
+  B4 regeneration (G1-4). The `write_comparison` CSV is labelled per field
+  under Clarification B2 (tested in the T071 testset).
 - R-005: the inflation and F6 rows use the `infl` fixture instead of the
   R-004/R-003 pins (*R-005 row map*). This deviation was made in the plan,
   not by a spec amendment.

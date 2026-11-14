@@ -108,7 +108,10 @@ own contracts and are numerically unchanged:
 
 Reproduction results that are structs or `NamedTuple`s carry their label in
 `kinetic_normalization`; a result that mixes the two contracts carries
-`kinetic_normalization_by_field` instead. Functions that return a bare matrix,
+`kinetic_normalization_by_field` instead. The persisted comparison CSV of
+`scripts/inflation_reproduction.jl` mixes them too: it has one
+`<column>_kinetic_normalization` label column for each value column and no
+row-level label. Functions that return a bare matrix,
 such as `n5_kinetic_matrix` and `n8_kinetic_matrix`, state their contract in
 their docstrings. Reproduction functions that use no kinetic matrix carry no
 label. Physical readers reject reproduction labels.

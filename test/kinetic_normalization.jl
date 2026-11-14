@@ -1943,6 +1943,28 @@ end
             @test stored[:kinetic_normalization] == "a96_reproduction_raw_radian"
             @test stored[:n5].kinetic_normalization === A96
             @test stored[:n8_poly102].kinetic_normalization === A96
+
+            # Clarification B2: the comparison CSV is labelled per field.
+            csv = fixture.write_comparison(joinpath(dir, "inflation_comparison.csv"))
+            lines = readlines(csv)
+            header = split(lines[1], ',')
+            @test !("kinetic_normalization" in header)
+            a96, p96 = "a96_reproduction_raw_radian", "p96_reproduction_c_half"
+            expected = Dict("N5" => (a96, a96, "", a96), "N8_poly102" => (p96, a96, a96, a96))
+            value_columns = ("reduced_model_efolds", "normal_form_efolds",
+                "independent_physical_flow_efolds", "reference_efolds")
+            @test length(lines) == 5
+            for line in lines[2:end]
+                row = Dict(zip(header, split(line, ',')))
+                labels = Tuple(row[c * "_kinetic_normalization"] for c in value_columns)
+                @test labels == expected[row["benchmark"]]
+                # A label is present exactly where a value is present.
+                @test all(isempty(row[c]) == isempty(row[c * "_kinetic_normalization"])
+                    for c in value_columns)
+            end
+            # A physical inflation-CSV reader rejects the file (A7, B2).
+            @test_throws ArgumentError inflation_csv_row_label(
+                String.(header), String.(split(lines[2], ',')); path=csv, row=2)
         end
     end
 
