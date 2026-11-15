@@ -842,3 +842,107 @@ Evidence / durable reference: PR #227; commit `861d9dc`
 
 Superseded by: N/A
 Promotion status: not promoted
+
+## L-0021 — Search audits and approved contracts before calling a question open
+
+ID: L-0021
+Status: candidate
+Date: 2026-11-15
+Type: state/provenance
+Scope / tags: scientific records, open questions, audits, approved contracts, cross-contract comparisons, Issue #148, Issue #235
+
+Observed failure: An Issue and the pull request that fixed it both called a
+factor of about 68 between two reproduction contracts' e-fold values
+unexplained. The pull request stated that no factor between the contracts had
+been tested against it. An earlier metric-boundary audit had already derived
+the scaling of the relevant canonical quantities between those contracts.
+Its recommendation also said not to compare their e-folds at the same numeric
+canonical displacement as though the two represented the same raw starting
+point. The owner later approved one of the contracts in a
+separate contract document. Applying the audit's scaling to the local
+normal-form formula reproduces the factor; the recorded values differ from
+the prediction by about 0.11%. That remainder is not yet explained.
+
+Correction: The analytic explanation was posted on the Issue. It cites the
+audit's scaling table and recommendation and the approved contract, and it
+says the comparison was arithmetic, not a code run. No code or convention
+changed.
+
+Root cause: The existing audit was not brought into the later explanation of
+the discrepancy. The durable record does not show which records the later work
+searched.
+
+Preventive rule / check: Before declaring a scientific discrepancy
+unexplained, or a question unchecked, search the relevant historical audits,
+approved contracts, decision records and specifications for the quantities,
+functions and conventions involved, and follow their supersession references
+(for example `docs/src/*audit*`, `docs/src/*contract*`, `docs/src/*decision*`,
+`specs/*/spec.md`, `specs/*/clarification-*`, `.agents/LESSONS.md`).
+Distinguish a historical recommendation from an approved decision, and an
+analytic explanation from empirical verification. Cite the evidence, or state
+the search boundary.
+
+Applicability / exceptions: Applies to open-question, non-scope and "not
+established" statements in Issues, pull requests and specifications. It
+requires searching the records for the names involved, not reading every
+historical record.
+
+Evidence / durable reference: Issue #235 and its follow-up comment
+`6901111029`; PR #241 (Explicit non-scope);
+`docs/src/issue_148_n8_metric_boundary_audit.md` (status and historical
+disposition; *Observable and acceptance impact*; *Bounded G2 inputs after the
+owner decides*, item 7); `docs/src/issue_148_n8_approved_metric_contract.md`.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0022 — A changed producer call can silently change persisted outputs
+
+ID: L-0022
+Status: candidate
+Date: 2026-11-15
+Type: semantic-drift
+Scope / tags: persisted outputs, validation files, writer call targets, aliases, provenance labels, regeneration
+
+Observed failure: A refactor changed the function that a comparison-file
+writer called for one column. The new name was a newly added compatibility
+alias of a different model under another kinetic contract. On regeneration
+the column's values changed, by a factor of about 68 at one point, while its
+`method` text still named the original quantity. For about three months the
+committed copy kept the old values, and no recorded check compared it with a
+regeneration. A later regeneration check found the drift and referred it to an
+Issue. Under its approved contract that work also labelled the column with the
+values' actual provenance, which was correct for the values present.
+
+Correction: The owner decided to restore the originally intended output. The
+writer now calls the intended function directly, the file was regenerated and
+diffed against the committed copy, and a test checks the committed file's
+values and labels against the live function.
+
+Root cause: The writer's call target changed during a broad refactor, and the
+change to the persisted output went unchecked. No check compared regenerated
+output with the committed copy and its descriptive text when the producer
+changed.
+
+Preventive rule / check: When refactoring a public name, an alias, or a
+persisted-output writer's call target, identify the affected outputs and their
+intended scientific contracts. Regenerate and diff the committed artifacts, and
+check the numerical values, column names, descriptive text and actual
+provenance against independent expectations. Label the actual provenance
+truthfully. Escalate an unexpected change of scientific intent through the
+governing owner-decision process rather than withholding or altering the
+label.
+
+Applicability / exceptions: Applies to `validation/` files, fixtures and other
+committed outputs produced by scripts. Changes with no persisted callers need
+only the usual tests.
+
+Evidence / durable reference: commit `828d2ff`
+(`scripts/inflation_reproduction.jl` call change and
+`src/paper_benchmarks/compatibility.jl` alias); Issue #235; PR #241
+(`write_comparison`, T071 in `test/kinetic_normalization.jl`);
+`specs/0232-kinetic-normalization/clarification-b.md` B2;
+`specs/0232-kinetic-normalization/plan.md`, B4 check.
+
+Superseded by: N/A
+Promotion status: not promoted
