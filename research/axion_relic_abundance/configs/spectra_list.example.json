@@ -1,0 +1,16 @@
+{
+ "schema": "cyaxiverse_relic_spectra/1",
+ "description": "Example list of existing CYAxiverse physical spectra (paths relative to this file or absolute)",
+ "vacuum_policy": {"on_unusable": "refuse"},
+ "spectra": [
+  {"path": "spectra/h11_011/np_0000001/cy_0000001/cyax.h5",
+   "vacuum_validation": {"state": "VERIFY"}},
+  {"path": "corrected/h11_011/np_0000012/cy_0000001/cyax.h5",
+   "geometry_id": "h11_011/np_0000012/cy_0000001",
+   "vacuum_validation": {"state": "DOCUMENTED_EXTERNAL",
+     "method": "leading-branch minimum validated on the full potential at ~500 and ~1000 digits",
+     "reference": "producers/vacuum run of 2026-10-29 (vacuum_repair/03_minima_validation.jsonl)",
+     "evidence": [{"path": "evidence/03_minima_validation.jsonl", "sha256": "<sha256 of that file>"}]},
+   "provenance": {"tranche": "NA"}}
+ ]
+}

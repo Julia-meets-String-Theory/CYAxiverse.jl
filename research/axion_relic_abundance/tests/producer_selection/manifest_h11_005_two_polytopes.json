@@ -1,0 +1,123 @@
+{
+ "polytopes": [
+  {
+   "h11": 5,
+   "vertices": [
+    [
+     -1,
+     -1,
+     -1,
+     -1
+    ],
+    [
+     0,
+     0,
+     1,
+     0
+    ],
+    [
+     1,
+     -1,
+     -1,
+     1
+    ],
+    [
+     0,
+     0,
+     0,
+     1
+    ],
+    [
+     0,
+     1,
+     0,
+     0
+    ],
+    [
+     1,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     -1,
+     0,
+     -1
+    ],
+    [
+     0,
+     -1,
+     0,
+     0
+    ]
+   ],
+   "unified_position": 1,
+   "seed": 777001
+  },
+  {
+   "h11": 5,
+   "vertices": [
+    [
+     0,
+     0,
+     1,
+     0
+    ],
+    [
+     0,
+     1,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     1
+    ],
+    [
+     1,
+     -1,
+     -1,
+     0
+    ],
+    [
+     -1,
+     -1,
+     -1,
+     -1
+    ],
+    [
+     0,
+     -1,
+     -1,
+     0
+    ],
+    [
+     1,
+     -1,
+     -1,
+     -1
+    ],
+    [
+     1,
+     0,
+     0,
+     0
+    ]
+   ],
+   "unified_position": 2,
+   "seed": 777002
+  }
+ ],
+ "base_seed": 777000,
+ "seed_rule": "seed = base_seed + unified_position",
+ "h11_range": [
+  5,
+  5
+ ],
+ "per_h11": 2,
+ "source": "two reflexive favorable h11 = 5 polytopes found by a random search around the P4 simplex (tests only)",
+ "revision": "external-researcher-audit-2026-10-31"
+}

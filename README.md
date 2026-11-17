@@ -218,6 +218,16 @@ claim to reproduce the full paper ensemble. Visible-sector metadata and the
 QED-threshold policy are explicit inputs, not inferred Standard Model
 assignments.
 
+### Relic abundance of the physical axion modes (research contribution)
+
+`research/axion_relic_abundance/` is an optional, self-contained analysis layer; it adds no file to `src/`, `scripts/` or the tests of
+the package. It takes the physical spectra written by `scripts/batch_physical_spectrum.jl` (masses and decay constants of the axion
+modes of each geometry) and computes the misalignment relic abundance for chosen reheating temperatures: per mode, per geometry, and
+the common-initial-angle analysis of which geometries can supply the observed dark matter. It inherits the vmm conventions unchanged
+(including the pair-instanton prescription and the kinetic normalization, whose factor-of-two question is open upstream). Start with
+[`research/axion_relic_abundance/README.md`](research/axion_relic_abundance/README.md); a one-minute example needs no CYTools and no
+Julia 1.12 (it uses Python 3.11 and Julia 1.8.4 for the analysis stages).
+
 ### Optional plotting
 
 Load `CairoMakie` and `ColorSchemes` explicitly when a plot is needed. The

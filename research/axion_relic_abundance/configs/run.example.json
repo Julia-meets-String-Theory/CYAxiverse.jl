@@ -1,0 +1,13 @@
+{
+ "schema": "cyaxiverse_relic_run/1",
+ "description": "Example run file: reheating scenarios (label, T_reh in GeV) and optional theta-analysis overrides. Every other number comes from configs/methodology_v1.json and configs/theta_methodology_v1.json.",
+ "scenarios": [
+  {"label": "1e4GeV", "T_reh_GeV": 1e4},
+  {"label": "1e7GeV", "T_reh_GeV": 1e7}
+ ],
+ "production_run_approved": false,
+ "theta_analysis": {
+  "theta": {"theta_max": 0.5},
+  "optimisation": {"bootstrap_resamples": 1000, "bootstrap_seed": 20261001}
+ }
+}

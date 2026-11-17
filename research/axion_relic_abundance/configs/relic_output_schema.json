@@ -1,0 +1,637 @@
+{
+ "schema": "relic_abundance_production_outputs/1",
+ "null_token": "NA",
+ "bool_tokens": [
+  "true",
+  "false"
+ ],
+ "categories": [
+  "FROZEN",
+  "LATE",
+  "POST_REHEATING",
+  "PRE_REHEATING"
+ ],
+ "abundance_states": [
+  "INCLUDED_POST_REHEATING",
+  "INCLUDED_PRE_REHEATING",
+  "NOT_INCLUDED_FROZEN",
+  "NOT_INCLUDED_LATE",
+  "INFLATIONARY_VALIDITY_EXCLUDED"
+ ],
+ "abundance_branches": [
+  "post_reheating_full_H",
+  "fuzzy_wR0_eq2.10_2.15",
+  "late_full_H_census_only",
+  "frozen_not_oscillating",
+  "not_evaluated_inflation_invalid"
+ ],
+ "tables": {
+  "master_modes_<label>.csv": [
+   {
+    "name": "geometry_id",
+    "type": "string",
+    "unit": null,
+    "null_when": "never",
+    "description": "canonical manifest ID h11_XXX/np_POSITION/cy_0000001"
+   },
+   {
+    "name": "h11",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": "Hodge number"
+   },
+   {
+    "name": "mode_index",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": "spectrum/physical/mode_indices (0-based index in the geometry's ascending eigenmode list)"
+   },
+   {
+    "name": "mode_rank_desc",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": "1 = heaviest stored mode of the geometry"
+   },
+   {
+    "name": "mass_eV",
+    "type": "float",
+    "unit": "eV",
+    "null_when": "never",
+    "description": "10^log10_mass_eV"
+   },
+   {
+    "name": "log10_mass_eV",
+    "type": "float",
+    "unit": "log10 eV",
+    "null_when": "never",
+    "description": "spectrum/physical/m"
+   },
+   {
+    "name": "f_pert_GeV",
+    "type": "float",
+    "unit": "GeV",
+    "null_when": "never",
+    "description": "f_relic = f_pert (C = 1)"
+   },
+   {
+    "name": "log10_f_pert_GeV",
+    "type": "float",
+    "unit": "log10 GeV",
+    "null_when": "never",
+    "description": "spectrum/physical/fpert_log10"
+   },
+   {
+    "name": "theta_ref",
+    "type": "float",
+    "unit": "rad",
+    "null_when": "never",
+    "description": "reference initial angle pi/2"
+   },
+   {
+    "name": "T_reh_GeV",
+    "type": "float",
+    "unit": "GeV",
+    "null_when": "never",
+    "description": "reheating temperature of this scenario"
+   },
+   {
+    "name": "scenario",
+    "type": "enum",
+    "unit": null,
+    "null_when": "never",
+    "description": "5MeV | 1e4GeV | 1e10GeV"
+   },
+   {
+    "name": "category",
+    "type": "enum:FROZEN|LATE|POST_REHEATING|PRE_REHEATING",
+    "unit": null,
+    "null_when": "never",
+    "description": "cosmological-history category (independent of the validity cut)"
+   },
+   {
+    "name": "abundance_state",
+    "type": "enum:INCLUDED_POST_REHEATING|INCLUDED_PRE_REHEATING|NOT_INCLUDED_FROZEN|NOT_INCLUDED_LATE|INFLATIONARY_VALIDITY_EXCLUDED",
+    "unit": null,
+    "null_when": "never",
+    "description": "what was done with the mode"
+   },
+   {
+    "name": "abundance_branch",
+    "type": "enum:post_reheating_full_H|fuzzy_wR0_eq2.10_2.15|late_full_H_census_only|frozen_not_oscillating|not_evaluated_inflation_invalid",
+    "unit": null,
+    "null_when": "never",
+    "description": "which equation evaluated it"
+   },
+   {
+    "name": "T_osc_GeV",
+    "type": "float",
+    "unit": "GeV",
+    "null_when": "category not in {LATE, POST_REHEATING} or not inflation_valid",
+    "description": "root of 3 Hfull(T_osc) = m_a"
+   },
+   {
+    "name": "z_osc",
+    "type": "float",
+    "unit": null,
+    "null_when": "category == FROZEN or not inflation_valid",
+    "description": "redshift of onset: post/late from a(T_osc); pre-reheating from (2.15)"
+   },
+   {
+    "name": "H_osc_GeV",
+    "type": "float",
+    "unit": "GeV",
+    "null_when": "category == FROZEN or not inflation_valid",
+    "description": "m_a/3"
+   },
+   {
+    "name": "threeH_over_m_minus_one",
+    "type": "float",
+    "unit": null,
+    "null_when": "category not in {LATE, POST_REHEATING} or not inflation_valid",
+    "description": "root residual"
+   },
+   {
+    "name": "Omega_h2_at_theta_ref",
+    "type": "float",
+    "unit": null,
+    "null_when": "not included_in_cdm_sum",
+    "description": "abundance at theta_i = pi/2 (only for modes included in the CDM sum)"
+   },
+   {
+    "name": "included_in_cdm_sum",
+    "type": "bool",
+    "unit": null,
+    "null_when": "never",
+    "description": "true iff abundance_state starts with INCLUDED_"
+   },
+   {
+    "name": "Omega_h2_late_census_only_at_theta_ref",
+    "type": "float",
+    "unit": null,
+    "null_when": "category != LATE or not inflation_valid",
+    "description": "formula value for LATE modes; NOT part of any CDM sum"
+   },
+   {
+    "name": "inflation_valid",
+    "type": "bool",
+    "unit": null,
+    "null_when": "never",
+    "description": "m_a <= 3 H_I,max"
+   },
+   {
+    "name": "inflation_exclusion_reason",
+    "type": "string",
+    "unit": null,
+    "null_when": "inflation_valid",
+    "description": "m_a>3H_I_max(Fuzzy_fn16;1.4e14_GeV)"
+   },
+   {
+    "name": "mass_over_3HImax",
+    "type": "float",
+    "unit": null,
+    "null_when": "never",
+    "description": "m_a / (3 H_I,max)"
+   },
+   {
+    "name": "m_KK_GeV",
+    "type": "float",
+    "unit": "GeV",
+    "null_when": "never",
+    "description": "2.4e18 GeV / V^(2/3) (diagnostic only)"
+   },
+   {
+    "name": "above_mKK",
+    "type": "bool",
+    "unit": null,
+    "null_when": "never",
+    "description": "m_a > m_KK (flag only, never an exclusion)"
+   },
+   {
+    "name": "mass_over_mKK",
+    "type": "float",
+    "unit": null,
+    "null_when": "never",
+    "description": "m_a / m_KK"
+   },
+   {
+    "name": "above_fpert",
+    "type": "bool",
+    "unit": null,
+    "null_when": "never",
+    "description": "m_a > f_pert (flag only, never an exclusion)"
+   },
+   {
+    "name": "mass_over_fpert",
+    "type": "float",
+    "unit": null,
+    "null_when": "never",
+    "description": "m_a / f_pert"
+   },
+   {
+    "name": "vacuum_status",
+    "type": "enum:ORIGINAL_SPECTRUM|VACUUM_CORRECTED|SYNTHETIC_BENCHMARK",
+    "unit": null,
+    "null_when": "never",
+    "description": "ORIGINAL_SPECTRUM or VACUUM_CORRECTED (SYNTHETIC_BENCHMARK only in benchmarks)"
+   }
+  ],
+  "geometry_summary_<label>.csv": [
+   {
+    "name": "geometry_id",
+    "type": "string",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "h11",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "vacuum_status",
+    "type": "enum:ORIGINAL_SPECTRUM|VACUUM_CORRECTED|SYNTHETIC_BENCHMARK",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "scenario",
+    "type": "enum",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "T_reh_GeV",
+    "type": "float",
+    "unit": "GeV",
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "theta_ref",
+    "type": "float",
+    "unit": "rad",
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "number_of_modes",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": "physical modes above the population threshold H0 (0 for a validated spectrum without such mode)"
+   },
+   {
+    "name": "number_frozen",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "number_late",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "number_post_reheating",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "number_pre_reheating",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": "all PRE_REHEATING modes, including inflation-excluded ones"
+   },
+   {
+    "name": "number_pre_reheating_valid",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "number_inflation_excluded",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "number_included",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": "modes in the CDM sum"
+   },
+   {
+    "name": "Omega_geometry_h2_at_theta_ref",
+    "type": "float",
+    "unit": null,
+    "null_when": "number_included == 0 and number_inflation_excluded > 0",
+    "description": "sum of Omega_h2_at_theta_ref over included modes (theta = pi/2). 0 for an evaluated empty CDM set (no mode excluded, none included: EVALUATED_ZERO). NA when no mode is included and at least one mode is not evaluated (inflation cut). For a PARTIAL_VALIDITY geometry (omega_total_excludes_invalid_modes = true) it is only the partial sum over the valid modes, not the complete abundance: use geometry_abundance_validity_<label>.csv"
+   },
+   {
+    "name": "Omega_post_reheating_h2_at_theta_ref",
+    "type": "float",
+    "unit": null,
+    "null_when": "no included POST_REHEATING mode",
+    "description": "sum over included modes of this class; NA means the class has no included mode in this geometry (an empty class, not missing data)"
+   },
+   {
+    "name": "Omega_pre_reheating_h2_at_theta_ref",
+    "type": "float",
+    "unit": null,
+    "null_when": "no included PRE_REHEATING mode",
+    "description": "sum over included modes of this class; NA means the class has no included mode in this geometry (an empty class, not missing data)"
+   },
+   {
+    "name": "omega_total_excludes_invalid_modes",
+    "type": "bool",
+    "unit": null,
+    "null_when": "never",
+    "description": "true if the geometry has inflation-excluded modes (its total is over the valid modes only)"
+   },
+   {
+    "name": "dominant_mode_index",
+    "type": "int",
+    "unit": null,
+    "null_when": "number_included == 0",
+    "description": "mode_index of the largest included contribution"
+   },
+   {
+    "name": "dominant_fraction",
+    "type": "float",
+    "unit": null,
+    "null_when": "number_included == 0",
+    "description": ""
+   },
+   {
+    "name": "Omega_late_census_only_h2_at_theta_ref",
+    "type": "float",
+    "unit": null,
+    "null_when": "number_late == 0",
+    "description": "NOT part of the CDM sum"
+   },
+   {
+    "name": "number_above_mKK",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "number_above_fpert",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "number_included_above_mKK",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "number_included_above_fpert",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "Omega_included_above_mKK_h2_at_theta_ref",
+    "type": "float",
+    "unit": null,
+    "null_when": "number_included_above_mKK == 0",
+    "description": "robustness diagnostic"
+   },
+   {
+    "name": "Omega_included_above_fpert_h2_at_theta_ref",
+    "type": "float",
+    "unit": null,
+    "null_when": "number_included_above_fpert == 0",
+    "description": "robustness diagnostic"
+   },
+   {
+    "name": "cy_volume",
+    "type": "float",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "m_KK_GeV",
+    "type": "float",
+    "unit": "GeV",
+    "null_when": "never",
+    "description": ""
+   }
+  ],
+  "h11_summary_<label>.csv": [
+   {
+    "name": "h11",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "scenario",
+    "type": "enum",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "geometries",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "modes",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "n_FROZEN",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "n_LATE",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "n_POST_REHEATING",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "n_PRE_REHEATING",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "n_inflation_excluded",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "n_included",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "geometries_with_included",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "p16_log10_Omega_geometry_h2_at_theta_ref",
+    "type": "float",
+    "unit": null,
+    "null_when": "geometries_with_included == 0",
+    "description": "p16 over geometries with included modes (theta_ref normalisation) (over geometries with Omega_geometry > 0; geometries - geometries_with_included have Omega_geometry = 0)"
+   },
+   {
+    "name": "median_log10_Omega_geometry_h2_at_theta_ref",
+    "type": "float",
+    "unit": null,
+    "null_when": "geometries_with_included == 0",
+    "description": "median over geometries with included modes (theta_ref normalisation) (over geometries with Omega_geometry > 0; geometries - geometries_with_included have Omega_geometry = 0)"
+   },
+   {
+    "name": "p84_log10_Omega_geometry_h2_at_theta_ref",
+    "type": "float",
+    "unit": null,
+    "null_when": "geometries_with_included == 0",
+    "description": "p84 over geometries with included modes (theta_ref normalisation) (over geometries with Omega_geometry > 0; geometries - geometries_with_included have Omega_geometry = 0)"
+   }
+  ],
+  "geometry_abundance_validity_<label>.csv": [
+   {
+    "name": "geometry_id",
+    "type": "string",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "h11",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "scenario",
+    "type": "enum",
+    "unit": null,
+    "null_when": "never",
+    "description": ""
+   },
+   {
+    "name": "number_of_modes",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": "physical modes above H0"
+   },
+   {
+    "name": "number_included",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": "modes in the CDM sum"
+   },
+   {
+    "name": "number_inflation_excluded",
+    "type": "int",
+    "unit": null,
+    "null_when": "never",
+    "description": "modes above 3 H_I,max (abundance not evaluated)"
+   },
+   {
+    "name": "abundance_validity",
+    "type": "enum:EVALUATED_POSITIVE|EVALUATED_ZERO|PARTIAL_VALIDITY|INFLATION_INVALID_ALL",
+    "unit": null,
+    "null_when": "never",
+    "description": "EVALUATED_POSITIVE: no mode excluded, >= 1 included; EVALUATED_ZERO: no mode excluded, none included (complete abundance 0); PARTIAL_VALIDITY: some but not all modes excluded; INFLATION_INVALID_ALL: every mode excluded"
+   },
+   {
+    "name": "reason",
+    "type": "enum:NO_MODES_ABOVE_THRESHOLD|ALL_MODES_FROZEN_OR_LATE|SOME_MODES_INFLATION_EXCLUDED|ALL_MODES_INFLATION_EXCLUDED",
+    "unit": null,
+    "null_when": "abundance_validity == EVALUATED_POSITIVE",
+    "description": "NO_MODES_ABOVE_THRESHOLD: validated spectrum without mode above H0 (lighter axions are outside the population, not absent)"
+   },
+   {
+    "name": "Omega_complete_h2_at_theta_ref",
+    "type": "float",
+    "unit": null,
+    "null_when": "abundance_validity not in {EVALUATED_POSITIVE, EVALUATED_ZERO}",
+    "description": "complete geometry abundance (0 for EVALUATED_ZERO)"
+   },
+   {
+    "name": "Omega_valid_modes_partial_h2_at_theta_ref",
+    "type": "float",
+    "unit": null,
+    "null_when": "abundance_validity != PARTIAL_VALIDITY",
+    "description": "partial sum over the valid included modes (>= 0); not the complete abundance"
+   },
+   {
+    "name": "theta_population",
+    "type": "enum:PRIMARY|SENSITIVITY_ONLY|EXCLUDED_NOT_EVALUATED",
+    "unit": null,
+    "null_when": "never",
+    "description": "PRIMARY: EVALUATED_POSITIVE and EVALUATED_ZERO; SENSITIVITY_ONLY: PARTIAL_VALIDITY (only in the labelled sensitivity population); EXCLUDED_NOT_EVALUATED: INFLATION_INVALID_ALL"
+   }
+  ]
+ },
+ "invariants": [
+  "included_in_cdm_sum == (abundance_state in INCLUDED_*) == (Omega_h2_at_theta_ref is not NA)",
+  "abundance_state == INFLATIONARY_VALIDITY_EXCLUDED  <=>  not inflation_valid  (and category is recorded unchanged)",
+  "category FROZEN => abundance_state NOT_INCLUDED_FROZEN; LATE => NOT_INCLUDED_LATE",
+  "Omega_h2_at_theta_ref > 0 and finite whenever not NA",
+  "PRE_REHEATING => T_osc_GeV is NA (never invented)",
+  "per geometry: counts sum to number_of_modes; Omega_geometry_h2_at_theta_ref == sum of master Omega_h2_at_theta_ref",
+  "global: sum over geometries reproduces the census; every scenario has 16313 rows in production",
+  "every usable geometry of the A1 canonical geometry table has one row in geometry_summary_<label>.csv and geometry_abundance_validity_<label>.csv; Omega_geometry > 0 iff number_included > 0; = 0 iff nothing included and nothing excluded (EVALUATED_ZERO); NA iff nothing included and >= 1 mode excluded"
+ ],
+ "revision": "2026-10-30/31: every validated geometry kept; abundance validity classes EVALUATED_POSITIVE / EVALUATED_ZERO / PARTIAL_VALIDITY / INFLATION_INVALID_ALL in geometry_abundance_validity_<label>.csv; Omega_geometry = 0 for an evaluated empty CDM set, NA when no mode is included and a mode was not evaluated (inflation cut)"
+}
