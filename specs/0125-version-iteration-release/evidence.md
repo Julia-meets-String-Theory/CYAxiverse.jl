@@ -1,9 +1,10 @@
 # CYAX-0125 Gate A candidate evidence
 
-This record belongs to a provisional premerge Gate A worktree candidate. It
-does not designate a historical release, adopt a DEV version, close an
-iteration, publish a release, or establish live GitHub protection. The
-integrated implementation source candidate addressed here is commit
+The historical premerge record below belongs to a provisional Gate A
+worktree candidate. It did not designate a historical release, adopt a DEV
+version, close an iteration, publish a release, or establish live GitHub
+protection. The current closure-repair attempt is recorded at the end of this
+file. The integrated implementation source candidate addressed below is commit
 `b324f04aff37758541b63bf5fd7928d169c862f7` (tree
 `82ed1100bdb2d22dd2ddee83dbfe79c3af7cc2fb`). Its exact N1 normative subject
 is commit `251467a6b12f44bca7c9540ec3fd0cdf18ffe8e2` (tree
@@ -507,6 +508,645 @@ scientific normalization and benchmark code are outside this approved
 lifecycle change, `Project.toml` remains `0.2.0`, and no production release
 state changed. Remote CI and fresh exact-candidate SPEC/STANDARDS reviews are
 observed on `cea78c0`; the evidence-only convergence successor requires final
-exact-state confirmation. Live protection/event-authority setup, an explicit owner
-merge decision, and fresh post-settings review remain later work; Gate B stays
-separate.
+exact-state confirmation. At that historical point, live
+protection/event-authority setup, an explicit owner merge decision, and fresh
+post-settings review remained later work; Gate B stayed separate.
+
+## Gate A closure-repair attempt 002 (current, pending exact-state review)
+
+The owner-dispatched revision 3 closure-repair handoff has SHA-256
+`80397047bdf102da79d94a8bcf42ad12f1bf151c92f6047ac8f1e8db10090d13`.
+Control Desk readiness v2 has SHA-256
+`fc8b5e392b999d3cc94469ba3e18fe7ed7a90f86da22edc1b20044dbfe22ba2a`.
+Manager P0 passed against `vmm`
+`74fea608684eae746f25ae45b18512f89b862fb0`, `main`
+`ff85a36b6f5d2efb9c841dbd073c86a5c609778c`, open Issue #125, all nine
+then-existing live ruleset definitions, the bound governing/source blobs, and
+the current canonical private Control Desk policy. Direct canonical-source
+policy validation was used; no fallback attestation was used. The package
+version remained `0.2.0`.
+
+After P0, the Manager created the exact reviewed candidate-ref ruleset pair
+for `refs/heads/candidates/**/*`. Active ruleset `23967983` has no bypass
+actors and guards update, deletion, and non-fast-forward operations. Active
+ruleset `23967991` guards creation with the sole `RepositoryRole` actor `5`
+`always` bypass. Both were reread after creation. The pre-existing nine
+rulesets remained definition-identical, and the `vmm`/`main` freeze rulesets
+remained disabled. The full eleven-ruleset snapshot has SHA-256
+`ee838f2f460500f96baff179bce35ee92a24c75595bc1cd4f00bea06319ad66c`.
+
+The authenticated, read-only GitHub rules-for-branch endpoint returned both
+candidate rulesets and all four expected rule types for each of two
+nonexistent synthetic candidate branch names, one nested and one single
+segment. It returned no rules for a nearby out-of-namespace branch name.
+The two positive response bodies each have SHA-256
+`7e2ab8bb25f15dae4e49df907c8c3f1fd5f713c96ed4716097648a05fe7e710f`;
+the negative response body has SHA-256
+`4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945`.
+Provider request IDs, response times, ETags, exact bodies, and the full
+ruleset definitions are held in the Manager-execution evidence for this
+attempt. This observes live rule applicability to synthetic branch inputs;
+it does not claim an observed rejected production push. No candidate branch
+was created.
+
+The bounded implementation and fail-closed corrections end at commit
+`d34630ab867a9a1b0f469f30db698a6d45e3b527` (tree
+`9ac1c8411e1c2388c0352519a60be7902ac3669e`). They add an authenticated
+GitHub ruleset/detail adapter, exact candidate-pair verification before a
+candidate creation path, live rule evaluation, and guarded `vmm`/`main`
+freeze acquisition and release. Real network requests are pinned to
+`https://api.github.com`. The transaction coordinator requires the concrete
+adapter for production protection and freeze evidence. The existing
+CLI remains read-only; this attempt did not run a production transaction or
+toggle a freeze control.
+
+Manager verification on Python 3.14.6 passed the five required focused test
+files (91 tests) and the complete `test_version_lifecycle_*.py` discovery
+(155 tests). `python3 scripts/agent_verify.py diff-check`, `git diff --check`,
+and `python3 scripts/check_version_bump.py --base
+74fea608684eae746f25ae45b18512f89b862fb0 --head HEAD` passed.
+The `src`, `test`, `Project.toml`, `Manifest.toml`, and `bin/audit.jl` paths
+match the rebound `vmm` base. Python-free `using CYAxiverse` passed with
+`PYTHON` and `PYTHONHOME` set to unavailable paths, using an offline temporary
+Julia QA project and a writable temporary depot; the governed source tree
+received no Julia dependency or manifest files. Julia version was 1.12.6.
+
+The exact combined source/settings/evidence review identity and remote CI
+result are recorded in the Manager handback when available. This attempt
+does not authorize merge, Gate A completion, Gate B, a version change, or
+any production lifecycle transaction.
+
+## r15 bounded source candidate (2026-10-30; local and pending independent review)
+
+This exact candidate starts from commit
+`653528ee25ffb2bf0b98c788570e9420484e954c` (tree
+`956a480feeb50f578c7bbbbfbbaf4b60389733f8`). It changes only these six
+paths: `scripts/version_lifecycle/github_protection.py`,
+`scripts/version_lifecycle/transactions.py`,
+`scripts/test_version_lifecycle_github_protection.py`,
+`scripts/test_version_lifecycle_transactions.py`, this evidence file, and the
+new `.github/workflows/cyax-lifecycle-dispatch.yml`.
+
+The workflow handles only a push to `rehearsal/trigger/*` that changes
+`lifecycle-requests/**`. It has one `lifecycle` job, a job-level user/App
+sender guard, a first-attempt-only guard, and the `lifecycle` environment from
+job start. Workflow permissions are empty; the job token has `contents: read`
+for the exact event-commit fetch. There are no external actions or called
+workflows. After environment approval, inline standard-library Ruby creates a
+short-lived installation token and checks its repository, permissions, and
+expiry before passing it only to the Python adapter. The request must be one
+canonical JSON file added by a one-parent commit on a new trigger branch whose
+name matches the request ID. The request binds its parent implementation,
+workflow blob, expected `vmm` SHA, and every Python source blob under
+`scripts/version_lifecycle`.
+
+The request-fence path checks the exact current `vmm` head, absence of the
+request file and request ref, and a full ruleset/effective-rules observation
+before writing. It creates a request ref whose commit has the observed `vmm`
+commit as its sole parent and adds only the validated request file; it never
+moves or creates `vmm`. A successful ref write is read back. Unknown object or
+ref writes are recorded as unreconciled in the adapter and cannot be retried
+through that instance. The workflow also rejects job reruns and trigger-branch
+updates, so each request ID uses one owner-created trigger branch.
+
+The principal-ref CAS is limited to `rehearsal/principal/*`. It scans every
+commit and every merge parent in the proposed range with rename detection off;
+any workflow path change routes to Owner review. Before a push, it checks the
+exact old head, effective rules, the target tree, and the authorization gates.
+The push uses an exact-old lease and a token isolated to its Git child process.
+It reads the result back and verifies effective rules again. An unknown push
+outcome fences later attempts in the adapter. No source path writes `main` or
+`vmm` through this CAS path.
+
+Freeze writes are attempted once and followed by one full-snapshot readback.
+Uncertain writes remain `UNKNOWN`/unreconciled, retain safe provider evidence,
+and block further freeze writes. Closure and release now disable the freeze
+before releasing the allocation exclusion. An uncertain activation blocks
+before lifecycle writes; any failed unfreeze keeps the existing exclusion
+held for Owner reconciliation.
+
+Verification commands and results:
+
+| Command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts.test_version_lifecycle_github_protection scripts.test_version_lifecycle_transactions` | Passed, 66 tests, exit 0. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed, 171 tests, exit 0. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 scripts/agent_verify.py diff-check` | Passed, no whitespace errors, exit 0. |
+| `git diff --check 653528ee25ffb2bf0b98c788570e9420484e954c HEAD` | Passed, exit 0. |
+| `python3 scripts/check_version_bump.py --base 653528ee25ffb2bf0b98c788570e9420484e954c --head HEAD` | Passed; no package version bump is required, exit 0. |
+| Ruby/Psych workflow parse and one-job/three-step/no-action structure check; `bash -n` on the fetch step; `ruby -c` on the inline script; Python `compile()` on the four changed Python source/test files | Passed. |
+| `JULIA_PKG_OFFLINE=true PYTHON=/nonexistent PYTHONHOME=/nonexistent julia --compiled-modules=no --project=. -e 'using CYAxiverse; println("Python-free CYAxiverse import passed")'` | Not verified; exit 1 because the local Julia depot does not contain `AbstractTrees`. No package install or network fetch was performed. |
+
+The Julia import limitation is unrelated to the changed lifecycle Python and
+workflow paths.
+
+All tests use local fixtures or mocks. No provider settings, credentials,
+trigger pushes, rulesets, refs, releases, merges, or production transactions
+were changed or proved by this source work. Owner setup and live evidence
+4a–4g/P1–P6, independent workflow security review, source SPEC/STANDARDS
+reviews, and final exact-state review remain pending. This candidate does not
+claim Gate A completion, Gate B, version adoption, or merge authorization.
+
+## r15 same-primary corrective successor (local-only; 2026-10-30)
+
+The following bounded corrections preserve the six-path scope and the earlier
+candidate and review history. The eight original findings remain open until
+fresh independent successor review and Manager reconciliation:
+
+| Correction | Original finding IDs | Source correction |
+| --- | --- | --- |
+| C01 | `CYAX125-SPEC-1e8ef2b8-F01`, `CYAX125-STD-1e8ef2b8-F02`, `SEC-06-01` | Validate the complete canonical effective rehearsal rules against the exact full ruleset definitions and ID/type linkage. Require active intended coverage with no exclusions, creation-only Admin/App bypass, separate bypass-free immutability, and the active principal freeze policy before a rehearsal principal move. Re-read and compare that evidence at the request-ref and CAS authorization boundaries. |
+| C02 | `SEC-05-01` | Give every local Git validation subprocess an allowlisted environment with no tokens or inherited Git configuration, disabled system/global config, empty credential helper, disabled hooks, and noninteractive prompt controls. Keep the remote CAS token only in its explicit isolated push configuration. |
+| C03 | `SEC-06-02` | Treat any unavailable request-ref readback as unknown, retain the unresolved request fence, and block retries. Return rejection only after positive absent-ref readback; return used-ID only after positive occupied-ref readback. |
+| C04 | `CYAX125-SPEC-1e8ef2b8-F02` | Atomically mark each freeze ref write in flight before provider access, reject overlapping or stale repeated/opposite writes, re-read the exact current ruleset before the mutation, and retain the lease/fence on unknown outcomes. |
+| C05 | `CYAX125-STD-1e8ef2b8-F01` | Keep the allocation exclusion on active, unknown, or unreconciled closure failures, including unexpected exceptions after anchor creation. Release it only after verified freeze disablement. |
+| C06 | `CYAX125-STD-1e8ef2b8-F03` | Carry accepted activation/readback evidence through moved-head, branch-read, and version-read failures before lease return. Closure and release results report the observed active state independently of a lease token and do not progress or compensate. |
+
+The exact local source checkout began at reviewed commit
+`1e8ef2b874f6f44a519eaf7dc7539b92a9381f4a` with a clean worktree. Only the
+six commissioned paths changed. The full test and source identity records,
+raw command outputs, correction-to-finding map, full workflow and 15-module
+closure, six-path diff, and protected-source equality record are retained in
+the private bundle identified as `CYAX125-R4-SOURCE-CORRECTION-3DC42926`
+(manifest SHA-256:
+`1c170dcd811f442620ffb953da0d22fa91c0d6dd37742f9ba84281a9502e339e`).
+
+Final offline verification on the corrected executable and test blobs:
+
+| Command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts.test_version_lifecycle_github_protection scripts.test_version_lifecycle_transactions` | Passed, 73 tests, exit 0. Raw output and tested path identities are in `focused-regressions.final.raw.log` and `focused-regressions.final.json` in the custody directory. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed, 178 tests, exit 0. Raw output and exact workflow, test, and all 15 module identities are in `full-lifecycle-discovery.raw.log` and `full-lifecycle-discovery.json` in the custody directory. |
+| `git diff --check 653528ee25ffb2bf0b98c788570e9420484e954c`; Ruby/Psych workflow structure; `bash -n` fetch script; `ruby -c` inline script; and Python compile checks | Passed, exit 0. Per-command output is retained in `static-checks.raw.log` and `static-checks.json`. |
+
+The correction tests use local Git fixtures and fake GitHub transports. No
+provider request, credential access, settings change, trigger, protected ref
+write, dependency installation, push, or publication was performed. The
+previous Python-free Julia import limitation remains unchanged: the local
+depot lacked `AbstractTrees`; no install or retry was made. These corrections
+do not transfer the original REQUEST_CHANGES verdicts to PASS and do not
+claim source acceptance, Gate A completion, Owner live-proof completion, or
+permission for rehearsal or lifecycle operations.
+
+## r15 post-review same-primary successor correction (local-only; 2026-10-30)
+
+This successor addresses the two findings recorded against candidate
+`3dc4292674c9591f15af31ca064e396ff30205dd`. The original eight finding
+records, review results, and dispositions remain preserved in predecessor
+history. This appendix does not transfer any prior review result to the new
+successor.
+
+The earlier statement that all eight findings remained open records the state
+before the independent review of candidate `3dc42926`. Its exact predecessor
+dispositions are: SPEC `F01` closed for the exact successor source; SPEC `F02`
+closed for the original repeated-write failure mode only; STANDARDS `F01`–`F03`
+resolved in the exact successor; and SECURITY `SEC-05-01`, `SEC-06-01`, and
+`SEC-06-02` closed by static source and adversarial test review. These results
+remain bound to `3dc42926`. The broader live-proof gap is the separate blocking
+P1 below, and the SPEC REQUEST_CHANGES disposition remains operative.
+
+| Finding | Severity | Correction |
+| --- | --- | --- |
+| `CYAX125-SPEC-3dc42926-F03` | Blocking P1 | Track a per-ref freeze-write generation. Live lease proof now fails while a write is pending or unresolved, captures the generation before its provider observation, and rechecks the generation and fences before returning true. A terminal write that starts and completes during the observation also invalidates the proof. The lease and write evidence remain available for reconciliation. |
+| `CYAX125-STD-3dc42926-F01` | Nonblocking P3 | Replace the absolute private custody locator above with the logical custody ID and digest of its private manifest. The private ledger and custody originals remain unchanged. |
+
+The affected transaction test path was also updated because closure consumes
+this proof before exclusion acquisition or lifecycle mutations. Its regression
+holds a disable write in flight after freeze acquisition and verifies closure
+blocks before serialization, anchor creation, manifest writes, or reopen. No
+transaction implementation change was needed.
+
+Verification on the corrected code and test source:
+
+| Command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts.test_version_lifecycle_github_protection scripts.test_version_lifecycle_transactions` | Passed, 76 tests, exit 0. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed, 181 tests, exit 0. |
+
+The focused fixtures cover a blocked disable with active readback, an unknown
+disable with active readback and a retained unresolved fence, a successful
+disable completed between the captured snapshot and final proof check, and a
+closure consumer that stops before downstream mutation. The uncontended live
+lease test still passes, and the existing stale and moved-lease checks remain
+in the suite. New run metadata, raw outputs, source identities, complete
+workflow and 15-module closure, protected-source comparison, and predecessor
+review references are in the private custody bundle identified as
+`CYAX125-R4-P1-CORRECTION-20261030`.
+
+This local source work made no provider request, credential access, settings
+change, ref write, rehearsal, dependency installation, network access, push,
+or publication. The P1 finding remains open until the exact successor receives
+an independent SPEC recheck and SECURITY impact review. The prior SPEC
+REQUEST_CHANGES disposition remains operative; prior SECURITY and STANDARDS
+results remain bound to their original candidate. No Gate A/B, publication,
+merge, release, or lifecycle-operation approval is claimed.
+
+## Provider review-parameter compatibility correction (local-only; 2026-11-01)
+
+The exact principal review parameter object returned for rehearsal ruleset
+`26314227` matches the captured production principal review object for ruleset
+`23947993`. Its complete nine-field value is now pinned in
+`_REHEARSAL_PR_REVIEW_PARAMETERS`:
+
+| Parameter | Exact value |
+| --- | --- |
+| `required_approving_review_count` | `0` |
+| `dismiss_stale_reviews_on_push` | `false` |
+| `required_reviewers` | `[]` |
+| `require_code_owner_review` | `false` |
+| `dismissal_restriction` | `{"enabled": false, "allowed_actors": []}` |
+| `require_last_push_approval` | `false` |
+| `required_review_thread_resolution` | `false` |
+| `require_extra_approval_for_unattributed_changes` | `true` |
+| `allowed_merge_methods` | `["merge", "squash", "rebase"]` |
+
+The initial correction required dictionary equality against the complete
+provider parameter mapping and did not discard or normalize extra fields. A
+follow-up review found that Python dictionary equality treats JSON booleans as
+equal to integers of value zero or one; the type-sensitive correction below
+closes that gap.
+Coverage, actor, effective-rule ID linkage, immutable controls, freeze
+controls, write fences, and lifecycle gates remain unchanged. The captured
+compatibility packet is identified by logical custody ID
+`CYAX125-PROVIDER-COMPATIBILITY-20261101` and SHA-256
+`2bed2ed34da5e1403ea50aa41b871ed64279d432c78691ac1362a545a9348eaa`.
+Its pinned read-only provider evidence identities are rehearsal response
+SHA-256 `a6b047df2c29dd672dfb42ec640abbffd857dab79874d82dfb7b013cb82634a7`
+and production response SHA-256
+`430d9051487af9a00aeda6f4ad7d5b48c2a0d2a541584982d57711836dcd94f5`.
+
+Verification on the corrected implementation and test source:
+
+| Command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts.test_version_lifecycle_github_protection` | Passed, 38 tests, exit 0. |
+
+The positive fixture verifies the full nine-field object together with the
+intended principal roles, exact effective-rule IDs, actors, coverage, and
+freeze controls. The initial negative cases changed ordinary values, omitted
+a field, or added an unknown field. They did not cover boolean/integer type
+aliases. Earlier 76- and 181-test runs are predecessor evidence only and are
+not presented as results for this successor. This
+evidence appendix was written after the test run; the lifecycle test module
+does not load it. Exact source identities, raw command output, workflow and
+15-module closure, the protected-source comparison, predecessor records, and
+the test chronology are retained under private logical custody ID
+`CYAX125-PROVIDER-COMPATIBILITY-20261101`.
+
+No live provider request, setup POST, credential access, ruleset mutation,
+ref/trigger/rehearsal operation, network access, dependency installation,
+push, or publication was performed. The earlier Python-free Julia import
+limitation remains unchanged because the local depot lacks `AbstractTrees`;
+no install or retry was made. The compatibility correction does not close
+the pending independent SPEC, STANDARDS, or SECURITY reviews and grants no
+rehearsal, publication, merge, release, or lifecycle-operation approval.
+
+## Type-sensitive provider-parameter correction (local-only; 2026-11-01)
+
+The affected SPEC and STANDARDS reviews of local candidate
+`29f017285f2071a5741b9cec7553d57f85c76755` each returned REQUEST_CHANGES with
+one blocking P2 finding. SPEC finding `CYAX125-SPEC-29f01728-F01` is bound to
+report SHA-256
+`c1bb8397295965fd77c6ed1577748ae408e98198f78fec2dc1180134ca9b7621`;
+STANDARDS finding `CYAX125-STD-29f01728-F01` is bound to report SHA-256
+`4c12aa2657227360698c39fa7d53ff366b99558e62ab39d89e13d3eedfca36f3`.
+The retained independent probes showed that `false`/`0` and `true`/`1`
+aliases in top-level and nested review parameters passed Python dictionary
+equality, produced live-policy evidence, and reached an intercepted push in
+the fixture CAS path. The probes used fake transport and temporary Git
+history; no provider, network, or remote-ref write occurred.
+
+The complete canonical rule arrays are now compared as canonical JSON bytes.
+This preserves the exact nine-field object, nested JSON types, array order,
+unknown-field rejection, actor requirements, coverage, and effective-rule
+linkage. It makes no provider policy change and applies no coercion or field
+filtering.
+
+The focused offline test module passed with exit 0: 38 tests in 6.021 seconds.
+Its positive full-CAS fixture verifies the exact pinned nine-field object and
+its JSON types through a successful simulated write/readback. The negative
+full-CAS fixture includes 18 cases: nine ordinary field mutations, missing
+and unknown fields, and seven boolean/integer aliases, including approval
+count `0` to `false` and nested dismissal `enabled: false` to `0`. Every
+negative case asserts zero API writes and zero intercepted Git pushes. The
+push interception returns locally and cannot contact a remote. Exact raw
+output, test-time source identities, corrective diff, review reports, and
+probe records are preserved under logical custody ID
+`CYAX125-PROVIDER-COMPATIBILITY-TYPE-STRICT-20261101`.
+
+No provider request, credentials, settings change, setup POST, ref/trigger,
+rehearsal, cleanup, publication, or network action was used. The correction
+is a local descendant of the reviewed candidate and changes only the same
+three authorized paths. Independent SPEC, STANDARDS, and SECURITY rechecks
+remain required. No approval for rehearsal, publication, merge, release, or
+lifecycle operation is claimed.
+
+## CYAX125 owner-approval runtime commission (local-only; 2026-11-02)
+
+This local implementation follows the Owner-adopted approval-predicate
+supersession and corrected R2 contract recorded for the 2026-11-01 runtime
+commission. It changes only the six commissioned paths: the fixed rehearsal
+runtime and its tests, the GitHub protection adapter and its tests, the
+dispatch workflow, and this evidence file. The runtime pins the request,
+driver-return, operation-table, approval-marker, and status-vector contracts.
+It validates the public repository, exact run attempt, Owner approval marker,
+environment, job, and current workflow step through eight anonymous direct-TLS
+reads. The retained receipt explicitly reports the approval time as
+`UNKNOWN_NOT_DOCUMENTED`; admin-bypass evidence remains an Owner procedural
+attestation and is not provider-verified. The first immutable case claim
+retains the receipt-bound response paths, headers, statuses, body bytes, and
+digests; later case claims do not repeat that envelope.
+
+The workflow reaches a deliberate pre-mint stop with
+`OWNER_SEED_RECEIPTS_UNAVAILABLE_BEFORE_APP_MINT`. The adopted request carries
+only the seed-receipt digest and provides no parseable Owner receipt artifact
+or schema. No App key was read, no App token was minted, and no lifecycle
+provider operation was attempted. This local source and its synthetic tests
+do not establish live approval, provider protection, a completed rehearsal,
+P5 evidence, Gate A, publication, merge, release, or lifecycle authorization.
+
+Offline qualification on this source snapshot:
+
+| Command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed, 203 tests, exit 0. |
+| Ruby YAML parse of `.github/workflows/cyax-lifecycle-dispatch.yml` | Passed. |
+| `ruby -c` on the workflow's embedded runtime | `Syntax OK`. |
+| Python AST parse of the four changed Python source/test files | Passed. |
+| `git diff --check` | Passed. |
+
+The tests use synthetic responses and fake transports. They cover the adopted
+status-aware vectors, strict request and receipt binding, raw-response
+tampering, one-time evidence retention, route ordering, fail-closed unknown
+writes, fixed API targets, and schema-1 compatibility. They made no live
+provider requests and performed no credential access, network operation,
+remote write, ref creation, cleanup, publication, or release. The source
+remains unreviewed pending the commissioned independent SPEC, STANDARDS, and
+SECURITY rechecks; this evidence does not self-accept the candidate.
+
+## Consolidated runtime finding repair (Phase A, local-only; 2026-11-02)
+
+This Phase A source correction is a normal descendant of base commit
+`babce8d724cf4acabf70902f41532f3f55d1734e` (tree
+`fa581c935cc15dbe71c830c4f3e91b569e050358`). The implementation and targeted
+regressions are commit `d9f344c36a55ad5f42ed1d3ffa8a0adb3e7f0035` (tree
+`fec5448ab365b31e77d4013cede36e92c3362e34`). Its parent is the commissioned
+base, and its author and committer use the configured GitHub noreply identity.
+The five implementation/test/workflow paths and this evidence file are the
+commissioned six paths. The preceding 203-test statement and schema-1
+compatibility description record the base candidate; they are not results for
+this correction.
+
+The correction closes the nine unchanged-interface groups commissioned for
+Phase A. The workflow has no schema-1 credential-bearing fallback and stops
+route-validation failures before App mint. The raw embedded operation-table
+artifact remains pinned at SHA-256
+`ab5b034f58bfc5aaac34bb2e8cd48555782d85c0d4b59ce6b086cafdbcdc810e`; route
+plans bind the canonical operation-table JSON at SHA-256
+`860fe00b0cad0cd884c22b6f0b55f4d9f16a68b5496e13943254ce12e5251150`.
+Approval validation permits only the known runner `Set up job` and
+`Complete job` bookends around the exact authored step sequence. The eight
+nonsecret approval responses now move between workflow processes in a closed,
+canonical envelope and are revalidated against the receipt, manifests, run,
+request, and job bindings.
+
+The driver now calls the same installed request-fence dispatch boundary for
+the duplicate case and records observed dispatch, API-mutation, and Git-push
+counters. Case results retain a retrievable canonical evidence preimage with
+raw response bytes, readbacks, operation identity, and freeze/rules proof; the
+reader rechecks its digest. Unknown post-reads remain unresolved and block the
+case. The principal move continues to use Git's exact-old
+`--force-with-lease` compare-and-swap with a fixed sanitized environment.
+Contents API Base64 decoding removes documented wrapping whitespace, then
+requires strict decoding and encode/decode identity.
+
+The explicit stop `OWNER_SEED_RECEIPTS_UNAVAILABLE_BEFORE_APP_MINT` remains in
+place. No positive seed-receipt path, live P5 observer, workflow-capability
+fallback, or tag-proof route was invented. Those design-dependent C01/C08
+items remain open. The implementation has not been independently accepted;
+the commissioned SPEC, SECURITY, and STANDARDS rechecks remain required.
+
+Targeted offline verification on implementation commit `d9f344c`:
+
+| Check | Observed result |
+| --- | --- |
+| Thirteen selected regression tests spanning canonical/raw pins, runner bookends, approval-envelope round-trip and tampering, wrapped fenced-request contents, durable evidence retrieval/rehash, fixed driver order, unknown post-read, duplicate dispatch/effect counters, workflow guards, Base64 wrapping, the existing CAS gates, and an actual local bare-repository lease race | Passed: 13 tests, exit 0 (0.897 seconds). |
+| Ruby YAML parse of the dispatch workflow | Passed: `YAML syntax OK`. |
+| Ruby syntax check of the extracted workflow runtime | Passed: `Syntax OK`. |
+| Python AST parse of the two runtime modules and two test modules | Passed. |
+| `git diff --check` | Passed. |
+
+All provider behavior in the selected Python regressions uses synthetic
+responses. The CAS race uses only a temporary local bare Git repository; its
+interleaving advances the remote ref immediately before the real local Git
+push and confirms the exact-old lease rejects it without moving the ref to the
+intended SHA. No GitHub request, credential access, App key read, token mint,
+provider write, seed operation, ref creation, push to an external remote,
+publication, merge, or release occurred. The full lifecycle test suite and
+independent reviews were not rerun for this Phase A correction. This evidence
+does not self-accept the candidate or authorize later phases.
+
+## R2 receipt, P5 observer, and tag evidence implementation (Phase B, local-only; 2026-11-02)
+
+This Phase B candidate is limited to the same six commissioned paths: the
+dispatch workflow, the rehearsal and GitHub protection runtimes, their two
+test modules, and this evidence file. The pinned R2 contracts add request
+schema 3, a closed three-role seed receipt bundle, Owner claim and action
+journal schemas, a nullable seed failure receipt, and the closed 4d capability
+evidence schema. The runtime validates the raw contract hashes before use.
+The design-vector checker reported that the closed journal, claim, bundle,
+failure, and 4d contracts match the nine persisted seed vectors; this is a
+design-contract check, not provider qualification.
+
+The pre-mint workflow step now validates the bundle before it enables the
+token-mint step. The credential-bearing step repeats that validation before
+reading the private key, minting a token, or making any lifecycle write.
+Validation binds the request and plan digests, role order,
+three fixed refs and target commit/tree, journal response digests and byte
+limits, Owner identity projection, create/readback projections, exact
+Owner-comment claim, current anonymous ref reads, and the fixed target commit
+tree. Request JSON is capped at 12 MiB and each historical journal at 4 MiB;
+the adapter permits up to 17 MiB only for the matching fenced-request Contents
+API read so Base64 encoding can fit. Other API responses keep the 1 MiB cap.
+This evidence format does not make Owner-authored historical journal bytes a
+provider signature. No real receipt was supplied or replayed in this local
+work.
+
+The P5 observer now reads the retained 4a terminal result and evidence, checks
+their request, plan, approval, CAS, ref, old/new SHA, tree, lineage, and effect
+count bindings, then confirms the exact current principal ref. It makes one
+read-only Actions run-list request for a matching push event. That optional
+event record is corroboration only: absence or unreadability does not prove
+that a trigger guard was exercised. The observer reports the fixed zero
+effect deltas and proceeds to the duplicate-fence case only when the prior 4a
+receipt and current ref checks pass.
+
+The pinned driver-return contract (`be01d6aba199b67ae44f793c26d8e5ca12de3a88623c9fd837f75f78de7a6f45`)
+and 33 status-aware vectors (`d70a6e65c13fce245d3bd60a806502cbe2c83c76926cec8dcd359d8406f529f8`)
+remain unchanged. The accepted `good-readonly-observer` vector still permits
+`observed_off_ref_event: null` when its fence state is `VERIFIED_MATCH`; the
+live P5 observer uses `fence_state: UNKNOWN` and records a boolean for the
+optional event. A passing live P5 result still requires exact integer zero
+effect counters, not booleans or nulls. The hash-bound evidence preimage uses
+empty strings, lists, or objects for unavailable read details because the
+runtime canonical encoder rejects nulls. This does not alter the pinned
+driver-return null schema or the fail-closed unresolved result behavior.
+
+Tag checks now read every paginated current and inherited ruleset definition
+and each definition detail from fixed ruleset endpoints. They derive matching
+tag rules from the exact known include/exclude patterns, active state, rule
+types, and bypass actors. Evidence is labeled
+`DERIVED_FROM_FULL_CURRENT_DEFINITIONS_NOT_PROVIDER_EFFECTIVE_TAG_EVALUATION`;
+it does not claim an effective `/rules/tags/{tag}` provider evaluation.
+
+The 4d evidence consumer checks the pinned closed object schema, fixed case
+and target, bounded response bytes and digests, a known-absent readback, and
+the nested pure classifier input and zero-effect counts. It is not wired to a
+raw provider denial parser. R2 supplies no qualified Workflows-specific
+provider response discriminator, and retained evidence contains no redacted
+real Workflows fixture. Therefore unqualified 403/422 denials, authentication
+errors, and network outcomes on these 4d create cases remain
+`BLOCKED_NOT_VERIFIABLE`; an observed unexpected ref change is also blocked.
+Synthetic closed-object tests show only schema and nesting behavior. They do
+not qualify a real provider parser or claim a live 4d pass.
+
+The implementation has not run a workflow or contacted a provider. It has not
+read a key, minted a token, created or moved a ref, posted a comment, changed
+settings, published, merged, or released. Offline qualification and independent
+SPEC, STANDARDS, and SECURITY reviews for the combined Phase B candidate are
+recorded below after completion; this evidence does not self-accept the
+candidate or authorize a later live phase.
+
+Final offline verification on the corrected Phase B source:
+
+| Check | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 220 tests, exit 0 (25.178 seconds). |
+| Ruby YAML parse of `.github/workflows/cyax-lifecycle-dispatch.yml` | Passed: `YAML syntax OK`. |
+| Ruby syntax check of the embedded runtime | Passed: `Embedded Ruby syntax OK`. |
+| Python compile checks for the four changed Python files and the workflow pre-mint block | Passed. |
+| `git diff --check` | Passed. |
+
+Two earlier full-suite runs exposed integration defects and were not accepted as
+qualification: the first failed with 33 failures and 5 errors, and the second
+failed with 3 failures and 1 error. The final 220-test pass above is on the
+corrected candidate. All automated provider behavior used synthetic responses
+or local fixtures. No actual provider request, credential access, key read,
+token mint, ref/comment/settings mutation, workflow run, publication, merge,
+or release occurred. The candidate remains pending the independent SPEC,
+STANDARDS, and SECURITY reviews.
+
+## Final same-primary runtime correction (local-only; 2026-11-02)
+
+This correction is bound to the exact six-path commission based on
+`f2cea7636f7b0f3b156e2ddba2dbc0e89873c278`. It addresses the commissioned
+runtime boundaries as follows:
+
+| Group | Finding IDs | Correction and limit |
+| --- | --- | --- |
+| R01 | `CYAX125-RUNTIME-F2CEA763-SPEC-F10`, `CYAX125-STD-f2cea763-F03`, `CYAX125-RUNTIME-BABCE8D7-SPEC-F05` | P5 hashes retrieved evidence with the same nullable route canonical encoding used by its producer. Ref states become explicit JSON objects. Regressions carry actual duplicate evidence through result serialization, append, retrieval, and digest verification. |
+| R02 | `CYAX125-RUNTIME-BABCE8D7-SPEC-F08` | Each final freeze proof is checked against the fixed case's expected ref and object state before PASS or advancement. Contradictory or unknown state blocks advancement and retains the unresolved marker. |
+| R03 | `CYAX125-STD-f2cea763-F01`, `CYAX125-STD-f2cea763-F02` | Exact-old Git CAS accepts only an unambiguous porcelain fast-forward update to the intended ref and SHA. An up-to-date no-op is rejected. Post-write state becomes unknown before readback, and an unresolved write blocks retry. |
+| R04 | `CYAX125-STD-f2cea763-F04` | Two fresh seed validations retain bounded raw GET observations and their canonical bindings through the workflow handoff and first durable claim. Failure evidence retains the raw observation preimage before key use. |
+| R05 | `CYAX125-STD-f2cea763-F05` | Iteration creation requires the exact Admin and App bypass actors; immutability remains bypass-free, and canonical ruleset creation remains Admin-only. No provider setting was changed. |
+| R06 | `CYAX125-STD-f2cea763-F06` | Admitted Contents reads above 1 MiB use fixed object metadata and raw media requests with bounded bodies, no redirects, and exact path, ref, Git blob SHA, size, and byte-hash checks. |
+| R07 | `CYAX125-RUNTIME-BABCE8D7-SPEC-F01`, `SEC-F2C-01-4D` | Remains `BLOCKED_NOT_VERIFIABLE`. No qualified real Workflows-denial discriminator or redacted provider fixture was supplied. Generic denials, authentication failures, network failures, unknown readbacks, and changed state do not pass. No full-route positive acceptance is claimed. |
+
+The correction preserves the original 19 finding identities:
+SPEC `CYAX125-RUNTIME-BABCE8D7-SPEC-F01` through `-F09`, STANDARDS
+`CYAX125-STD-babce8d7-F01` through `-F07`, and SECURITY `SEC-BABCE-F01`
+through `-F03`. The affected f2cea successor findings are the IDs in the
+table above. No unrelated 19th or 20th candidate dispositions are transferred.
+The retained f2cea report set and correction commission remain the source of
+the exact finding text and authority.
+
+Offline verification on the corrected source:
+
+| Check | Result |
+| --- | --- |
+| Selected boundary regressions | Passed: 12 tests, exit 0 (0.413 seconds). |
+| Full lifecycle suite after fixture correction | Passed: 222 tests, exit 0 (22.140 seconds); a later retained rerun also passed 222 tests (26.111 seconds). |
+| Earlier combined suite attempt | Failed with one error in the wrapped fenced-request fixture, which lacked the exact Contents response metadata. The fixture was corrected; this run and earlier focused failures remain in private custody. |
+| Ruby YAML parse and embedded Ruby syntax check | Passed. |
+| Python AST checks for both runtime modules and both test modules | Passed. |
+| `git diff --check` | Passed. |
+
+Private custody package `cyax125-f2cea-correction-custody-20261102` retains
+the review inputs and reports, source snapshots, 16-module closure, protected
+source manifest, and passing and failing raw run logs. Its artifact manifest
+SHA-256 is
+`d9d6e844232c73db81f2b4410bc72c366203691bffbe2994f7795f5ead0bf32a`.
+The original protected-source manifest SHA-256 is
+`db794ca4baba0dfb78e088370d6d3ed4d6b40d96e072078c5b6f001f80da7e61` and
+binds 638 entries; all remain unchanged in the frozen correction.
+
+All test provider behavior used synthetic responses or local Git fixtures.
+No provider request, credential or key read, token mint, external ref or
+comment mutation, settings change, workflow run, publication, merge, or
+release occurred. The candidate is not self-accepted. Original affected SPEC,
+STANDARDS, and SECURITY acceptance remains pending, and this evidence does
+not claim R07, full runtime readiness, or Gate A completion.
+
+## Same-primary seed boundary follow-on (local-only; 2026-11-02)
+
+This follow-on uses the existing six-path authority and has base commit
+`2dc97d327332e2c77caf4ec65c3f6529df38c5e1` (tree
+`2bf0661c167ed001bfae2f4d2dc48c6908968248`). It addresses only the two
+newly identified seed-evidence boundaries; the prior finding history and
+source fixes remain recorded above.
+
+`rehydrate_seed_receipt_evidence` now validates a closed observation shape,
+strict integer HTTP 200 status, canonical UTC timestamps, allowlisted string
+headers, exact ordered paths, bounded body sizes, and body digests. It then
+replays all seven stored responses through the same pure producer validator
+with an in-memory transport. This rechecks the Owner comment, Issue 125 URL,
+claim, current ref, target commit, and tree projections without another
+request. The evidence and pair schema versions require strict integers.
+Rehashed failed responses and mismatched authority or target fields cannot
+rehydrate as `PASS_ACCEPTED` or cross request-fence admission.
+
+Both embedded pre-key failure writers convert observation tuples to JSON
+lists before serialization. The second-validation failure artifact keeps the
+first raw evidence bytes, second-read observations, and the receipt digest.
+The exact extracted preflight child was exercised in a separate process for
+second-read 503, 404, changed Issue 126 response, transport exception, and a
+malformed first envelope. The first four retain one synthetic GET observation
+and a digest that matches the receipt; the malformed first envelope retains
+its raw bytes and stops before the second read. Each case writes a canonical
+mode-0600 failure file before the private-key step.
+
+The commissioned findings remain the subject of independent review:
+`CYAX125-RUNTIME-2DC97D32-SPEC-F11`, `CYAX125-STD-2dc97d32-F01`,
+`CYAX125-STD-2dc97d32-F02`, and `SEC-2DC-R07-4D`. This correction does not
+self-close findings or change the prior R01–R06 implementation. R07 remains
+`BLOCKED_NOT_VERIFIABLE`; no real provider denial fixture, parser, full-route
+positive, or Gate A result is claimed.
+
+Offline verification after the source and test changes:
+
+| Check | Result |
+| --- | --- |
+| Targeted producer, rehydration, pair/admission, failure, and workflow regressions | Passed: 5 tests, exit 0 (1.076 seconds). |
+| Full lifecycle suite | Passed: 224 tests, exit 0 (27.964 seconds). |
+| Ruby YAML parse and extracted embedded Ruby syntax check | Passed. |
+| Python AST checks for the changed runtime and test module | Passed. |
+| `git diff --check` | Passed. |
+| Exact generated-cache cleanup | Rechecked all 13 inventory hashes, byte lengths, and Python magic values; removed only those files and their empty `__pycache__` directory. The inventory is retained. Generator attribution remains unknown. |
+
+Private custody package `cyax125-2dc97d32-correction-custody-20261102`
+contains the current commission and review reports, prior correction custody,
+protected-source manifest, source and test snapshots, all 16 lifecycle
+modules, all 11 combined-discovery test modules, and every passing and failed
+raw run log. Its artifact manifest SHA-256 is
+`2f0064ce823eb19d2790a709fd66263d1b3d7597723ce73a1265904371441df7`.
+The protected-source manifest SHA-256 remains
+`db794ca4baba0dfb78e088370d6d3ed4d6b40d96e072078c5b6f001f80da7e61` and
+binds 638 entries; they remain unchanged in the frozen successor. The 16
+module closure and 11 test-module identities are bound to the final source
+tree in the frozen identity record.
+
+All error-path requests used local fake transports. No provider request,
+credential or key read, token mint, external ref or comment mutation,
+settings change, workflow run, publication, merge, or release occurred.
+Original review acceptance remains the Root's responsibility after freeze;
+this evidence makes no acceptance or full-route claim.

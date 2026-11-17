@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import unittest
 from hashlib import sha256
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -25,6 +27,7 @@ from version_lifecycle.manifests import (  # noqa: E402
 from version_lifecycle.publication_evidence import (  # noqa: E402
     publication_evidence_for_tag,
 )
+from version_lifecycle.github_protection import GitHubProtectionAdapter  # noqa: E402
 from version_lifecycle.transactions import (  # noqa: E402
     AllocationView,
     BootstrapIntent,
@@ -35,6 +38,11 @@ from version_lifecycle.transactions import (  # noqa: E402
     run_rare_recovery,
     run_release,
 )
+from test_version_lifecycle_github_protection import (  # noqa: E402
+    FakeGitHub,
+    rule,
+    ruleset,
+)
 
 
 SHA_A = "a" * 40
@@ -43,7 +51,7 @@ TREE = "c" * 40
 SNAPSHOT = "0" * 64
 LIFECYCLE_SNAPSHOT = "1" * 64
 OWNER = "owner-principal"
-REPOSITORY = "fixture-repository"
+REPOSITORY = "fixture-owner/fixture-repository"
 RESERVATION_REF = (
     "refs/heads/lifecycle/v1/reservations/principal/v0.3.0-DEV/"
     + "LIF-SHA256-" + "e" * 64
@@ -55,6 +63,31 @@ CONSUMED_RESERVATION_REF = (
 CLAIM_REF = "refs/heads/lifecycle/v1/claims/v0.3.0"
 ANCHOR_REF = "refs/tags/iterations/0.3.0"
 RELEASE_TARGET = "refs/heads/lifecycle/v1/releases/v0.3.0"
+
+
+def transaction_github() -> FakeGitHub:
+    fake = FakeGitHub()
+    fake.branch_shas = {"vmm": SHA_B, "main": SHA_B}
+    fake.rows.extend([
+        ruleset(
+            23948086,
+            "CYAx canonical release tags immutable",
+            target="tag",
+            include=["refs/tags/v*.*.*"],
+            exclude=["refs/tags/v-0.1"],
+            rules=[rule("update"), rule("deletion"), rule("non_fast_forward")],
+        ),
+        ruleset(
+            23948090,
+            "CYAx canonical release tag creation",
+            target="tag",
+            include=["refs/tags/v*.*.*"],
+            exclude=["refs/tags/v-0.1"],
+            rules=[rule("creation")],
+            actors=[{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
+        ),
+    ])
+    return fake
 
 
 def make_authorization(
@@ -140,18 +173,32 @@ class PrincipalClosureFixture:
         self.now_utc = "2026-09-20T12:34:56Z"
         self.authorization = IssuingAuthority("tx-closure")
         self.owner_authorization_authority = self.authorization
+        self.github_api = transaction_github()
+        self.github_protection_adapter = GitHubProtectionAdapter(
+            REPOSITORY,
+            token="fixture-token",
+            transport=self.github_api,
+            clock=lambda: datetime(2026, 9, 24, 15, 0, tzinfo=timezone.utc),
+            authorization_gate=self._freeze_gate,
+        )
+
+    def _freeze_gate(self, intent, action, ref):
+        if action == "activate":
+            self.calls.append("freeze")
+            return self.fail != "freeze"
+        self.calls.append("unfreeze")
+        mode = getattr(self, "freeze_write_on_deactivate", None)
+        if mode:
+            self.github_api.freeze_write_mode = (
+                mode if isinstance(mode, str) else "response-lost-after"
+            )
+        return True
 
     def owner_authorization_ref_for(self, action, target_ref, final_version):
         return self.authorization.issue(action, target_ref, final_version)
 
     def authorization_now_utc(self):
         return self.now_utc
-
-    def freeze_line(self, intent):
-        self.calls.append("freeze")
-        if self.fail == "freeze":
-            return None
-        return "line-freeze"
 
     def acquire_static_mutation(self, intent):
         self.calls.append("serialize")
@@ -218,10 +265,6 @@ class PrincipalClosureFixture:
             raise RuntimeError("correspondence unavailable")
         return {"verified": True}
 
-    def unfreeze_line(self, token):
-        self.calls.append("unfreeze")
-
-
 class NoExclusionClosureFixture(PrincipalClosureFixture):
     def __getattribute__(self, name):
         if name in {"acquire_static_mutation", "acquire_allocation_exclusion"}:
@@ -250,6 +293,30 @@ class PrincipalReleaseFixture:
         self.persisted_publication_evidence_payload = None
         self.authorization = IssuingAuthority("tx-release")
         self.owner_authorization_authority = self.authorization
+        self.github_api = transaction_github()
+        if fail == "candidate-protection":
+            self.github_api.rows[:] = [
+                row for row in self.github_api.rows if row["id"] != 23967991
+            ]
+        self.github_protection_adapter = GitHubProtectionAdapter(
+            REPOSITORY,
+            token="fixture-token",
+            transport=self.github_api,
+            clock=lambda: datetime(2026, 9, 24, 15, 0, tzinfo=timezone.utc),
+            authorization_gate=self._freeze_gate,
+        )
+
+    def _freeze_gate(self, intent, action, ref):
+        if action == "activate":
+            self.calls.append("freeze-main")
+            return self.fail != "freeze"
+        self.calls.append("unfreeze-main")
+        mode = getattr(self, "freeze_write_on_deactivate", None)
+        if mode:
+            self.github_api.freeze_write_mode = (
+                mode if isinstance(mode, str) else "response-lost-after"
+            )
+        return True
 
     def owner_authorization_ref_for(self, action, target_ref, final_version):
         return self.authorization.issue(action, target_ref, final_version)
@@ -288,6 +355,14 @@ class PrincipalReleaseFixture:
                 "durable": True, "main_at_candidate_sha": SHA_B,
                 "main_at_candidate_version": "0.2.0"}
 
+    def make_durable_candidate_protected(self, intent, protection):
+        self.calls.append("candidate-protection")
+        if not self.github_protection_adapter.is_live_protection_evidence(
+            protection, ref=intent.candidate_ref, repository=intent.repository
+        ):
+            return None
+        return self.create_candidate(intent)
+
     def create_manifest(self, manifest_type, payload):
         self.calls.append(f"manifest:{manifest_type}")
         self.manifest_types.append(manifest_type)
@@ -305,10 +380,6 @@ class PrincipalReleaseFixture:
                 "subject_tree": candidate["tree"], "policy_revision": "policy",
                 "harness_revision": "harness", "environment": "fixture",
                 "evidence_refs": ["evidence/candidate.json"]}
-
-    def freeze_main(self, intent):
-        self.calls.append("freeze-main")
-        return {"token": "main-freeze", "sha": SHA_B, "version": "0.2.0"}
 
     def verify_principal_interval(self, intent, candidate, freeze):
         self.calls.append("interval")
@@ -334,14 +405,6 @@ class PrincipalReleaseFixture:
                 "subject_tree": final["tree"], "policy_revision": "policy-final",
                 "harness_revision": "harness-final", "environment": "fixture-final",
                 "evidence_refs": ["evidence/final.json"]}
-
-    class Protection:
-        def require_public_tag(self, ref):
-            return None
-
-    def verify_public_tag_ruleset(self, intent, ref):
-        self.calls.append("tag-ruleset")
-        return self.Protection()
 
     def create_tag(self, intent, prepared, final):
         self.calls.append("tag")
@@ -407,17 +470,16 @@ class PrincipalReleaseFixture:
             raise RuntimeError("documentation dispatch unavailable")
         if self.fail == "documentation-dispatch-mismatch":
             return {"status": "requested", "publication_ref": "refs/heads/wrong"}
+        if getattr(self, "freeze_write_after_documentation", False):
+            self.github_api.freeze_write_mode = "response-lost-after"
         return {"status": "requested", "publication_ref": publication_ref}
 
-    def unfreeze_main(self, token):
-        self.calls.append("unfreeze-main")
-
-
 class NoTagProtectionReleaseFixture(PrincipalReleaseFixture):
-    def __getattribute__(self, name):
-        if name == "verify_public_tag_ruleset":
-            raise AttributeError(name)
-        return super().__getattribute__(name)
+    def __init__(self):
+        super().__init__()
+        self.github_api.rows[:] = [
+            row for row in self.github_api.rows if row["id"] not in {23948086, 23948090}
+        ]
 
 
 class MissingClosureProofFixture(PrincipalClosureFixture):
@@ -484,7 +546,7 @@ class TransactionTests(unittest.TestCase):
                          ["reservation-consumed", "reservation-prepared", "reservation-opened", "version-claimed"])
         self.assertLess(port.calls.index("manifest:reservation-consumed"), port.calls.index("manifest:reservation-prepared"))
         self.assertLess(port.calls.index("manifest:reservation-prepared"), port.calls.index("reopen"))
-        self.assertEqual(port.calls[-2:], ["release-exclusion", "unfreeze"])
+        self.assertEqual(port.calls[-2:], ["unfreeze", "release-exclusion"])
         snapshots = [
             (
                 manifest["static_iteration_snapshot"],
@@ -501,6 +563,241 @@ class TransactionTests(unittest.TestCase):
                 ("3" * 64, "4" * 64),
             ],
         )
+
+    def test_uncertain_freeze_activation_blocks_before_ref_mutation(self):
+        closure = PrincipalClosureFixture()
+        closure.github_api.freeze_write_mode = "response-lost-after"
+        result = run_closure(closure, self.closure_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen, result.freeze_state),
+            ("BLOCKED", "FREEZE_WRITE_UNKNOWN", False, "unknown"),
+        )
+        self.assertEqual(result.evidence["freeze_write_reconciliation"]["observed_enforcement"], "active")
+        self.assertNotIn("serialize", closure.calls)
+        self.assertEqual(closure.manifest_types, [])
+
+        release = PrincipalReleaseFixture()
+        release.github_api.freeze_write_mode = "response-lost-after"
+        result = run_release(release, self.release_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.freeze_state),
+            ("BLOCKED", "FREEZE_WRITE_UNKNOWN", "unknown"),
+        )
+        self.assertEqual(result.evidence["freeze_write_reconciliation"]["observed_enforcement"], "active")
+        self.assertNotIn("promote", release.calls)
+        self.assertNotIn("release-exclusion", release.calls)
+
+    def test_pending_live_freeze_proof_blocks_closure_before_downstream_mutation(self):
+        closure = PrincipalClosureFixture()
+        adapter = closure.github_protection_adapter
+        ref = "refs/heads/vmm"
+        disabled_put_started = threading.Event()
+        resume_disabled_put = threading.Event()
+        write_results: list[object] = []
+
+        class DelayedDisableTransport:
+            def __call__(self, method, path, payload=None):
+                if (
+                    method == "PUT"
+                    and "/rulesets/" in path
+                    and payload.get("enforcement") == "disabled"
+                ):
+                    disabled_put_started.set()
+                    if not resume_disabled_put.wait(5):
+                        raise RuntimeError("timed out waiting to release fake disable")
+                return closure.github_api(method, path, payload)
+
+        adapter._transport = DelayedDisableTransport()
+        original_freeze_line = adapter.freeze_line
+        write_thread = None
+
+        def acquire_then_start_disable(intent):
+            lease = original_freeze_line(intent)
+            ruleset = adapter._freeze_ruleset(ref, adapter.read_snapshot())
+
+            def disable_while_proof_is_pending():
+                try:
+                    write_results.append(
+                        adapter._set_enforcement(ref, ruleset, "disabled")
+                    )
+                except Exception as error:
+                    write_results.append(error)
+
+            nonlocal write_thread
+            write_thread = threading.Thread(target=disable_while_proof_is_pending)
+            write_thread.start()
+            if not disabled_put_started.wait(5):
+                resume_disabled_put.set()
+                write_thread.join(5)
+                raise RuntimeError("fake disable did not reach its blocked PUT")
+            return lease
+
+        adapter.freeze_line = acquire_then_start_disable
+        try:
+            result = run_closure(closure, self.closure_intent)
+            self.assertEqual(
+                (result.status, result.reason_code, result.frozen, result.freeze_state),
+                ("BLOCKED", "LINE_FREEZE_UNAVAILABLE", True, "active"),
+            )
+            self.assertEqual(
+                next(row for row in closure.github_api.rows if row["id"] == 23948123)[
+                    "enforcement"
+                ],
+                "active",
+            )
+            self.assertNotIn("serialize", closure.calls)
+            self.assertNotIn("create-anchor", closure.calls)
+            self.assertNotIn("reopen", closure.calls)
+            self.assertEqual(closure.manifest_types, [])
+            self.assertNotIn("release-exclusion", closure.calls)
+        finally:
+            resume_disabled_put.set()
+            if write_thread is not None:
+                write_thread.join(5)
+
+        self.assertIsNotNone(write_thread)
+        self.assertFalse(write_thread.is_alive())
+        self.assertEqual(len(write_results), 1)
+        self.assertIsInstance(write_results[0], tuple)
+
+    def test_post_activation_identity_failures_keep_active_state_for_closure_and_release(self):
+        scenarios = ("moved_head", "branch_read_failure", "version_read_failure")
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario):
+                closure = PrincipalClosureFixture()
+                if scenario == "moved_head":
+                    closure.github_api.branch_shas["vmm"] = SHA_A
+                    closure.github_api.change_vmm_after_write = True
+                    expected_reason = "FREEZE_TARGET_MOVED"
+                    expected_stage = "branch_identity"
+                elif scenario == "branch_read_failure":
+                    closure.github_api.fail_branch_read_at = {"vmm": {2}}
+                    expected_reason = "GITHUB_API_REQUEST_FAILED"
+                    expected_stage = "branch_read"
+                else:
+                    closure.github_api.fail_project_version = True
+                    expected_reason = "GITHUB_API_REQUEST_FAILED"
+                    expected_stage = "version_read"
+                closure_result = run_closure(closure, self.closure_intent)
+                self.assertEqual(
+                    (closure_result.status, closure_result.reason_code,
+                     closure_result.frozen, closure_result.freeze_state),
+                    ("BLOCKED", expected_reason, True, "active"),
+                )
+                closure_evidence = closure_result.evidence[
+                    "freeze_activation_reconciliation"
+                ]
+                self.assertEqual(closure_evidence["freeze_state"], "active")
+                self.assertEqual(closure_evidence["observed_enforcement"], "active")
+                self.assertEqual(
+                    closure_evidence["post_activation_failure_stage"], expected_stage
+                )
+                self.assertNotIn("serialize", closure.calls)
+                self.assertNotIn("create-anchor", closure.calls)
+                self.assertNotIn("unfreeze", closure.calls)
+
+                release = PrincipalReleaseFixture()
+                if scenario == "moved_head":
+                    release.github_api.branch_shas["main"] = SHA_A
+                    release.github_api.change_main_after_write = True
+                elif scenario == "branch_read_failure":
+                    release.github_api.fail_branch_read_at = {"main": {2}}
+                else:
+                    release.github_api.fail_project_version = True
+                release_result = run_release(release, self.release_intent)
+                self.assertEqual(
+                    (release_result.status, release_result.reason_code,
+                     release_result.frozen, release_result.freeze_state),
+                    ("BLOCKED", expected_reason, True, "active"),
+                )
+                release_evidence = release_result.evidence[
+                    "freeze_activation_reconciliation"
+                ]
+                self.assertEqual(release_evidence["freeze_state"], "active")
+                self.assertEqual(release_evidence["observed_enforcement"], "active")
+                self.assertEqual(
+                    release_evidence["post_activation_failure_stage"], expected_stage
+                )
+                self.assertNotIn("promote", release.calls)
+                self.assertNotIn("unfreeze-main", release.calls)
+                self.assertNotIn("release-exclusion", release.calls)
+
+    def test_unexpected_closure_snapshot_failure_retains_active_exclusion(self):
+        port = PrincipalClosureFixture()
+        original_view = port.allocation_view
+
+        def fail_after_anchor():
+            if "create-anchor" in port.calls:
+                port.calls.append("view-exception")
+                raise RuntimeError("simulated allocation snapshot failure")
+            return original_view()
+
+        port.allocation_view = fail_after_anchor
+        result = run_closure(port, self.closure_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen, result.freeze_state),
+            ("BLOCKED", "TRANSACTION_OUTCOME_UNCERTAIN", True, "active"),
+        )
+        self.assertIn("create-anchor", port.calls)
+        self.assertIn("view-exception", port.calls)
+        self.assertNotIn("release-exclusion", port.calls)
+        self.assertNotIn("unfreeze", port.calls)
+
+    def test_uncertain_freeze_release_keeps_exclusion_and_reports_unknown(self):
+        closure = PrincipalClosureFixture()
+        closure.freeze_write_on_deactivate = True
+        result = run_closure(closure, self.closure_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen, result.freeze_state),
+            ("BLOCKED", "FREEZE_WRITE_UNKNOWN", True, "unknown"),
+        )
+        self.assertIn("unfreeze", closure.calls)
+        self.assertNotIn("release-exclusion", closure.calls)
+
+        release = PrincipalReleaseFixture()
+        release.freeze_write_after_documentation = True
+        result = run_release(release, self.release_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen, result.freeze_state),
+            ("BLOCKED", "FREEZE_WRITE_UNKNOWN", True, "unknown"),
+        )
+        self.assertIn("unfreeze-main", release.calls)
+        self.assertNotIn("release-exclusion", release.calls)
+
+    def test_rejected_freeze_release_keeps_exclusion_until_owner_reconciliation(self):
+        closure = PrincipalClosureFixture()
+        closure.freeze_write_on_deactivate = "terminal-rejection"
+        result = run_closure(closure, self.closure_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen, result.freeze_state),
+            ("BLOCKED", "FREEZE_WRITE_REJECTED", True, "active"),
+        )
+        self.assertEqual(
+            result.evidence["freeze_write_reconciliation"]["observed_enforcement"],
+            "active",
+        )
+        self.assertNotIn("release-exclusion", closure.calls)
+
+        release = PrincipalReleaseFixture()
+        release.freeze_write_after_documentation = True
+        original_dispatch = release.dispatch_documentation
+
+        def reject_freeze_release(publication_ref):
+            value = original_dispatch(publication_ref)
+            release.github_api.freeze_write_mode = "terminal-rejection"
+            return value
+
+        release.dispatch_documentation = reject_freeze_release
+        result = run_release(release, self.release_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen, result.freeze_state),
+            ("BLOCKED", "FREEZE_WRITE_REJECTED", True, "active"),
+        )
+        self.assertEqual(
+            result.evidence["freeze_write_reconciliation"]["observed_enforcement"],
+            "active",
+        )
+        self.assertNotIn("release-exclusion", release.calls)
 
     def test_closure_rejects_cached_authority_after_anchor_mutation(self):
         port = CachedClosureFixture()
@@ -622,6 +919,18 @@ class TransactionTests(unittest.TestCase):
                          ("BLOCKED", "OWNER_AUTHORIZATION_UNVERIFIED"))
         self.assertNotIn("anchor", port.calls)
 
+    def test_production_closure_rejects_fixture_freeze_token(self):
+        class PlaceholderAdapter:
+            def is_live_freeze_lease(self, token, *, ref):
+                return False
+
+        port = PrincipalClosureFixture()
+        port.github_protection_adapter = PlaceholderAdapter()
+        port.freeze_line = lambda intent: "fixture-token"
+        result = run_closure(port, self.closure_intent)
+        self.assertEqual((result.status, result.reason_code), ("BLOCKED", "LINE_FREEZE_UNAVAILABLE"))
+        self.assertEqual(port.calls, [])
+
     def test_authority_must_come_from_trusted_port_configuration(self):
         port = PrincipalClosureFixture()
         port.owner_authorization_authority = None
@@ -709,8 +1018,8 @@ class TransactionTests(unittest.TestCase):
         self.assertLess(port.calls.index("publication-evidence"), port.calls.index("publication-evidence-readback"))
         self.assertLess(port.calls.index("publication-evidence-readback"), port.calls.index("manifest:publication"))
         self.assertLess(port.calls.index("terminal"), port.calls.index("documentation-dispatch"))
-        self.assertLess(port.calls.index("documentation-dispatch"), port.calls.index("release-exclusion"))
-        self.assertEqual(port.calls[-2:], ["release-exclusion", "unfreeze-main"])
+        self.assertLess(port.calls.index("documentation-dispatch"), port.calls.index("unfreeze-main"))
+        self.assertEqual(port.calls[-2:], ["unfreeze-main", "release-exclusion"])
         self.assertEqual(
             port.manifests[-1]["publication_evidence_digest"],
             sha256(port.persisted_publication_evidence_payload).hexdigest(),
@@ -736,11 +1045,7 @@ class TransactionTests(unittest.TestCase):
 
     def test_principal_release_rejects_version_regression_before_tag(self):
         port = PrincipalReleaseFixture()
-        port.freeze_main = lambda intent: {
-            "token": "main-freeze",
-            "sha": SHA_B,
-            "version": "0.4.0",
-        }
+        port.github_api.project_version = "0.4.0"
         result = run_release(port, self.release_intent)
         self.assertEqual(
             (result.status, result.reason_code, result.frozen),
@@ -829,8 +1134,36 @@ class TransactionTests(unittest.TestCase):
         port = NoTagProtectionReleaseFixture()
         result = run_release(port, self.release_intent)
         self.assertEqual((result.status, result.reason_code, result.frozen),
-                         ("BLOCKED", "PUBLIC_TAG_RULESET_UNAVAILABLE", True))
+                         ("BLOCKED", "PUBLIC_TAG_PROTECTION_INVALID", True))
         self.assertNotIn("tag", port.calls)
+
+    def test_candidate_creation_requires_verified_protection_first(self):
+        port = PrincipalReleaseFixture(fail="candidate-protection")
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code), ("BLOCKED", "CANDIDATE_PROTECTION_INCOMPLETE"))
+        self.assertNotIn("candidate", port.calls)
+
+        port = PrincipalReleaseFixture()
+        port.github_protection_adapter = None
+        port.verify_candidate_ref = lambda intent, ref: "fixture-token"
+        port._allow_fixture_protection_evidence = True
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code), ("BLOCKED", "CANDIDATE_PROTECTION_UNAVAILABLE"))
+        self.assertNotIn("candidate", port.calls)
+
+    def test_production_candidate_path_rejects_fixture_only_evidence(self):
+        class PlaceholderAdapter:
+            def verify_candidate_ref(self, ref):
+                return "fixture-token"
+
+            def is_live_protection_evidence(self, evidence, *, ref, repository):
+                return False
+
+        port = PrincipalReleaseFixture()
+        port.github_protection_adapter = PlaceholderAdapter()
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code), ("BLOCKED", "CANDIDATE_PROTECTION_UNAVAILABLE"))
+        self.assertNotIn("candidate", port.calls)
         self.assertNotIn("manifest:release-intent-prepared", port.calls)
 
     def test_tree_bound_transfer_requires_equal_trees(self):
