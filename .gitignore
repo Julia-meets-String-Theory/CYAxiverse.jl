@@ -50,6 +50,10 @@ __pycache__/
 /.github/instructions/
 /.github/skills/
 
+# Agent-team coordination state (Herdr/Synapse boards, charters, member
+# instructions, artifacts). Private: holds local paths and team records.
+/.herdr*
+
 # Validation artifacts are normally local unless explicitly allow-listed.
 /validation/*
 !/validation/orientifold_exact_action_formula_ledger_20260822.md
