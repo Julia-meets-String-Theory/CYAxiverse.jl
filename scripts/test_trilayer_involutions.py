@@ -132,6 +132,22 @@ class StructuralReconstructionTests(unittest.TestCase):
         self.assertEqual(failed["status"], "eq_4_45_parity_failure")
         self.assertEqual(len(failed["violations"]), 5)
 
+    def test_eq_4_45_fails_closed_without_facet_evidence(self):
+        record = next(
+            item
+            for item in enumerate_source_trilayer_candidates(SOURCE_POLY)
+            if item["terminal_status"] == "structurally_reconstructed"
+        )
+        unavailable = eq_4_45_parity_evidence(
+            SOURCE_POLY, record["action"], extra_dual_vertices=None
+        )
+        self.assertEqual(unavailable["status"], "eq_4_45_parity_unavailable")
+        self.assertEqual(unavailable["violations"], [])
+        empty = eq_4_45_parity_evidence(
+            SOURCE_POLY, record["action"], extra_dual_vertices=set()
+        )
+        self.assertEqual(empty["status"], "eq_4_45_parity_passed")
+
     def test_missing_fan_is_fail_closed(self):
         result = reconstruct_trilayer_actions(SOURCE_POLY)
         self.assertEqual(result["candidate_count"], 2)

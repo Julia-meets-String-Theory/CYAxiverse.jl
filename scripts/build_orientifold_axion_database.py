@@ -1200,7 +1200,7 @@ def _exact_trilayer_topology(poly, triangulation):
         return {
             "_exact_trilayer_topology_unavailable": str(exc),
             "fixed_surface_n_s": {},
-            "non_smooth_facet_dual_vertices": set(),
+            "non_smooth_facet_dual_vertices": None,
         }
 
 

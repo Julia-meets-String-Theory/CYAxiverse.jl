@@ -29,6 +29,7 @@ from build_orientifold_axion_database import (
     enrich_accepted_witness_matrices,
     EXACT_ACTION_H21_PLUS_STATUS,
     exact_action_h21_diagnostic,
+    _exact_trilayer_topology,
     exact_hodge_split_from_euler,
     find_exact_trilayer_witnesses,
     find_accepted_o3o7_witness,
@@ -975,6 +976,17 @@ class LoadLedgerAcceptedClassesTests(unittest.TestCase):
                 load_ledger_accepted_classes(
                     str(directory / "tampered.json.zst"), str(sums_path)
                 )
+
+
+class ExactTrilayerTopologyFallbackTests(unittest.TestCase):
+    def test_exception_fallback_marks_facet_evidence_unavailable(self):
+        class _RaisingTriangulation:
+            def get_cy(self):
+                raise RuntimeError("synthetic topology failure")
+
+        topology = _exact_trilayer_topology(object(), _RaisingTriangulation())
+        self.assertIn("_exact_trilayer_topology_unavailable", topology)
+        self.assertIsNone(topology["non_smooth_facet_dual_vertices"])
 
 
 if __name__ == "__main__":
