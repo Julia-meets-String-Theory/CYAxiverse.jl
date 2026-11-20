@@ -299,5 +299,52 @@ class StructuralReconstructionTests(unittest.TestCase):
         self.assertEqual(evaluated["terminal_status"], "mpcp_certificate_unavailable")
 
 
+class EvaluatorFacetEvidenceExtractionTests(unittest.TestCase):
+    """Review v1 A3: a topology without the facet key triggers extraction."""
+
+    def _evaluate(self, facet_return):
+        from unittest import mock
+
+        import generate_geometric_data_multitriangulation as mg
+        import inherited_orientifold_candidates as ioc
+
+        structural = next(
+            item
+            for item in enumerate_source_trilayer_candidates(SOURCE_POLY)
+            if item["terminal_status"] == "structurally_reconstructed"
+        )
+        triangulation = _FakeTriangulation(SOURCE_POLY.points(), [[0, 1]])
+        validated = {
+            "h2_involution_matrix": [[1]],
+            "h2_action_proof": {},
+            "h11_plus": 1,
+            "h11_minus": 0,
+        }
+        with mock.patch.object(
+            mg, "validate_orientifold", return_value=validated
+        ), mock.patch.object(
+            ioc, "facets_with_non_smooth_cones", return_value=facet_return
+        ) as facets:
+            evaluated = evaluate_exact_trilayer_action(
+                SOURCE_POLY, triangulation, {"fixed_surface_n_s": {}}, structural
+            )
+        return evaluated, facets
+
+    def test_missing_facet_key_extracts_and_fails_closed(self):
+        evaluated, facets = self._evaluate(None)
+        facets.assert_called_once()
+        self.assertEqual(
+            evaluated["eq_4_45_parity"]["status"], "eq_4_45_parity_unavailable"
+        )
+        self.assertEqual(evaluated["terminal_status"], "eq_4_45_parity_unavailable")
+
+    def test_missing_facet_key_uses_extracted_evidence(self):
+        evaluated, facets = self._evaluate(set())
+        facets.assert_called()
+        self.assertEqual(
+            evaluated["eq_4_45_parity"]["status"], "eq_4_45_parity_passed"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
