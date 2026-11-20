@@ -480,6 +480,139 @@ def _fixed_component_is_contained_in(component, container):
         tuple(container_rays),
     )
 
+def _exact_fraction_or_none(value):
+    """Return ``Fraction(value)`` or None for booleans and non-numeric input."""
+    if isinstance(value, bool):
+        return None
+    try:
+        return Fraction(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _exact_integer_matrix_4x4(matrix):
+    """Return a 4x4 matrix as exact integer tuples, or None if any entry is inexact."""
+    try:
+        rows = [list(row) for row in matrix]
+    except TypeError:
+        return None
+    if len(rows) != 4 or any(len(row) != 4 for row in rows):
+        return None
+    exact = []
+    for row in rows:
+        exact_row = []
+        for value in row:
+            fraction = _exact_fraction_or_none(value)
+            if fraction is None or fraction.denominator != 1:
+                return None
+            exact_row.append(int(fraction))
+        exact.append(tuple(exact_row))
+    return tuple(exact)
+
+
+def _support_chart_certified(support, sigma_rays):
+    """True when the support and its Cox chart are certified for this exact cone."""
+    if not isinstance(support, dict) or support.get("status") != "certified":
+        return False
+    chart = support.get("chart")
+    if not isinstance(chart, dict) or chart.get("status") != "certified":
+        return False
+    if chart.get("irrelevant_ideal_avoided") is not True:
+        return False
+    sigma = sorted([int(value) for value in ray] for ray in sigma_rays)
+    return chart.get("chart_cone") == sigma
+
+
+def _dense_torus_inversion_cancellation_applies(
+    matrix,
+    torus_shift,
+    lambda_f,
+    sigma_rays,
+    ambient_dimension,
+    support,
+    *,
+    dual_points_complete,
+):
+    """Return True only for the proved issue #236 dense-torus inversion case.
+
+    For L = -I, t = 0 and lambda_f = 1, Moritz eq. (4.42) forces psi_0 = 0
+    and makes every swapped pair restrict as psi_q (eps^q - eps^-q) = 0 at
+    each dense-torus sign point eps, so the restriction vanishes identically.
+    ``dual_points_complete=True`` is the producer's attestation that
+    ``dual_points`` is an exact enumeration of every lattice point of the
+    dual polytope for this fan; internally consistent truncated input cannot
+    prove its own completeness.  Owner decision D1(b), issue #236.
+    """
+    if dual_points_complete is not True:
+        return False
+    if len(sigma_rays) != 0 or ambient_dimension != 0:
+        return False
+    if _exact_fraction_or_none(lambda_f) != 1:
+        return False
+    minus_identity = tuple(
+        tuple(-1 if row == column else 0 for column in range(4)) for row in range(4)
+    )
+    if _exact_integer_matrix_4x4(matrix) != minus_identity:
+        return False
+    try:
+        shift = [_exact_fraction_or_none(value) for value in torus_shift]
+    except TypeError:
+        return False
+    if len(shift) != 4 or any(value != 0 for value in shift):
+        return False
+    return _support_chart_certified(support, sigma_rays)
+
+
+def _singleton_nonvanishing_witness(matrix, support, sigma_rays):
+    """Return a fixed-singleton witness of a nonzero restriction, or None.
+
+    Analyst A-6 (issue #236): if one allowed L-fixed dual point q has a
+    monomial that is nonzero on the component chart, the covariant section
+    with psi_q = 1 and every other independent orbit coefficient zero has a
+    nonzero restriction, so the generic restriction is not identically zero.
+    No complete dual-point enumeration is required for this direction.
+    """
+    exact = _exact_integer_matrix_4x4(matrix)
+    if exact is None or not _support_chart_certified(support, sigma_rays):
+        return None
+    sigma = {tuple(int(value) for value in ray) for ray in sigma_rays}
+    try:
+        ambient = [tuple(int(value) for value in ray) for ray in support.get("ambient_rays") or ()]
+    except (TypeError, ValueError):
+        return None
+    for row in support.get("support") or ():
+        try:
+            q = tuple(int(value) for value in row["q"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(q) != 4:
+            continue
+        image = tuple(sum(exact[k][i] * q[k] for k in range(4)) for i in range(4))
+        if image != q:
+            continue
+        if row.get("orbit_q") != [list(q)] or row.get("image_q") != list(q):
+            continue
+        if row.get("chart_nonzero") is not True:
+            continue
+        phase = row.get("phase_exponent")
+        if isinstance(phase, bool) or not isinstance(phase, int):
+            continue
+        exponents = row.get("cox_exponents")
+        if not isinstance(exponents, list) or len(exponents) != len(ambient):
+            continue
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value != sum(a * b for a, b in zip(ray, q)) + 1
+            or value < 0
+            or (ray in sigma and value != 0)
+            for value, ray in zip(exponents, ambient)
+        ):
+            continue
+        return {"q": list(q), "orbit_q": [list(q)], "phase_exponent": phase}
+    return None
+
+
 def _fixed_component_records(
     auxiliary_fan,
     matrix,
@@ -491,6 +624,7 @@ def _fixed_component_records(
     dual_points=None,
     ambient_rays=None,
     fan_cones=None,
+    dual_points_complete=False,
 ):
     """Enumerate source eq. (4.30)--(4.35) fixed components.
 
@@ -586,24 +720,38 @@ def _fixed_component_records(
                 fan_cones=fan_cones,
                 invariant_basis=_integer_kernel_basis(np.eye(4, dtype=int) - matrix),
             )
+            singleton_witness = None
             if use_half_ray:
                 vanishes_identically = (sigma_dimension + int(lambda_f)) % 2 == 1
                 containment_method = "eq_4.46_after_smooth_half_ray_eq_4.35"
-            elif support.get("status") == "certified":
-                vanishes_identically = bool(support["restriction_identically_zero"])
-                containment_method = "exact_eq_4.42_invariant_restricted_support"
-            elif ambient_dimension == 0 and np.array_equal(
-                np.asarray(matrix, dtype=int), np.eye(4, dtype=int)
+            elif _dense_torus_inversion_cancellation_applies(
+                matrix,
+                torus_shift,
+                lambda_f,
+                rays,
+                ambient_dimension,
+                support,
+                dual_points_complete=dual_points_complete,
             ):
-                # For the identity action, the source parity rule is exact at
-                # a zero-dimensional toric stratum even when the optional dual
-                # lattice-point payload is absent.  Keep this narrow fallback
-                # so missing general-L support evidence remains fail-closed.
-                vanishes_identically = (sigma_dimension + int(lambda_f)) % 2 == 1
-                containment_method = "eq_4.46_identity_zero_dimensional_parity"
+                # Issue #236 (Owner decision D1(b)): proved swapped-pair
+                # cancellation at the dense-torus sign points.
+                vanishes_identically = True
+                containment_method = "eq_4.42_dense_torus_inversion_cancellation"
             else:
-                vanishes_identically = None
-                containment_method = "invariant_restricted_support_unavailable"
+                # Issue #236: a nonempty covariant support does not prove a
+                # nonzero restriction (swapped pairs can cancel), and an empty
+                # or incomplete one does not prove vanishing.  Only a fixed
+                # singleton witness certifies non-vanishing; every other
+                # non-smooth-fallback case is undetermined (Owner D1(b)).
+                singleton_witness = _singleton_nonvanishing_witness(
+                    matrix, support, rays
+                )
+                if singleton_witness is not None:
+                    vanishes_identically = False
+                    containment_method = "eq_4.42_fixed_singleton_nonvanishing_witness"
+                else:
+                    vanishes_identically = None
+                    containment_method = "non_smooth_containment_undetermined"
             # A non-vanishing section has no zero-dimensional hypersurface
             # component.  Do not persist an empty fixed intersection.
             if ambient_dimension == 0 and vanishes_identically is False:
@@ -651,6 +799,7 @@ def _fixed_component_records(
                     },
                     "invariant_restricted_support": support,
                     "containment_method": containment_method,
+                    "containment_witness": singleton_witness,
                     "fixed_toric_dimension": ambient_dimension,
                     "f_vanishes_identically": vanishes_identically,
                     "hypersurface_component_dimension": (
@@ -1096,9 +1245,11 @@ def invariant_restricted_monomial_support(
     Use all exact dual lattice points, the Cox monomial
     ``s_q = prod_p x_p^(<p,q>+1)``, and the coefficient covariance in Moritz
     eq. (4.42).  This is the owner-approved derived implementation for the
-    nonsmooth branch: a restriction is identically zero exactly when this
-    invariant support is empty.  No complete restricted line system is
-    reconstructed.
+    nonsmooth branch.  Issue #236: ``restriction_identically_zero`` only
+    reports that the supplied pre-cancellation support is empty.  A nonempty
+    support does not prove a nonzero restriction, because swapped pairs can
+    cancel, and an empty or incomplete one does not prove vanishing.  No
+    complete restricted line system is reconstructed.
     """
 
     if dual_points is None:
@@ -1245,7 +1396,11 @@ def invariant_restricted_monomial_support(
             rays,
             _integer_lattice_index(np.asarray(sigma, dtype=int).T if sigma else np.empty((4, 0), dtype=int)),
         ),
-        "restriction_statement": "restriction is identically zero iff invariant support is empty",
+        "restriction_statement": (
+            "restriction_identically_zero reports only that the supplied "
+            "pre-cancellation invariant support is empty; it is not a "
+            "containment decision (issue #236)"
+        ),
     }
 
 def _primitive_quotient_vector(vector):
@@ -3112,6 +3267,13 @@ def classify_smoothness(
             + repr(parity["violations"])
         )
     for component in fixed_components:
+        if component["f_vanishes_identically"] is None:
+            unavailable_reasons.append(
+                "fixed-component containment is undetermined ["
+                + str(component.get("containment_method"))
+                + "]"
+            )
+            continue
         if not component["f_vanishes_identically"]:
             if not all(
                 len(cone["rays"]) == cone["dimension"]

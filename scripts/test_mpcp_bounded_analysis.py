@@ -210,9 +210,9 @@ class InvariantRestrictedSupportFixtures(unittest.TestCase):
         )
         self.assertEqual(len(components), 1)
         component = components[0]
-        self.assertEqual(component["containment_method"], "exact_eq_4.42_invariant_restricted_support")
+        self.assertEqual(component["containment_method"], "non_smooth_containment_undetermined")
         self.assertEqual(component["fixed_cone_lattice"]["stabilizer_order"], 2)
-        self.assertTrue(component["f_vanishes_identically"])
+        self.assertIsNone(component["f_vanishes_identically"])
         self.assertEqual(component["invariant_restricted_support"]["support"], [])
         self.assertTrue(component["invariant_restricted_support"]["restriction_identically_zero"])
         lambda_one = _fixed_component_records(
@@ -230,9 +230,9 @@ class InvariantRestrictedSupportFixtures(unittest.TestCase):
         )[0]
         self.assertEqual(
             lambda_one["containment_method"],
-            "exact_eq_4.42_invariant_restricted_support",
+            "non_smooth_containment_undetermined",
         )
-        self.assertTrue(lambda_one["f_vanishes_identically"])
+        self.assertIsNone(lambda_one["f_vanishes_identically"])
 
     def test_bounded_structural_rank_three_four_support_reaudit(self):
         """Re-audit two bounded structural ranks without count-based tuning."""
