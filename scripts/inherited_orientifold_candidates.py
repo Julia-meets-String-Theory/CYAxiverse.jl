@@ -11,7 +11,7 @@ The implementation deliberately reports ``smoothness_verification_unavailable``
 when the supplied topology does not contain the evidence needed for a
 sufficient claim.  Only ``accepted_verified_orientifold`` records carry a
 verified acceptance status.  The identity ``L=I, t=0`` is retained as the
-explicit task-level sanity contract for both parity choices; those records are
+explicit task-level sanity contract for lambda_f = 0 only; those records are
 labelled ``identity_sanity_contract`` rather than being presented as a
 generic nontrivial hypersurface proof.
 """
@@ -2659,6 +2659,13 @@ def classify_smoothness(
             + repr(parity["violations"])
         )
     for component in fixed_components:
+        if component["f_vanishes_identically"] is None:
+            unavailable_reasons.append(
+                "fixed-component containment is undetermined ["
+                + str(component.get("containment_method"))
+                + "]"
+            )
+            continue
         if not component["f_vanishes_identically"]:
             if not all(
                 len(cone["rays"]) == cone["dimension"]

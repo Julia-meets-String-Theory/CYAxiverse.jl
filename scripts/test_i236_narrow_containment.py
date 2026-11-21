@@ -223,5 +223,38 @@ class BoundaryControlTests(unittest.TestCase):
             self.assertEqual(witness["phase_exponent"], expected_phase)
 
 
+class InheritedClassifierUndeterminedTests(unittest.TestCase):
+    """Review v1 A1: the inherited classifier must not promote None to smooth."""
+
+    def test_undetermined_containment_is_not_smooth(self):
+        import inherited_orientifold_candidates as ioc
+
+        component = {
+            "sigma_rays": [],
+            "sigma_dimension": 0,
+            "fixed_toric_dimension": 0,
+            "nu": [],
+            "f_vanishes_identically": None,
+            "containment_method": "non_smooth_containment_undetermined",
+        }
+        result = ioc.classify_smoothness(
+            MINUS_I,
+            ZERO_T,
+            1,
+            [],
+            [component],
+            {"non_smooth_facet_dual_vertices": set()},
+            [],
+        )
+        self.assertTrue(result["dual_vertex_parity"]["available"])
+        self.assertEqual(result["status"], "smoothness_verification_unavailable")
+        self.assertEqual(result["verdict"], "not_verified")
+        self.assertIn(
+            "fixed-component containment is undetermined "
+            "[non_smooth_containment_undetermined]",
+            result["reasons"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1248,8 +1248,10 @@ def invariant_restricted_monomial_support(
     nonsmooth branch.  Issue #236: ``restriction_identically_zero`` only
     reports that the supplied pre-cancellation support is empty.  A nonempty
     support does not prove a nonzero restriction, because swapped pairs can
-    cancel, and an empty or incomplete one does not prove vanishing.  No
-    complete restricted line system is reconstructed.
+    cancel.  An empty support proves vanishing only when the dual points are
+    complete; the non-smooth containment fallback does not rely on that and
+    records such cases as undetermined.  No complete restricted line system
+    is reconstructed.
     """
 
     if dual_points is None:
