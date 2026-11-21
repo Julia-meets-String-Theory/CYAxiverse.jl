@@ -302,6 +302,13 @@ class StructuralReconstructionTests(unittest.TestCase):
 class EvaluatorFacetEvidenceExtractionTests(unittest.TestCase):
     """Review v1 A3: a topology without the facet key triggers extraction."""
 
+    @classmethod
+    def setUpClass(cls):
+        # The code under test imports CYTools; skip in the portable CI.
+        from local_only import require_cytools
+
+        require_cytools()
+
     def _evaluate(self, facet_return):
         from unittest import mock
 
