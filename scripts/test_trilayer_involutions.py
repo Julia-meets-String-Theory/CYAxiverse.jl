@@ -132,6 +132,22 @@ class StructuralReconstructionTests(unittest.TestCase):
         self.assertEqual(failed["status"], "eq_4_45_parity_failure")
         self.assertEqual(len(failed["violations"]), 5)
 
+    def test_eq_4_45_fails_closed_without_facet_evidence(self):
+        record = next(
+            item
+            for item in enumerate_source_trilayer_candidates(SOURCE_POLY)
+            if item["terminal_status"] == "structurally_reconstructed"
+        )
+        unavailable = eq_4_45_parity_evidence(
+            SOURCE_POLY, record["action"], extra_dual_vertices=None
+        )
+        self.assertEqual(unavailable["status"], "eq_4_45_parity_unavailable")
+        self.assertEqual(unavailable["violations"], [])
+        empty = eq_4_45_parity_evidence(
+            SOURCE_POLY, record["action"], extra_dual_vertices=set()
+        )
+        self.assertEqual(empty["status"], "eq_4_45_parity_passed")
+
     def test_missing_fan_is_fail_closed(self):
         result = reconstruct_trilayer_actions(SOURCE_POLY)
         self.assertEqual(result["candidate_count"], 2)
@@ -281,6 +297,60 @@ class StructuralReconstructionTests(unittest.TestCase):
             source_record={"source": source},
         )
         self.assertEqual(evaluated["terminal_status"], "mpcp_certificate_unavailable")
+
+
+class EvaluatorFacetEvidenceExtractionTests(unittest.TestCase):
+    """Review v1 A3: a topology without the facet key triggers extraction."""
+
+    @classmethod
+    def setUpClass(cls):
+        # The code under test imports CYTools; skip in the portable CI.
+        from local_only import require_cytools
+
+        require_cytools()
+
+    def _evaluate(self, facet_return):
+        from unittest import mock
+
+        import generate_geometric_data_multitriangulation as mg
+        import inherited_orientifold_candidates as ioc
+
+        structural = next(
+            item
+            for item in enumerate_source_trilayer_candidates(SOURCE_POLY)
+            if item["terminal_status"] == "structurally_reconstructed"
+        )
+        triangulation = _FakeTriangulation(SOURCE_POLY.points(), [[0, 1]])
+        validated = {
+            "h2_involution_matrix": [[1]],
+            "h2_action_proof": {},
+            "h11_plus": 1,
+            "h11_minus": 0,
+        }
+        with mock.patch.object(
+            mg, "validate_orientifold", return_value=validated
+        ), mock.patch.object(
+            ioc, "facets_with_non_smooth_cones", return_value=facet_return
+        ) as facets:
+            evaluated = evaluate_exact_trilayer_action(
+                SOURCE_POLY, triangulation, {"fixed_surface_n_s": {}}, structural
+            )
+        return evaluated, facets
+
+    def test_missing_facet_key_extracts_and_fails_closed(self):
+        evaluated, facets = self._evaluate(None)
+        facets.assert_called_once()
+        self.assertEqual(
+            evaluated["eq_4_45_parity"]["status"], "eq_4_45_parity_unavailable"
+        )
+        self.assertEqual(evaluated["terminal_status"], "eq_4_45_parity_unavailable")
+
+    def test_missing_facet_key_uses_extracted_evidence(self):
+        evaluated, facets = self._evaluate(set())
+        facets.assert_called()
+        self.assertEqual(
+            evaluated["eq_4_45_parity"]["status"], "eq_4_45_parity_passed"
+        )
 
 
 if __name__ == "__main__":

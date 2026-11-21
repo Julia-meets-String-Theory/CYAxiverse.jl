@@ -33,6 +33,7 @@ from sympy import Matrix
 
 
 RECONSTRUCTION_SCHEMA_VERSION = "cyaxiverse-sheridan-trilayer-exact-1.0"
+_EXTRA_DUAL_VERTICES_NOT_REQUESTED = object()
 RECONSTRUCTION_RULE_VERSION = "moritz-4.64-4.66-source-gauge-1"
 SOURCE_ANCHORS = {
     "sheridan_population": "arXiv:2412.12012v1 main.tex lines 1295-1299",
@@ -505,11 +506,26 @@ def action_involution_evidence(action):
 
 
 def eq_4_45_parity_evidence(
-    poly, action, *, dual_vertices=None, extra_dual_vertices=None
+    poly, action, *, dual_vertices=None, extra_dual_vertices=_EXTRA_DUAL_VERTICES_NOT_REQUESTED
 ):
-    """Evaluate Moritz eq. (4.45) with exact rational arithmetic."""
+    """Evaluate Moritz eq. (4.45) with exact rational arithmetic.
+
+    ``extra_dual_vertices=None`` means the non-smooth-facet evidence was
+    requested but is unavailable; the result is then fail-closed
+    (``eq_4_45_parity_unavailable``).  Omitting the argument means no extra
+    vertices were requested.
+    """
     matrix = np.asarray(action["lattice_matrix"], dtype=np.int64)
     t = decode_fraction_vector(action["torus_shift"])
+    if extra_dual_vertices is None:
+        return {
+            "status": "eq_4_45_parity_unavailable",
+            "reason": "non-smooth facet dual-vertex evidence is unavailable",
+            "checked_vertices": [],
+            "violations": [],
+        }
+    if extra_dual_vertices is _EXTRA_DUAL_VERTICES_NOT_REQUESTED:
+        extra_dual_vertices = ()
     if dual_vertices is None:
         try:
             dual_vertices = _points_from_polytope(_dual_polytope(poly), name="vertices")
@@ -525,7 +541,7 @@ def eq_4_45_parity_evidence(
     violations = []
     extra = {
         tuple(int(value) for value in vertex)
-        for vertex in (extra_dual_vertices or ())
+        for vertex in extra_dual_vertices
     }
     for q in dual_vertices:
         q_tuple = tuple(int(value) for value in q)
@@ -719,10 +735,18 @@ def evaluate_exact_trilayer_action(
         "h11_plus": int(validated["h11_plus"]),
         "h11_minus": int(validated["h11_minus"]),
     }
+    if "non_smooth_facet_dual_vertices" in topology:
+        facet_evidence = topology["non_smooth_facet_dual_vertices"]
+    else:
+        try:
+            import inherited_orientifold_candidates as ioc
+            facet_evidence = ioc.facets_with_non_smooth_cones(poly, triangulation)
+        except (ArithmeticError, AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+            facet_evidence = None
     parity = eq_4_45_parity_evidence(
         poly,
         action,
-        extra_dual_vertices=topology.get("non_smooth_facet_dual_vertices", ()),
+        extra_dual_vertices=facet_evidence,
     )
     result["eq_4_45_parity"] = parity
     if parity["status"] != "eq_4_45_parity_passed":
