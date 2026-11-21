@@ -739,8 +739,9 @@ def _fixed_component_records(
                 containment_method = "eq_4.42_dense_torus_inversion_cancellation"
             else:
                 # Issue #236: a nonempty covariant support does not prove a
-                # nonzero restriction (swapped pairs can cancel), and an empty
-                # or incomplete one does not prove vanishing.  Only a fixed
+                # nonzero restriction (swapped pairs can cancel).  An empty
+                # support proves vanishing only when the dual points are
+                # complete; this fallback does not rely on that.  Only a fixed
                 # singleton witness certifies non-vanishing; every other
                 # non-smooth-fallback case is undetermined (Owner D1(b)).
                 singleton_witness = _singleton_nonvanishing_witness(
