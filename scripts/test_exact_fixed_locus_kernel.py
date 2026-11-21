@@ -67,6 +67,39 @@ class ExactFixedLocusKernelTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual(result["reason_code"], "missing_invariant_restricted_support")
+        self.assertIsNone(result["components"][0]["contained_in_hypersurface"])
+
+
+class ContainmentUndeterminedEulerTests(unittest.TestCase):
+    """Issue #236 P-D1-3: undetermined containment stays undetermined."""
+
+    def test_explicit_none_containment_is_serialized_as_undetermined(self):
+        result = toric_euler.exact_fixed_locus_euler(
+            [], np.eye(4, dtype=int), [{
+                "fixed_toric_dimension": 0,
+                "sigma_rays": [],
+                "nu": {"numerator": [0, 0, 0, 0], "denominator": 1},
+                "f_vanishes_identically": None,
+                "containment_method": "non_smooth_containment_undetermined",
+            }],
+        )
+        self.assertEqual(result["status"], "unavailable")
+        self.assertNotIn("chi_F_I", result)
+        self.assertEqual(
+            result["reason_code"], "fixed_component_containment_undetermined"
+        )
+        self.assertEqual(
+            result["reason"],
+            "fixed-component containment is undetermined "
+            "[non_smooth_containment_undetermined]",
+        )
+        component = result["components"][0]
+        self.assertIsNone(component["contained_in_hypersurface"])
+        self.assertEqual(component["euler_status"], "unavailable")
+        self.assertEqual(
+            component["euler_reason_code"],
+            "fixed_component_containment_undetermined",
+        )
 
 
 if __name__ == "__main__":
