@@ -1493,20 +1493,19 @@ class FixedComponentIntegralityPathTests(unittest.TestCase):
 
 
 class FixedComponentZeroDimensionalFilterTests(unittest.TestCase):
-    """Zero-dimensional non-vanishing strata are not persisted.
+    """Zero-dimensional strata with a proved non-vanishing restriction are dropped.
 
-    A component with ``ambient_dimension == 0`` (fixed-subspace dimension equal
-    to sigma dimension) and ``vanishes_identically == False``
-    (``(sigma_dimension + lambda_f)`` even) has no hypersurface component: the
-    generic section does not vanish at the point, so there is nothing to
-    persist.  The odd-parity (vanishing) zero-dimensional stratum is kept.
+    A component with ``ambient_dimension == 0`` and
+    ``f_vanishes_identically is False`` has no hypersurface component, so there
+    is nothing to persist.  Issue #236 D1(b): when containment is undetermined
+    (``None``) the record is kept with that value, whatever the parity.
     """
 
     def test_even_parity_zero_dim_stratum_is_filtered_odd_parity_kept(self):
-        """Even-parity zero-dim stratum dropped; odd-parity zero-dim stratum kept.
+        """Issue #236 D1(b): with no support evidence both parities stay undetermined.
 
-        Regression guard: persisting the empty non-vanishing intersection would
-        emit a spurious point-component record with no hypersurface.
+        Regression guard: an undetermined record must stay undetermined, never
+        be dropped as non-vanishing or kept as a proved vanishing locus.
         """
         # L = I: fixed_subspace_dimension = rank(2I) = 4. A 4-ray cone has
         # sigma_dimension 4, so ambient_dimension = 0.
@@ -1515,13 +1514,15 @@ class FixedComponentZeroDimensionalFilterTests(unittest.TestCase):
         # = (1/2,...) + (1/2,...) = (1,1,1,1).
         torus_shift = tuple(Fraction(1, 2) for _ in range(4))
 
-        # lambda_f = 0 -> (4 + 0) even -> non-vanishing zero-dim stratum -> dropped.
+        # lambda_f = 0: no support evidence -> one undetermined record.
         even_parity = _fixed_component_records(
             [], IDENTITY, torus_shift, 0, fixed_cone_keys=(full_cone,)
         )
-        self.assertEqual(even_parity, [])
+        self.assertEqual(len(even_parity), 1)
+        self.assertIsNone(even_parity[0]["f_vanishes_identically"])
+        self.assertEqual(even_parity[0]["containment_method"], "non_smooth_containment_undetermined")
 
-        # lambda_f = 1 -> (4 + 1) odd -> vanishing zero-dim stratum -> retained.
+        # lambda_f = 1: no support evidence -> one undetermined record.
         odd_parity = _fixed_component_records(
             [], IDENTITY, torus_shift, 1, fixed_cone_keys=(full_cone,)
         )
@@ -1529,7 +1530,8 @@ class FixedComponentZeroDimensionalFilterTests(unittest.TestCase):
         record = odd_parity[0]
         self.assertEqual(record["sigma_dimension"], 4)
         self.assertEqual(record["fixed_toric_dimension"], 0)
-        self.assertTrue(record["f_vanishes_identically"])
+        self.assertIsNone(record["f_vanishes_identically"])
+        self.assertEqual(record["containment_method"], "non_smooth_containment_undetermined")
 
 
 class CompleteSimplicialFanMalformedTests(unittest.TestCase):

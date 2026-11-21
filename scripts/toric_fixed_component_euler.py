@@ -637,17 +637,29 @@ def exact_fixed_locus_euler(
         dimension = int(component["fixed_toric_dimension"])
         containment_value = component.get("f_vanishes_identically")
         if containment_value is None:
+            if "f_vanishes_identically" in component:
+                # Issue #236 D1(b): containment was evaluated but is
+                # undetermined; it must not be serialized as non-contained.
+                reason = (
+                    "fixed-component containment is undetermined ["
+                    + str(component.get("containment_method"))
+                    + "]"
+                )
+                reason_code = "fixed_component_containment_undetermined"
+            else:
+                reason = "exact invariant restricted support is unavailable"
+                reason_code = "missing_invariant_restricted_support"
             evidence.append(component_evidence(
                 component,
-                contained=False,
+                contained=None,
                 dimension=dimension,
-                reason="exact invariant restricted support is unavailable",
-                reason_code="missing_invariant_restricted_support",
+                reason=reason,
+                reason_code=reason_code,
             ))
             if first_failure is None:
                 first_failure = {
-                    "reason": "exact invariant restricted support is unavailable",
-                    "reason_code": "missing_invariant_restricted_support",
+                    "reason": reason,
+                    "reason_code": reason_code,
                 }
             continue
         contained = containment_value is True
