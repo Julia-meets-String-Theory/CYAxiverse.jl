@@ -226,6 +226,13 @@ class BoundaryControlTests(unittest.TestCase):
 class InheritedClassifierUndeterminedTests(unittest.TestCase):
     """Review v1 A1: the inherited classifier must not promote None to smooth."""
 
+    @classmethod
+    def setUpClass(cls):
+        # The code under test imports CYTools; skip in the portable CI.
+        from local_only import require_cytools
+
+        require_cytools()
+
     def test_undetermined_containment_is_not_smooth(self):
         import inherited_orientifold_candidates as ioc
 
