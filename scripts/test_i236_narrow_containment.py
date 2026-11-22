@@ -60,6 +60,17 @@ def build(c2, L, t, lam, *, dual=_FULL, complete=False, with_fan_cones=True, key
         ambient_rays=rays,
         fan_cones=cones if with_fan_cones else None,
         dual_points_complete=complete,
+        dual_points_provenance=(
+            None
+            if dual is None
+            else {
+                "method": "fixture_attested",
+                "complete": complete,
+                "source": "fixture_attested",
+                "row_count": len(dual),
+                "rows_sha256": g._canonical_dual_rows_sha256(dual),
+            }
+        ),
     )
     return records, aux, cones, rays
 
@@ -179,7 +190,7 @@ class ClassifierConsumerTests(unittest.TestCase):
 
 
 class BoundaryControlTests(unittest.TestCase):
-    def test_lambda0_full_support_is_undetermined(self):
+    def test_lambda0_full_support_matrix_route_contained(self):
         records, _, cones, rays = build(DIAG_2D, BOUNDARY_L, BOUNDARY_T, 0, complete=True)
         expected = {
             (((0, 0, 0, s),), (a, b, c, 0), 1)
@@ -190,9 +201,12 @@ class BoundaryControlTests(unittest.TestCase):
         self.assertEqual(labels(records), expected)
         for rec in records:
             self.assertEqual(rec["fixed_toric_dimension"], 0)
-            self.assertIsNone(rec["f_vanishes_identically"])
-            self.assertIsNone(rec["hypersurface_component_dimension"])
-            self.assertEqual(rec["containment_method"], UNDETERMINED)
+            self.assertIs(rec["f_vanishes_identically"], True)
+            self.assertEqual(
+                rec["containment_method"], "eq_4.42_restriction_matrix_zero"
+            )
+            self.assertIsNone(rec["containment_reason_code"])
+            self.assertIs(rec["containment_generic"], False)
         for s in (1, -1):
             support = g.invariant_restricted_monomial_support(
                 full_dual(rays), rays, [(0, 0, 0, s)], BOUNDARY_L, BOUNDARY_T, 0,
@@ -203,6 +217,33 @@ class BoundaryControlTests(unittest.TestCase):
             self.assertEqual(support["chart"]["status"], "certified")
             self.assertTrue(support["support"])
             self.assertIsNone(g._singleton_nonvanishing_witness(BOUNDARY_L, support, [(0, 0, 0, s)]))
+            self.assertFalse(
+                g._dense_torus_inversion_cancellation_applies(
+                    BOUNDARY_L,
+                    BOUNDARY_T,
+                    0,
+                    [(0, 0, 0, s)],
+                    0,
+                    support,
+                    dual_points_complete=True,
+                )
+            )
+
+    def test_lambda0_full_support_without_attested_completeness_is_undetermined(self):
+        records, _, _, _ = build(DIAG_2D, BOUNDARY_L, BOUNDARY_T, 0, complete=False)
+        expected = {
+            (((0, 0, 0, s),), (a, b, c, 0), 1)
+            for s in (1, -1)
+            for a, b, c in itertools.product((0, 1), repeat=3)
+        }
+        self.assertEqual(len(records), 16)
+        self.assertEqual(labels(records), expected)
+        for rec in records:
+            self.assertEqual(rec["fixed_toric_dimension"], 0)
+            self.assertIsNone(rec["f_vanishes_identically"])
+            self.assertEqual(rec["containment_method"], UNDETERMINED)
+            self.assertEqual(rec["containment_reason_code"], "dual_points_incomplete")
+            self.assertIsNone(rec["containment_generic"])
 
     def test_lambda1_singleton_witness_drops_points(self):
         dual = [(0, 0, 0, -1), (0, 0, 0, 1)]
