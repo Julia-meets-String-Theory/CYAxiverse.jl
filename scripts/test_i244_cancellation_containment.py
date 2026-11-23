@@ -810,6 +810,128 @@ class SyntheticCancellationContainmentTests(unittest.TestCase):
         )
         self.assertNotEqual(complete_euler.get("reason_code"), SUPPORT_GATE)
 
+    def test_p_i3_a_unlisted_failed_check_fails_closed(self):
+        result = g.decide_from_columns([], ["unlisted_failure"], None)
+
+        self.assertIsNone(result[0])
+        self.assertEqual(result[1], "containment_certificate_conflict")
+        self.assertEqual(result[2], "certificate_conflict")
+        self.assertIsNone(result[3])
+        self.assertEqual(
+            result[4],
+            {
+                "failed_checks": ["certificate_conflict"],
+                "offending_codes": ["unlisted_failure"],
+                "totality_violation": True,
+            },
+        )
+
+    def test_p_i3_b_bare_string_failed_checks_fails_closed(self):
+        result = g.decide_from_columns([], "action_not_validated", None)
+
+        self.assertIsNone(result[0])
+        self.assertEqual(result[1], "containment_certificate_conflict")
+        self.assertEqual(result[2], "certificate_conflict")
+        self.assertIsNone(result[3])
+        self.assertEqual(
+            result[4],
+            {
+                "failed_checks": ["certificate_conflict"],
+                "offending_codes": ["action_not_validated"],
+                "totality_violation": True,
+            },
+        )
+
+    def test_p_i3_c_matrix_route_exception_fails_component_closed(self):
+        rows = full_dual(product_fan(DIAG_2D)[1])
+        decision_log = []
+        with mock.patch.object(
+            g,
+            "restriction_matrix_decision",
+            side_effect=RuntimeError("synthetic matrix route failure"),
+        ) as matrix_route:
+            records, _, _, _ = build(
+                DIAG_2D,
+                MINUS_I,
+                ZERO_T,
+                1,
+                rows,
+                complete=True,
+                decision_log=decision_log,
+            )
+
+        self.assertTrue(records)
+        self.assertGreater(matrix_route.call_count, 0)
+        component = records[0]
+        self.assertIsNone(component["f_vanishes_identically"])
+        self.assertEqual(
+            component["containment_method"], "containment_certificate_conflict"
+        )
+        self.assertEqual(component["containment_reason_code"], "certificate_conflict")
+        self.assertIsNone(component["containment_generic"])
+        self.assertEqual(
+            component["containment_witness"],
+            {
+                "failed_checks": ["certificate_conflict"],
+                "totality_violation": True,
+                "exception_type": "RuntimeError",
+            },
+        )
+
+    def test_p_i3_d_vertices_receipt_cannot_claim_completeness(self):
+        rows = full_dual(product_fan(DIAG_2D)[1])
+        records, _, _, _ = build(
+            DIAG_2D,
+            MINUS_I,
+            ZERO_T,
+            1,
+            rows,
+            complete=True,
+            method="vertices",
+            source="cytools_dual_points",
+        )
+
+        self.assertEqual(len(records), 16)
+        for component in records:
+            self.assertIsNone(component["f_vanishes_identically"])
+            self.assertEqual(component["containment_method"], UNDETERMINED)
+            self.assertEqual(
+                component["containment_reason_code"], "dual_points_incomplete"
+            )
+            self.assertIsNone(component["containment_generic"])
+            provenance = component["containment_witness"]["dual_points_provenance"]
+            self.assertEqual(provenance["method"], "vertices")
+            self.assertIs(provenance["complete"], False)
+
+    def test_p_i3_e_completeness_flag_without_provenance_is_incomplete(self):
+        cones, rays = product_fan(DIAG_2D)
+        rows = full_dual(rays)
+        auxiliary = g.build_auxiliary_fan(cones, MINUS_I)
+        records = g._fixed_component_records(
+            auxiliary,
+            MINUS_I,
+            ZERO_T,
+            1,
+            fixed_cone_keys=g._pointwise_invariant_cone_keys(cones, MINUS_I),
+            dual_points=rows,
+            ambient_rays=rays,
+            fan_cones=cones,
+            dual_points_complete=True,
+            dual_points_provenance=None,
+        )
+
+        self.assertEqual(len(records), 16)
+        for component in records:
+            self.assertIsNone(component["f_vanishes_identically"])
+            self.assertEqual(component["containment_method"], UNDETERMINED)
+            self.assertEqual(
+                component["containment_reason_code"], "dual_points_incomplete"
+            )
+            self.assertIsNone(component["containment_generic"])
+            self.assertNotIn(
+                "dual_points_provenance", component["containment_witness"]
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

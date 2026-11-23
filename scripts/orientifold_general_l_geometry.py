@@ -627,6 +627,42 @@ _RESTRICTION_FAILURE_ORDER = (
     "dual_points_incomplete",
     "certificate_conflict",
 )
+_RESTRICTION_FAILURE_CODES = frozenset(_RESTRICTION_FAILURE_ORDER)
+
+
+class _RestrictionDecisionTotalityError(RuntimeError):
+    """Raised when a matrix decision has no valid value/reason classification."""
+
+
+def _certificate_conflict_decision(*, offending_codes=None, exception_type=None):
+    witness = {
+        "failed_checks": ["certificate_conflict"],
+        "totality_violation": True,
+    }
+    if offending_codes is not None:
+        witness["offending_codes"] = list(offending_codes)
+    if exception_type is not None:
+        witness["exception_type"] = exception_type
+    return (
+        None,
+        "containment_certificate_conflict",
+        "certificate_conflict",
+        None,
+        witness,
+    )
+
+
+def _invalid_restriction_failure_codes(failed_checks):
+    """Return offending values when failure codes are not a closed-list sequence."""
+    if not isinstance(failed_checks, (list, tuple)):
+        if isinstance(failed_checks, str):
+            return [failed_checks]
+        return [repr(failed_checks)]
+    return [
+        code if isinstance(code, str) else repr(code)
+        for code in failed_checks
+        if not isinstance(code, str) or code not in _RESTRICTION_FAILURE_CODES
+    ]
 
 
 def _matrix_input_is_exact(value):
@@ -1375,8 +1411,11 @@ def _restriction_matrix_witness(
 
 def decide_from_columns(orbit_records, failed_checks, provenance, fast_path=None):
     """Decide from exact orbit columns, checking the invariant and fast paths."""
+    offending_codes = _invalid_restriction_failure_codes(failed_checks)
+    if offending_codes:
+        return _certificate_conflict_decision(offending_codes=offending_codes)
     orbit_records = list(orbit_records or ())
-    failures = list(failed_checks or ())
+    failures = list(failed_checks)
     frame_available = not any(
         reason in failures
         for reason in _RESTRICTION_FAILURE_ORDER[:6]
@@ -1428,6 +1467,15 @@ def decide_from_columns(orbit_records, failed_checks, provenance, fast_path=None
     else:
         matrix_value = True
         matrix_method = "eq_4.42_restriction_matrix_zero"
+    decision_is_total = (
+        (matrix_value is None and reason_code is not None)
+        or (matrix_value is True and reason_code is None)
+        or (matrix_value is False and reason_code is None)
+    )
+    if not decision_is_total:
+        raise _RestrictionDecisionTotalityError(
+            "matrix value and failure reason do not form a total decision"
+        )
     matrix_witness = _restriction_matrix_witness(
         orbit_records,
         failures,
@@ -1478,24 +1526,6 @@ def decide_from_columns(orbit_records, failed_checks, provenance, fast_path=None
             None,
             True if fast_value is False else False,
             final_witness,
-        )
-    if matrix_value is None and not failures:
-        # This is an internal totality guard. It fails closed instead of
-        # allowing an unclassified component to escape the builder.
-        witness = _restriction_matrix_witness(
-            orbit_records,
-            ["certificate_conflict"],
-            provenance,
-            None,
-            frame_available=frame_available,
-            totality_violation=True,
-        )
-        return (
-            None,
-            "containment_certificate_conflict",
-            "certificate_conflict",
-            None,
-            witness,
         )
     generic = False if matrix_value is True else True if matrix_value is False else None
     return matrix_value, matrix_method, reason_code, generic, matrix_witness
@@ -1727,10 +1757,10 @@ def _fixed_component_records(
                         lambda_f,
                         fast_path=fast_path,
                     )
-                except AssertionError:
-                    # A failed totality assertion is a component-level
-                    # unavailable certificate, never an exception escaping
-                    # the builder (clarification M-5).
+                except Exception as error:
+                    # Matrix-route failures are unavailable component
+                    # certificates, never exceptions escaping the builder
+                    # (clarification M-5).
                     vanishes_identically = None
                     containment_method = "containment_certificate_conflict"
                     containment_reason_code = "certificate_conflict"
@@ -1738,6 +1768,7 @@ def _fixed_component_records(
                     containment_witness = {
                         "failed_checks": ["certificate_conflict"],
                         "totality_violation": True,
+                        "exception_type": type(error).__name__,
                     }
                 if (
                     singleton_witness is not None
