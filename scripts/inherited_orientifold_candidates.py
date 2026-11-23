@@ -862,6 +862,9 @@ def _fixed_component_records(
     dual_points=None,
     ambient_rays=None,
     fan_cones=None,
+    dual_points_complete=False,
+    dual_points_provenance=None,
+    decision_log=None,
 ):
     """Delegate fixed-component construction to the exact general-L kernel.
 
@@ -880,6 +883,9 @@ def _fixed_component_records(
         dual_points=dual_points,
         ambient_rays=ambient_rays,
         fan_cones=fan_cones,
+        dual_points_complete=dual_points_complete,
+        dual_points_provenance=dual_points_provenance,
+        decision_log=decision_log,
     )
 
 
@@ -902,24 +908,8 @@ def _extract_dual_vertices(poly, dual_polytope=None):
 
 
 def _extract_dual_lattice_points(poly, dual_polytope=None):
-    """Read all exact dual lattice points, preferring CYTools ``points``."""
-
-    if dual_polytope is None:
-        try:
-            dual_polytope = poly.dual()
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            return None
-    for method_name in ("points", "vertices"):
-        method = getattr(dual_polytope, method_name, None)
-        if method is not None:
-            try:
-                values = np.asarray(method(), dtype=int)
-            except (RuntimeError, TypeError, ValueError):
-                continue
-            if values.ndim == 2 and values.shape[1] == 4 and values.shape[0] > 0:
-                if len({tuple(int(value) for value in row) for row in values.tolist()}) == values.shape[0]:
-                    return values
-    return None
+    """Compatibility wrapper for the CYTools-independent shared extractor."""
+    return _general_l._extract_dual_lattice_points(poly, dual_polytope)
 
 
 def facets_with_non_smooth_cones(poly, triangulation):
@@ -2667,6 +2657,25 @@ def classify_smoothness(
             )
             continue
         if not component["f_vanishes_identically"]:
+            if _general_l._matrix_false_support_incomplete(component):
+                section_check = {
+                    "status": "unavailable",
+                    "reason_code": "support_incomplete_for_matrix_false",
+                    "reason": (
+                        "matrix False used incomplete dual rows; the full restricted "
+                        "support is unavailable"
+                    ),
+                    "component": {
+                        "sigma_rays": component["sigma_rays"],
+                        "sigma_dimension": component["sigma_dimension"],
+                        "nu": component["nu"],
+                    },
+                }
+                positive_component_checks.append(section_check)
+                unavailable_reasons.append(
+                    "section certificate unavailable [support_incomplete_for_matrix_false]"
+                )
+                continue
             if not all(
                 len(cone["rays"]) == cone["dimension"]
                 for cone in auxiliary_fan
@@ -2852,7 +2861,13 @@ def enumerate_orientifold_candidates(
     frst_hash = compute_triangulation_hash(simplices)
     triangulation_cones = _triangulation_cones(poly, triangulation)
     dual_vertices = _extract_dual_vertices(poly, dual_polytope)
-    dual_points = _extract_dual_lattice_points(poly, dual_polytope)
+    dual_points, dual_points_provenance = _extract_dual_lattice_points(
+        poly, dual_polytope
+    )
+    dual_points_complete = (
+        dual_points_provenance is not None
+        and dual_points_provenance.get("complete") is True
+    )
     ambient_rays = sorted({ray for cone in triangulation_cones for ray in cone})
     class _RecordCollection(list):
         def append(self, record):
@@ -3072,6 +3087,8 @@ def enumerate_orientifold_candidates(
                         dual_points=dual_points,
                         ambient_rays=ambient_rays,
                         fan_cones=triangulation_cones,
+                        dual_points_complete=dual_points_complete,
+                        dual_points_provenance=dual_points_provenance,
                     )
                     smoothness = _general_l.classify_smoothness(
                         matrix,

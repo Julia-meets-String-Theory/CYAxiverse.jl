@@ -5,6 +5,8 @@ a2018d98bd558ff9903c2296d7e8e122c84c1434. It implements Moritz
 arXiv:2305.06363v1 Secs. 4.4--4.6 with exact arithmetic.
 """
 from fractions import Fraction
+import copy
+import hashlib
 import itertools
 import json
 import math
@@ -613,6 +615,961 @@ def _singleton_nonvanishing_witness(matrix, support, sigma_rays):
     return None
 
 
+_RESTRICTION_FAILURE_ORDER = (
+    "action_not_validated",
+    "inexact_input",
+    "component_label_unbound",
+    "chart_unavailable",
+    "dual_rows_invalid",
+    "frame_unavailable",
+    "pair_phase_inconsistent",
+    "column_uniformity_violated",
+    "dual_points_incomplete",
+    "certificate_conflict",
+)
+_RESTRICTION_FAILURE_CODES = frozenset(_RESTRICTION_FAILURE_ORDER)
+
+
+class _RestrictionDecisionTotalityError(RuntimeError):
+    """Raised when a matrix decision has no valid value/reason classification."""
+
+
+def _certificate_conflict_decision(*, offending_codes=None, exception_type=None):
+    witness = {
+        "failed_checks": ["certificate_conflict"],
+        "totality_violation": True,
+    }
+    if offending_codes is not None:
+        witness["offending_codes"] = list(offending_codes)
+    if exception_type is not None:
+        witness["exception_type"] = exception_type
+    return (
+        None,
+        "containment_certificate_conflict",
+        "certificate_conflict",
+        None,
+        witness,
+    )
+
+
+def _invalid_restriction_failure_codes(failed_checks):
+    """Return offending values when failure codes are not a closed-list sequence."""
+    if not isinstance(failed_checks, (list, tuple)):
+        if isinstance(failed_checks, str):
+            return [failed_checks]
+        return [repr(failed_checks)]
+    return [
+        code if isinstance(code, str) else repr(code)
+        for code in failed_checks
+        if not isinstance(code, str) or code not in _RESTRICTION_FAILURE_CODES
+    ]
+
+
+def _matrix_input_is_exact(value):
+    """Check the numeric leaves accepted by the exact matrix decision API."""
+    if value is None or isinstance(value, (str, bytes)):
+        return True
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, np.integer, Fraction)):
+        return True
+    if isinstance(value, np.ndarray):
+        return _matrix_input_is_exact(value.tolist())
+    if isinstance(value, dict):
+        return all(_matrix_input_is_exact(item) for item in value.values())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return all(_matrix_input_is_exact(item) for item in value)
+    return False
+
+
+def _matrix_validation_fraction(value):
+    """Convert an input for ordered domain diagnostics, including a float.
+
+    Floats are used only to check an earlier action condition when condition 2
+    has already recorded ``inexact_input``. They never enter a column or a
+    returned decision.
+    """
+    if isinstance(value, (bool, np.bool_)):
+        return Fraction(int(value))
+    if isinstance(value, Fraction):
+        return value
+    if isinstance(value, (int, np.integer)):
+        return Fraction(int(value))
+    if isinstance(value, (float, np.floating)) and math.isfinite(float(value)):
+        return Fraction(float(value))
+    return None
+
+
+def _matrix_fraction(value):
+    """Decode one exact Python/NumPy integer or rational value."""
+    if isinstance(value, (bool, np.bool_)):
+        return None
+    if isinstance(value, Fraction):
+        return value
+    if isinstance(value, (int, np.integer)):
+        return Fraction(int(value))
+    if isinstance(value, dict):
+        numerator = value.get("numerator")
+        denominator = value.get("denominator")
+        if (
+            isinstance(numerator, (int, np.integer))
+            and not isinstance(numerator, (bool, np.bool_))
+            and isinstance(denominator, (int, np.integer))
+            and not isinstance(denominator, (bool, np.bool_))
+            and int(denominator) != 0
+        ):
+            return Fraction(int(numerator), int(denominator))
+    return None
+
+
+def _matrix_fraction_vector(value):
+    """Decode a four-vector supplied as exact scalars or the JSON vector form."""
+    if isinstance(value, dict) and "numerator" in value and "denominator" in value:
+        numerators = value.get("numerator")
+        denominator = value.get("denominator")
+        if not isinstance(numerators, (list, tuple)):
+            return None
+        denominator = _matrix_fraction(denominator)
+        if denominator is None or denominator.denominator != 1 or denominator == 0:
+            return None
+        values = [_matrix_fraction(item) for item in numerators]
+        if any(item is None for item in values):
+            return None
+        return tuple(item / denominator for item in values)
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    try:
+        values = tuple(_matrix_fraction(item) for item in value)
+    except TypeError:
+        return None
+    if any(item is None for item in values):
+        return None
+    return values
+
+
+def _matrix_int_vector(value, *, diagnostic=False):
+    values = _matrix_fraction_vector(value)
+    if values is None and diagnostic:
+        try:
+            values = tuple(_matrix_validation_fraction(item) for item in value)
+        except TypeError:
+            return None
+    if values is None or len(values) != 4:
+        return None
+    if any(item is None or item.denominator != 1 for item in values):
+        return None
+    return tuple(int(item) for item in values)
+
+
+def _matrix_int_rows(value, *, diagnostic=False):
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    try:
+        rows = tuple(_matrix_int_vector(row, diagnostic=diagnostic) for row in value)
+    except TypeError:
+        return None
+    if any(row is None for row in rows):
+        return None
+    return rows
+
+
+def _matrix_cone_rows(value, *, diagnostic=False):
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    try:
+        cones = tuple(
+            _matrix_int_rows(cone, diagnostic=diagnostic)
+            for cone in value
+        )
+    except TypeError:
+        return None
+    if any(cone is None for cone in cones):
+        return None
+    return cones
+
+
+def _matrix_integer_linear_solution(matrix, rhs):
+    """Return one exact integer solution of ``matrix * x = rhs``, if it exists."""
+    rows = [list(row) for row in matrix]
+    if not rows:
+        return (0, 0, 0, 0)
+    row_count = len(rows)
+    column_count = len(rows[0])
+    if any(len(row) != column_count for row in rows) or len(rhs) != row_count:
+        return None
+    domain = _DomainMatrix.from_Matrix(_SympyMatrix(rows))
+    diagonal_form, left, right = _smith_normal_decomp(domain)
+    diagonal_form = diagonal_form.to_Matrix()
+    left = left.to_Matrix()
+    right = right.to_Matrix()
+    transformed_rhs = left * _SympyMatrix(list(rhs))
+    solution_coordinates = [0] * column_count
+    diagonal_count = min(row_count, column_count)
+    rank = 0
+    for index in range(diagonal_count):
+        diagonal = diagonal_form[index, index]
+        if diagonal == 0:
+            continue
+        rank += 1
+        quotient = transformed_rhs[index] / diagonal
+        if getattr(quotient, "q", 1) != 1:
+            return None
+        solution_coordinates[index] = int(quotient)
+    for index in range(rank, row_count):
+        if transformed_rhs[index] != 0:
+            return None
+    solution = right * _SympyMatrix(solution_coordinates)
+    values = tuple(int(value) for value in solution)
+    if _SympyMatrix(rows) * _SympyMatrix(values) != _SympyMatrix(list(rhs)):
+        return None
+    return values
+
+
+def _matrix_action_valid(matrix, torus_shift, lambda_f, ambient_rays, fan_cones):
+    raw_matrix = matrix.tolist() if isinstance(matrix, np.ndarray) else matrix
+    try:
+        rows = [list(row) for row in raw_matrix]
+    except TypeError:
+        return False
+    if len(rows) != 4 or any(len(row) != 4 for row in rows):
+        return False
+    fractions = [
+        [_matrix_validation_fraction(value) for value in row]
+        for row in rows
+    ]
+    if any(value is None for row in fractions for value in row):
+        return False
+    if any(value.denominator != 1 for row in fractions for value in row):
+        return False
+    action = tuple(tuple(int(value) for value in row) for row in fractions)
+    if any(
+        sum(action[i][k] * action[k][j] for k in range(4)) != int(i == j)
+        for i in range(4)
+        for j in range(4)
+    ):
+        return False
+    rays = _matrix_int_rows(ambient_rays, diagnostic=True)
+    cones = _matrix_cone_rows(fan_cones, diagnostic=True)
+    if rays is None or not rays or cones is None or not cones:
+        return False
+    ray_set = set(rays)
+    if len(ray_set) != len(rays):
+        return False
+    mapped_rays = {
+        tuple(sum(action[i][j] * ray[j] for j in range(4)) for i in range(4))
+        for ray in rays
+    }
+    if mapped_rays != ray_set:
+        return False
+    cone_set = {frozenset(cone) for cone in cones}
+    for cone in cones:
+        image = frozenset(
+            tuple(sum(action[i][j] * ray[j] for j in range(4)) for i in range(4))
+            for ray in cone
+        )
+        if image not in cone_set:
+            return False
+    shift = _matrix_fraction_vector(torus_shift)
+    if shift is None and isinstance(torus_shift, (list, tuple, np.ndarray)):
+        try:
+            shift = tuple(_matrix_validation_fraction(value) for value in torus_shift)
+        except TypeError:
+            shift = None
+    if shift is None or len(shift) != 4 or any(value is None for value in shift):
+        return False
+    shift_delta = tuple(
+        sum(action[i][j] * shift[j] for j in range(4)) - shift[i]
+        for i in range(4)
+    )
+    if any(value.denominator != 1 for value in shift_delta):
+        return False
+    if any((2 * value).denominator != 1 for value in shift):
+        return False
+    parity = _matrix_validation_fraction(lambda_f)
+    return parity is not None and parity.denominator == 1 and int(parity) in (0, 1)
+
+
+def _matrix_label_valid(matrix, torus_shift, sigma_rays, nu, cox_phase_witness):
+    exact_matrix = _exact_integer_matrix_4x4(matrix)
+    shift = _matrix_fraction_vector(torus_shift)
+    nu = _matrix_fraction_vector(nu)
+    sigma = _matrix_int_rows(sigma_rays)
+    if exact_matrix is None or shift is None or len(shift) != 4:
+        return False
+    if nu is None or len(nu) != 4 or sigma is None:
+        return False
+    action = np.asarray(exact_matrix, dtype=int)
+    sigma_matrix = np.eye(4, dtype=int) - action
+    if any(
+        tuple(sum(action[i, j] * ray[j] for j in range(4)) for i in range(4)) != ray
+        for ray in sigma
+    ):
+        return False
+    image_nu = tuple(
+        sum(Fraction(int(action[i, j])) * nu[j] for j in range(4))
+        for i in range(4)
+    )
+    if image_nu != tuple(-value for value in nu):
+        return False
+    twice_nu = tuple(2 * value for value in nu)
+    if any(value.denominator != 1 for value in twice_nu):
+        return False
+    if _matrix_integer_linear_solution(sigma_matrix.tolist(), [int(value) for value in twice_nu]) is None:
+        return False
+    if not isinstance(cox_phase_witness, dict) or cox_phase_witness.get("status") != "certified":
+        return False
+    alpha_raw = cox_phase_witness.get("alpha")
+    lattice_raw = cox_phase_witness.get("lattice_vector")
+    if isinstance(alpha_raw, np.ndarray):
+        alpha_raw = alpha_raw.tolist()
+    try:
+        alpha = tuple(_matrix_fraction(value) for value in alpha_raw)
+    except TypeError:
+        return False
+    lattice_vector = _matrix_int_vector(lattice_raw)
+    if len(alpha) != len(sigma) or any(value is None for value in alpha) or lattice_vector is None:
+        return False
+    phase_vector = tuple(shift[index] + nu[index] for index in range(4))
+    reconstructed = tuple(
+        phase_vector[index]
+        + sum(Fraction(ray[index]) * alpha[ray_index] for ray_index, ray in enumerate(sigma))
+        for index in range(4)
+    )
+    return reconstructed == tuple(Fraction(value) for value in lattice_vector)
+
+
+def _matrix_chart_valid(sigma_rays, ambient_rays, fan_cones):
+    sigma = _matrix_int_rows(sigma_rays)
+    ambient = _matrix_int_rows(ambient_rays)
+    cones = _matrix_cone_rows(fan_cones)
+    if sigma is None or ambient is None or cones is None:
+        return False
+    sigma_set = set(sigma)
+    if len(sigma_set) != len(sigma) or not sigma_set.issubset(set(ambient)):
+        return False
+    for cone in cones:
+        cone_set = set(cone)
+        if not sigma_set.issubset(cone_set):
+            continue
+        if len(cone) <= 4 and _exact_rank(np.asarray(cone, dtype=int)) == len(cone):
+            return True
+    return False
+
+
+def _matrix_rows_valid(dual_points, ambient_rays, fan_cones):
+    rows = _matrix_int_rows(dual_points)
+    ambient = _matrix_int_rows(ambient_rays)
+    cones = _matrix_cone_rows(fan_cones)
+    if rows is None or not rows or ambient is None or not ambient or cones is None:
+        return False
+    if len(set(rows)) != len(rows) or len(set(ambient)) != len(ambient):
+        return False
+    full_rays = {ray for cone in cones for ray in cone}
+    if set(ambient) != full_rays:
+        return False
+    return all(
+        1 + sum(ray[index] * point[index] for index in range(4)) >= 0
+        for point in rows
+        for ray in ambient
+    )
+
+
+def _matrix_frame(sigma_rays):
+    sigma = _matrix_int_rows(sigma_rays)
+    if sigma is None:
+        return None
+    if not sigma:
+        return (0, 0, 0, 0)
+    return _matrix_integer_linear_solution(sigma, [-1] * len(sigma))
+
+
+def _canonical_dual_rows_sha256(rows):
+    """Hash canonical sorted integer rows using compact JSON serialization."""
+    canonical_rows = _matrix_int_rows(rows)
+    if canonical_rows is None:
+        return None
+    payload = json.dumps(
+        [list(row) for row in sorted(canonical_rows)],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _extract_dual_lattice_points(poly, dual_polytope=None):
+    """Return exact dual rows and provenance without importing CYTools.
+
+    ``points()`` on the implicit dual is the only source that attests the full
+    lattice-point set.  A vertices fallback, or an explicitly supplied dual
+    polytope, carries rows but cannot attest completeness on its own.
+    """
+    explicit_dual_polytope = dual_polytope is not None
+    if dual_polytope is None:
+        try:
+            dual_polytope = poly.dual()
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return None, None
+    for method_name in ("points", "vertices"):
+        method = getattr(dual_polytope, method_name, None)
+        if callable(method):
+            try:
+                values = np.asarray(method(), dtype=int)
+            except (RuntimeError, TypeError, ValueError):
+                continue
+            if values.ndim != 2 or values.shape[1] != 4 or values.shape[0] == 0:
+                continue
+            if len({tuple(int(value) for value in row) for row in values.tolist()}) != values.shape[0]:
+                continue
+            provenance = {
+                "method": method_name,
+                "complete": bool(method_name == "points" and not explicit_dual_polytope),
+                "source": "cytools_dual_points",
+                "row_count": int(values.shape[0]),
+                "rows_sha256": _canonical_dual_rows_sha256(values),
+            }
+            return values, provenance
+    return None, None
+
+
+def _verified_dual_points_provenance(dual_points, dual_points_complete, provenance):
+    """Return a copied provenance receipt with completeness rechecked."""
+    if not isinstance(provenance, dict):
+        return None
+    receipt = copy.deepcopy(provenance)
+    rows = _matrix_int_rows(dual_points)
+    actual_hash = _canonical_dual_rows_sha256(dual_points)
+    hash_matches = (
+        actual_hash is not None
+        and receipt.get("rows_sha256") == actual_hash
+        and rows is not None
+        and receipt.get("row_count") == len(rows)
+    )
+    method = receipt.get("method")
+    source = receipt.get("source")
+    source_is_authoritative = (
+        (source == "cytools_dual_points" and method == "points")
+        or (source == "fixture_attested" and method == "fixture_attested")
+    )
+    receipt["complete"] = bool(
+        dual_points_complete is True
+        and provenance.get("complete") is True
+        and hash_matches
+        and source_is_authoritative
+    )
+    return receipt
+
+
+def _matrix_false_support_incomplete(component):
+    """True when a new matrix False lacks the full support for consumers."""
+    if not isinstance(component, dict):
+        return False
+    if component.get("containment_method") != "eq_4.42_restriction_matrix_nonzero_column":
+        return False
+    witness = component.get("containment_witness") or {}
+    return not isinstance(witness, dict) or witness.get("support_complete") is not True
+
+
+def _ordered_restriction_failures(failed_checks):
+    found = set(failed_checks)
+    return [code for code in _RESTRICTION_FAILURE_ORDER if code in found]
+
+
+def _matrix_character_coordinates(q, frame, matrix, sigma_rays):
+    """Return exact residual-character coordinates in the fixed torus."""
+    action = np.asarray(matrix, dtype=int)
+    invariant_basis = _integer_kernel_basis(np.eye(4, dtype=int) - action)
+    sigma_coordinates = []
+    for ray in sigma_rays:
+        coordinates = _integer_coordinates(invariant_basis, ray)
+        if coordinates is None:
+            return None
+        sigma_coordinates.append(coordinates)
+    if sigma_coordinates:
+        sigma_matrix = np.column_stack(sigma_coordinates)
+    else:
+        sigma_matrix = np.empty((invariant_basis.shape[1], 0), dtype=int)
+    quotient_annihilator = _integer_kernel_basis(sigma_matrix.T).T
+    framed_character = tuple(q[index] - frame[index] for index in range(4))
+    return _quotient_character_coordinates(
+        framed_character,
+        invariant_basis,
+        quotient_annihilator,
+    )
+
+
+def _matrix_phase_sign(phase):
+    phase = Fraction(phase) % 1
+    if phase == 0:
+        return 1
+    if phase == Fraction(1, 2):
+        return -1
+    return None
+
+
+def _matrix_column_entries(column):
+    return [
+        {
+            "character": [_fraction_to_json(value) for value in character],
+            "coefficient": _fraction_to_json(coefficient),
+        }
+        for character, coefficient in sorted(column.items())
+    ]
+
+
+def restriction_matrix_columns(
+    rows,
+    provenance,
+    ambient_rays,
+    fan_cones,
+    sigma_rays,
+    nu,
+    cox_phase_witness,
+    matrix,
+    torus_shift,
+    lambda_f,
+):
+    """Build the exact Eq. 4.42 restriction column for each free orbit."""
+    witness_alpha = (
+        cox_phase_witness.get("alpha")
+        if isinstance(cox_phase_witness, dict)
+        else None
+    )
+    witness_lattice = (
+        cox_phase_witness.get("lattice_vector")
+        if isinstance(cox_phase_witness, dict)
+        else None
+    )
+    inputs_are_exact = _matrix_input_is_exact(
+        (
+            rows,
+            ambient_rays,
+            fan_cones,
+            sigma_rays,
+            nu,
+            witness_alpha,
+            witness_lattice,
+            matrix,
+            torus_shift,
+            lambda_f,
+        )
+    )
+    failed_checks = []
+    action_valid = _matrix_action_valid(
+        matrix, torus_shift, lambda_f, ambient_rays, fan_cones
+    )
+    if not action_valid:
+        failed_checks.append("action_not_validated")
+    if not inputs_are_exact:
+        failed_checks.append("inexact_input")
+        return [], _ordered_restriction_failures(failed_checks)
+
+    if not _matrix_label_valid(
+        matrix, torus_shift, sigma_rays, nu, cox_phase_witness
+    ):
+        failed_checks.append("component_label_unbound")
+    if not _matrix_chart_valid(sigma_rays, ambient_rays, fan_cones):
+        failed_checks.append("chart_unavailable")
+    if not _matrix_rows_valid(rows, ambient_rays, fan_cones):
+        failed_checks.append("dual_rows_invalid")
+    frame = _matrix_frame(sigma_rays)
+    if frame is None:
+        failed_checks.append("frame_unavailable")
+    failed_checks = _ordered_restriction_failures(failed_checks)
+    if failed_checks:
+        return [], failed_checks
+
+    exact_action = _exact_integer_matrix_4x4(matrix)
+    action = np.asarray(exact_action, dtype=int)
+    shift = _matrix_fraction_vector(torus_shift)
+    nu_vector = _matrix_fraction_vector(nu)
+    lam = int(_matrix_fraction(lambda_f))
+    points = _matrix_int_rows(rows)
+    sigma = _matrix_int_rows(sigma_rays)
+    alpha = tuple(
+        _matrix_fraction(value) for value in cox_phase_witness["alpha"]
+    )
+    kappa_phase = sum(alpha, Fraction(0)) + Fraction(lam, 2)
+    kappa_sign = _matrix_phase_sign(kappa_phase)
+    point_set = set(points)
+    pending = set(points)
+    orbit_records = []
+    while pending:
+        point = min(pending)
+        image = tuple(
+            sum(int(action[k, i]) * point[k] for k in range(4))
+            for i in range(4)
+        )
+        if image == point:
+            pending.remove(point)
+            phase = _fraction_dot(shift, point) + Fraction(lam, 2)
+            allowed = phase.denominator == 1
+            survives = all(
+                1 + sum(ray[index] * point[index] for index in range(4)) == 0
+                for ray in sigma
+            )
+            character = (
+                _matrix_character_coordinates(point, frame, exact_action, sigma)
+                if allowed and survives
+                else None
+            )
+            invalid_character = allowed and survives and character is None
+            column = {character: Fraction(1)} if character is not None else {}
+            status = (
+                "forced_singleton"
+                if not allowed
+                else "column_invalid"
+                if invalid_character
+                else "nonzero"
+                if column
+                else "dead"
+            )
+            orbit_records.append(
+                {
+                    "q": list(point),
+                    "Aq": list(point),
+                    "h_q": _fraction_to_json(phase),
+                    "h_Aq": _fraction_to_json(phase),
+                    "survives": bool(survives),
+                    "free": bool(allowed),
+                    "pair_phase_consistent": True,
+                    "phase": _fraction_to_json(phase),
+                    "character": character,
+                    "column": column,
+                    "status": status,
+                    "kappa": kappa_sign,
+                }
+            )
+            continue
+
+        present = image in point_set
+        pending.discard(point)
+        if present:
+            pending.discard(image)
+            representative, partner = sorted((point, image))
+            # A is an involution, so the image of the representative is the
+            # other member regardless of which row sorted first.
+            partner = tuple(
+                sum(int(action[k, i]) * representative[k] for k in range(4))
+                for i in range(4)
+            )
+        else:
+            representative, partner = point, None
+        h_q = _fraction_dot(shift, representative) + Fraction(lam, 2)
+        if partner is None:
+            h_partner = None
+            pair_consistent = False
+            survives = all(
+                1 + sum(ray[index] * representative[index] for index in range(4)) == 0
+                for ray in sigma
+            )
+            character = None
+            column = {}
+            phase = _fraction_dot(
+                tuple(shift[index] - nu_vector[index] for index in range(4)),
+                representative,
+            ) + Fraction(lam, 2)
+            status = "partner_missing"
+        else:
+            h_partner = _fraction_dot(shift, partner) + Fraction(lam, 2)
+            pair_consistent = (h_q + h_partner).denominator == 1
+            survives = all(
+                1 + sum(ray[index] * representative[index] for index in range(4)) == 0
+                for ray in sigma
+            )
+            phase = _fraction_dot(
+                tuple(shift[index] - nu_vector[index] for index in range(4)),
+                representative,
+            ) + Fraction(lam, 2)
+            sign = _matrix_phase_sign(phase)
+            character = (
+                _matrix_character_coordinates(representative, frame, exact_action, sigma)
+                if survives
+                else None
+            )
+            invalid_character = survives and character is None
+            invalid_phase = survives and sign is None
+            if invalid_character or invalid_phase:
+                column = {}
+                status = "column_invalid"
+            elif not survives:
+                column = {}
+                status = "dead"
+            elif sign == 1:
+                column = {character: Fraction(2)}
+                status = "nonzero"
+            else:
+                column = {}
+                status = "zero"
+        orbit_records.append(
+            {
+                "q": list(representative),
+                "Aq": None if partner is None else list(partner),
+                "image_q": list(image),
+                "h_q": _fraction_to_json(h_q),
+                "h_Aq": None if h_partner is None else _fraction_to_json(h_partner),
+                "survives": bool(survives),
+                "free": bool(partner is not None),
+                "pair_phase_consistent": bool(pair_consistent),
+                "phase": _fraction_to_json(phase),
+                "character": character,
+                "column": column,
+                "status": status,
+                "kappa": kappa_sign,
+            }
+        )
+    orbit_records.sort(key=lambda item: tuple(item["q"]))
+    return orbit_records, []
+
+
+def _restriction_column_status(orbit_records):
+    return [
+        {
+            "q": list(record["q"]),
+            "Aq": copy.deepcopy(record.get("Aq")),
+            "survives": record.get("survives") is True,
+            "free": record.get("free") is True,
+            "status": record.get("status"),
+        }
+        for record in orbit_records
+    ]
+
+
+def _restriction_matrix_shape(orbit_records):
+    characters = {
+        tuple(record["character"])
+        for record in orbit_records
+        if record.get("free") is True
+        and record.get("survives") is True
+        and record.get("character") is not None
+    }
+    columns = sum(record.get("free") is True for record in orbit_records)
+    return [len(characters), columns]
+
+
+def _restriction_nonzero_orbits(orbit_records):
+    return [
+        record
+        for record in orbit_records
+        if record.get("free") is True
+        and record.get("survives") is True
+        and bool(record.get("column"))
+    ]
+
+
+def _restriction_matrix_witness(
+    orbit_records,
+    failed_checks,
+    provenance,
+    value,
+    *,
+    frame_available,
+    totality_violation=False,
+):
+    witness = {"failed_checks": list(failed_checks)}
+    if provenance is not None:
+        witness["dual_points_provenance"] = copy.deepcopy(provenance)
+    if frame_available:
+        kappas = {
+            record.get("kappa")
+            for record in orbit_records
+            if record.get("kappa") in (-1, 1)
+        }
+        witness["kappa"] = next(iter(kappas)) if len(kappas) == 1 else None
+        witness["column_status"] = _restriction_column_status(orbit_records)
+    nonzero = sorted(
+        _restriction_nonzero_orbits(orbit_records),
+        key=lambda record: tuple(record["q"]),
+    )
+    if value is True:
+        witness["orbit_count"] = sum(
+            record.get("free") is True for record in orbit_records
+        )
+        witness["restriction_matrix_shape"] = _restriction_matrix_shape(orbit_records)
+    elif value is False and nonzero:
+        record = nonzero[0]
+        witness.update(
+            {
+                "q": list(record["q"]),
+                "Aq": copy.deepcopy(record.get("Aq")),
+                "phase": copy.deepcopy(record.get("phase")),
+                "column": _matrix_column_entries(record.get("column") or {}),
+                "support_complete": (
+                    provenance.get("complete") is True
+                    if isinstance(provenance, dict)
+                    else False
+                ),
+            }
+        )
+    if totality_violation:
+        witness["totality_violation"] = True
+    return witness
+
+
+def decide_from_columns(orbit_records, failed_checks, provenance, fast_path=None):
+    """Decide from exact orbit columns, checking the invariant and fast paths."""
+    offending_codes = _invalid_restriction_failure_codes(failed_checks)
+    if offending_codes:
+        return _certificate_conflict_decision(offending_codes=offending_codes)
+    orbit_records = list(orbit_records or ())
+    failures = list(failed_checks)
+    frame_available = not any(
+        reason in failures
+        for reason in _RESTRICTION_FAILURE_ORDER[:6]
+    )
+    if frame_available:
+        if any(record.get("pair_phase_consistent") is not True for record in orbit_records):
+            failures.append("pair_phase_inconsistent")
+        if any(record.get("status") == "column_invalid" for record in orbit_records):
+            failures.append("column_uniformity_violated")
+        surviving = [
+            record
+            for record in orbit_records
+            if record.get("free") is True and record.get("survives") is True
+        ]
+        statuses = {
+            "nonzero" if record.get("column") else "zero"
+            for record in surviving
+            if record.get("status") not in ("forced_singleton", "partner_missing")
+        }
+        if len(statuses) > 1:
+            failures.append("column_uniformity_violated")
+        kappas = {
+            record.get("kappa")
+            for record in orbit_records
+            if record.get("kappa") in (-1, 1)
+        }
+        if len(kappas) == 1 and statuses:
+            kappa = next(iter(kappas))
+            if (kappa == -1 and "nonzero" in statuses) or (
+                kappa == 1 and "zero" in statuses
+            ):
+                failures.append("column_uniformity_violated")
+    failures = _ordered_restriction_failures(failures)
+    nonzero = _restriction_nonzero_orbits(orbit_records)
+    all_zero = not nonzero
+    provenance_complete = (
+        isinstance(provenance, dict) and provenance.get("complete") is True
+    )
+    if frame_available and not failures and all_zero and not provenance_complete:
+        failures.append("dual_points_incomplete")
+        failures = _ordered_restriction_failures(failures)
+    reason_code = failures[0] if failures else None
+    if reason_code is not None:
+        matrix_value = None
+        matrix_method = "non_smooth_containment_undetermined"
+    elif nonzero:
+        matrix_value = False
+        matrix_method = "eq_4.42_restriction_matrix_nonzero_column"
+    else:
+        matrix_value = True
+        matrix_method = "eq_4.42_restriction_matrix_zero"
+    decision_is_total = (
+        (matrix_value is None and reason_code is not None)
+        or (matrix_value is True and reason_code is None)
+        or (matrix_value is False and reason_code is None)
+    )
+    if not decision_is_total:
+        raise _RestrictionDecisionTotalityError(
+            "matrix value and failure reason do not form a total decision"
+        )
+    matrix_witness = _restriction_matrix_witness(
+        orbit_records,
+        failures,
+        provenance,
+        matrix_value,
+        frame_available=frame_available,
+    )
+    if fast_path is not None:
+        fast_value, fast_method = fast_path
+        if fast_value not in (True, False):
+            conflict_witness = {
+                "failed_checks": ["certificate_conflict"],
+                "totality_violation": True,
+            }
+            return (
+                None,
+                "containment_certificate_conflict",
+                "certificate_conflict",
+                None,
+                conflict_witness,
+            )
+        if matrix_value is not None and matrix_value is not fast_value:
+            conflict_witness = {
+                "failed_checks": ["certificate_conflict"],
+                "fast_path_certificate": {
+                    "value": fast_value,
+                    "method": fast_method,
+                },
+                "matrix_certificate": {
+                    "value": matrix_value,
+                    "method": matrix_method,
+                    "witness": matrix_witness,
+                },
+            }
+            return (
+                None,
+                "containment_certificate_conflict",
+                "certificate_conflict",
+                None,
+                conflict_witness,
+            )
+        final_witness = matrix_witness
+        if matrix_value is None and not frame_available:
+            final_witness = {"failed_checks": failures}
+        return (
+            fast_value,
+            fast_method,
+            None,
+            True if fast_value is False else False,
+            final_witness,
+        )
+    generic = False if matrix_value is True else True if matrix_value is False else None
+    return matrix_value, matrix_method, reason_code, generic, matrix_witness
+
+
+def restriction_matrix_decision(
+    rows,
+    provenance,
+    ambient_rays,
+    fan_cones,
+    sigma_rays,
+    nu,
+    cox_phase_witness,
+    matrix,
+    torus_shift,
+    lambda_f,
+    *,
+    fast_path=None,
+):
+    """Compose exact geometry-column construction and the decision procedure."""
+    orbit_records, failed_checks = restriction_matrix_columns(
+        rows,
+        provenance,
+        ambient_rays,
+        fan_cones,
+        sigma_rays,
+        nu,
+        cox_phase_witness,
+        matrix,
+        torus_shift,
+        lambda_f,
+    )
+    return decide_from_columns(
+        orbit_records,
+        failed_checks,
+        _verified_dual_points_provenance(
+            rows,
+            provenance.get("complete") is True if isinstance(provenance, dict) else False,
+            provenance,
+        ),
+        fast_path=fast_path,
+    )
+
+
 def _fixed_component_records(
     auxiliary_fan,
     matrix,
@@ -625,6 +1582,8 @@ def _fixed_component_records(
     ambient_rays=None,
     fan_cones=None,
     dual_points_complete=False,
+    dual_points_provenance=None,
+    decision_log=None,
 ):
     """Enumerate source eq. (4.30)--(4.35) fixed components.
 
@@ -642,6 +1601,16 @@ def _fixed_component_records(
     restricted monomial support.
     """
     nu_representatives = enumerate_projected_lattice_representatives(matrix, -1)
+    verified_dual_provenance = _verified_dual_points_provenance(
+        dual_points,
+        dual_points_complete,
+        dual_points_provenance,
+    )
+    verified_dual_points_complete = (
+        verified_dual_provenance is not None
+        and verified_dual_provenance.get("complete") is True
+    )
+    decision_log_indices = {}
     # The connected fixed torus has the +1 eigenspace of L.  Keep the
     # source convention (rank(I+L)) while evaluating the rank exactly.
     fixed_subspace_dimension = _exact_rank(
@@ -721,108 +1690,200 @@ def _fixed_component_records(
                 invariant_basis=_integer_kernel_basis(np.eye(4, dtype=int) - matrix),
             )
             singleton_witness = None
+            containment_reason_code = None
             if use_half_ray:
                 vanishes_identically = (sigma_dimension + int(lambda_f)) % 2 == 1
                 containment_method = "eq_4.46_after_smooth_half_ray_eq_4.35"
-            elif _dense_torus_inversion_cancellation_applies(
-                matrix,
-                torus_shift,
-                lambda_f,
-                rays,
-                ambient_dimension,
-                support,
-                dual_points_complete=dual_points_complete,
-            ):
-                # Issue #236 (Owner decision D1(b)): proved swapped-pair
-                # cancellation at the dense-torus sign points.
-                vanishes_identically = True
-                containment_method = "eq_4.42_dense_torus_inversion_cancellation"
-            else:
-                # Issue #236: a nonempty covariant support does not prove a
-                # nonzero restriction (swapped pairs can cancel).  An empty
-                # support proves vanishing only when the dual points are
-                # complete; this fallback does not rely on that.  Only a fixed
-                # singleton witness certifies non-vanishing; every other
-                # non-smooth-fallback case is undetermined (Owner D1(b)).
-                singleton_witness = _singleton_nonvanishing_witness(
-                    matrix, support, rays
+                containment_generic = (
+                    False if vanishes_identically else True
                 )
-                if singleton_witness is not None:
-                    vanishes_identically = False
-                    containment_method = "eq_4.42_fixed_singleton_nonvanishing_witness"
+                containment_witness = None
+            else:
+                fast_path = None
+                if _dense_torus_inversion_cancellation_applies(
+                    matrix,
+                    torus_shift,
+                    lambda_f,
+                    rays,
+                    ambient_dimension,
+                    support,
+                    dual_points_complete=verified_dual_points_complete,
+                ):
+                    fast_path = (
+                        True,
+                        "eq_4.42_dense_torus_inversion_cancellation",
+                    )
                 else:
+                    # Keep the accepted #236 singleton proof as the second
+                    # fast path. The general matrix below must agree with any
+                    # decisive fast path whose domain is independently valid.
+                    singleton_witness = _singleton_nonvanishing_witness(
+                        matrix, support, rays
+                    )
+                    if singleton_witness is not None:
+                        fast_path = (
+                            False,
+                            "eq_4.42_fixed_singleton_nonvanishing_witness",
+                        )
+                try:
+                    (
+                        vanishes_identically,
+                        containment_method,
+                        containment_reason_code,
+                        containment_generic,
+                        containment_witness,
+                    ) = restriction_matrix_decision(
+                        dual_points,
+                        verified_dual_provenance,
+                        ambient_rays if ambient_rays is not None else tuple(
+                            tuple(int(value) for value in ray)
+                            for cone in (fan_cones or ())
+                            for ray in cone
+                        ),
+                        fan_cones,
+                        rays,
+                        nu,
+                        {
+                            "status": cox_witness["status"],
+                            "equation": cox_witness.get(
+                                "equation", "t + nu + sum(alpha_p p) = n in N"
+                            ),
+                            "alpha": cox_witness.get("alpha"),
+                            "lattice_vector": cox_witness.get("lattice_vector"),
+                            "phase_vector": _fraction_vector_to_json(phase_vector),
+                        },
+                        matrix,
+                        torus_shift,
+                        lambda_f,
+                        fast_path=fast_path,
+                    )
+                except Exception as error:
+                    # Matrix-route failures are unavailable component
+                    # certificates, never exceptions escaping the builder
+                    # (clarification M-5).
                     vanishes_identically = None
-                    containment_method = "non_smooth_containment_undetermined"
+                    containment_method = "containment_certificate_conflict"
+                    containment_reason_code = "certificate_conflict"
+                    containment_generic = None
+                    containment_witness = {
+                        "failed_checks": ["certificate_conflict"],
+                        "totality_violation": True,
+                        "exception_type": type(error).__name__,
+                    }
+                if (
+                    singleton_witness is not None
+                    and containment_method
+                    == "eq_4.42_fixed_singleton_nonvanishing_witness"
+                ):
+                    # Rule W keeps A-6 identity fields authoritative at top level.
+                    matrix_fields = ("q", "Aq", "phase", "column")
+                    matrix_witness = {}
+                    if isinstance(containment_witness, dict):
+                        if all(key in containment_witness for key in matrix_fields):
+                            matrix_witness = {
+                                key: copy.deepcopy(containment_witness.pop(key))
+                                for key in matrix_fields
+                            }
+                        for key, value in singleton_witness.items():
+                            containment_witness[key] = copy.deepcopy(value)
+                        if matrix_witness:
+                            containment_witness["matrix_witness"] = matrix_witness
+                    elif containment_witness is None:
+                        containment_witness = copy.deepcopy(singleton_witness)
+                elif singleton_witness is not None and isinstance(containment_witness, dict):
+                    # Preserve the 40fecd89 layout for conflict records.
+                    for key, value in singleton_witness.items():
+                        containment_witness.setdefault(key, copy.deepcopy(value))
+                elif singleton_witness is not None and containment_witness is None:
+                    containment_witness = copy.deepcopy(singleton_witness)
             # A non-vanishing section has no zero-dimensional hypersurface
-            # component.  Do not persist an empty fixed intersection.
-            if ambient_dimension == 0 and vanishes_identically is False:
-                continue
-            admissible.append(
-                {
-                    "sigma_rays": [list(ray) for ray in rays],
-                    "sigma_dimension": sigma_dimension,
-                    "nu": _fraction_vector_to_json(nu),
-                    "nu_binary_source": nu_record["binary_source"],
-                    "integrality_vector": (
-                        _integer_vector(integrality_vector)
-                        if _is_integral(integrality_vector)
-                        else None
-                    ),
-                    "fixed_component_integrality": {
-                        "method": integrality_method,
-                        "shortcut_proof": shortcut_reason,
-                        "quotient_annihilator": (
-                            None
-                            if quotient_annihilator is None
-                            else np.asarray(quotient_annihilator, dtype=int).tolist()
-                        ),
-                        "quotient_coordinates": (
-                            None
-                            if quotient_coordinates is None
-                            else [_fraction_to_json(value) for value in quotient_coordinates]
-                        ),
-                    },
-                    "cox_phase_witness": {
-                        "status": cox_witness["status"],
-                        "equation": cox_witness.get(
-                            "equation", "t + nu + sum(alpha_p p) = n in N"
-                        ),
-                        "alpha": cox_witness.get("alpha"),
-                        "lattice_vector": cox_witness.get("lattice_vector"),
-                        "phase_vector": _fraction_vector_to_json(phase_vector),
-                    },
-                    "fixed_cone_lattice": {
-                        "rank": int(sigma_dimension),
-                        "index": int(lattice_index),
-                        "saturated": bool(lattice_index == 1),
-                        "stabilizer_order": int(lattice_index),
-                        "method": "exact_gcd_of_maximal_minors",
-                    },
-                    "invariant_restricted_support": support,
-                    "containment_method": containment_method,
-                    "containment_witness": singleton_witness,
-                    "fixed_toric_dimension": ambient_dimension,
-                    "f_vanishes_identically": vanishes_identically,
-                    "hypersurface_component_dimension": (
+            # component. Log the decision first: the zero-dimensional False
+            # record is intentionally absent from the returned records.
+            component_record = {
+                "sigma_rays": [list(ray) for ray in rays],
+                "sigma_dimension": sigma_dimension,
+                "nu": _fraction_vector_to_json(nu),
+                "nu_binary_source": nu_record["binary_source"],
+                "integrality_vector": (
+                    _integer_vector(integrality_vector)
+                    if _is_integral(integrality_vector)
+                    else None
+                ),
+                "fixed_component_integrality": {
+                    "method": integrality_method,
+                    "shortcut_proof": shortcut_reason,
+                    "quotient_annihilator": (
                         None
-                        if vanishes_identically is None
-                        else ambient_dimension
-                        if vanishes_identically
-                        else max(ambient_dimension - 1, 0)
+                        if quotient_annihilator is None
+                        else np.asarray(quotient_annihilator, dtype=int).tolist()
                     ),
-                }
-            )
+                    "quotient_coordinates": (
+                        None
+                        if quotient_coordinates is None
+                        else [_fraction_to_json(value) for value in quotient_coordinates]
+                    ),
+                },
+                "cox_phase_witness": {
+                    "status": cox_witness["status"],
+                    "equation": cox_witness.get(
+                        "equation", "t + nu + sum(alpha_p p) = n in N"
+                    ),
+                    "alpha": cox_witness.get("alpha"),
+                    "lattice_vector": cox_witness.get("lattice_vector"),
+                    "phase_vector": _fraction_vector_to_json(phase_vector),
+                },
+                "fixed_cone_lattice": {
+                    "rank": int(sigma_dimension),
+                    "index": int(lattice_index),
+                    "saturated": bool(lattice_index == 1),
+                    "stabilizer_order": int(lattice_index),
+                    "method": "exact_gcd_of_maximal_minors",
+                },
+                "invariant_restricted_support": support,
+                "containment_method": containment_method,
+                "containment_reason_code": containment_reason_code,
+                "containment_generic": containment_generic,
+                "containment_witness": containment_witness,
+                "fixed_toric_dimension": ambient_dimension,
+                "f_vanishes_identically": vanishes_identically,
+                "hypersurface_component_dimension": (
+                    None
+                    if vanishes_identically is None
+                    else ambient_dimension
+                    if vanishes_identically
+                    else max(ambient_dimension - 1, 0)
+                ),
+            }
+            if decision_log is not None:
+                decision_log.append(
+                    {
+                        "sigma_rays": copy.deepcopy(component_record["sigma_rays"]),
+                        "nu": copy.deepcopy(component_record["nu"]),
+                        "route": "smooth_half_ray" if use_half_ray else "non_smooth_fallback",
+                        "f_vanishes_identically": vanishes_identically,
+                        "containment_method": containment_method,
+                        "containment_reason_code": containment_reason_code,
+                        "containment_generic": containment_generic,
+                        "containment_witness": copy.deepcopy(containment_witness),
+                        "fixed_toric_dimension": ambient_dimension,
+                        "kept_in_output": False,
+                    }
+                )
+                decision_log_indices[id(component_record)] = len(decision_log) - 1
             if (
                 vanishes_identically is True
                 and ambient_dimension == 0
             ):
-                admissible[-1][
+                component_record[
                     "zero_dimensional_local_smoothness_cartier_evidence"
                 ] = _derive_zero_dimensional_local_evidence(
                     auxiliary_fan,
                     matrix,
-                    admissible[-1],
+                    component_record,
                 )
+            if ambient_dimension == 0 and vanishes_identically is False:
+                continue
+            admissible.append(component_record)
 
     # First keep one deterministic representative for each phase class modulo
     # span(sigma).  The first record is deterministic because the projected
@@ -855,7 +1916,7 @@ def _fixed_component_records(
             continue
         retained.append(component)
 
-    return sorted(
+    result = sorted(
         retained,
         key=lambda item: (
             item["sigma_dimension"],
@@ -863,6 +1924,11 @@ def _fixed_component_records(
             tuple(item["nu"]["numerator"]),
         ),
     )
+    for component in result:
+        log_index = decision_log_indices.get(id(component))
+        if log_index is not None:
+            decision_log[log_index]["kept_in_output"] = True
+    return result
 
 def _dual_vertex_parity_evidence(
     matrix,
@@ -3278,6 +4344,25 @@ def classify_smoothness(
             )
             continue
         if not component["f_vanishes_identically"]:
+            if _matrix_false_support_incomplete(component):
+                section_check = {
+                    "status": "unavailable",
+                    "reason_code": "support_incomplete_for_matrix_false",
+                    "reason": (
+                        "matrix False used incomplete dual rows; the full restricted "
+                        "support is unavailable"
+                    ),
+                    "component": {
+                        "sigma_rays": component["sigma_rays"],
+                        "sigma_dimension": component["sigma_dimension"],
+                        "nu": component["nu"],
+                    },
+                }
+                positive_component_checks.append(section_check)
+                unavailable_reasons.append(
+                    "section certificate unavailable [support_incomplete_for_matrix_false]"
+                )
+                continue
             if not all(
                 len(cone["rays"]) == cone["dimension"]
                 for cone in auxiliary_fan

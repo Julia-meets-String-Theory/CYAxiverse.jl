@@ -2429,7 +2429,7 @@ def _identity_surface_n_s_diagnostics(
     surfaces = [
         component
         for component in components
-        if bool(component.get("f_vanishes_identically"))
+        if component.get("f_vanishes_identically") is True
         and int(component.get("fixed_toric_dimension", -1)) == 2
     ]
     if not surfaces:
@@ -2660,12 +2660,10 @@ def _fixed_locus_fallback(poly: Any, triangulation: Any, action: Mapping[str, An
         cones = ioc._triangulation_cones(poly, triangulation)
         auxiliary = general_l.build_auxiliary_fan(cones, matrix)
         fixed_keys = general_l._pointwise_invariant_cone_keys(cones, matrix)
-        dual_polytope = poly.dual()
-        dual_points_method = getattr(dual_polytope, "points", None)
-        if not callable(dual_points_method):
-            dual_points_method = getattr(dual_polytope, "vertices", None)
-        dual_points = None if not callable(dual_points_method) else np.asarray(
-            dual_points_method(), dtype=np.int64
+        dual_points, dual_points_provenance = ioc._extract_dual_lattice_points(poly)
+        dual_points_complete = (
+            dual_points_provenance is not None
+            and dual_points_provenance.get("complete") is True
         )
         ambient_rays = sorted({ray for cone in cones for ray in cone})
         components = general_l._fixed_component_records(
@@ -2677,6 +2675,8 @@ def _fixed_locus_fallback(poly: Any, triangulation: Any, action: Mapping[str, An
             dual_points=dual_points,
             ambient_rays=ambient_rays,
             fan_cones=cones,
+            dual_points_complete=dual_points_complete,
+            dual_points_provenance=dual_points_provenance,
         )
         fixed_surface_n_s_evidence = {}
         surface_diagnostics = []

@@ -663,6 +663,25 @@ def exact_fixed_locus_euler(
                 }
             continue
         contained = containment_value is True
+        if general_l._matrix_false_support_incomplete(component):
+            reason = (
+                "matrix False used incomplete dual rows; the full restricted "
+                "support is unavailable"
+            )
+            reason_code = "support_incomplete_for_matrix_false"
+            evidence.append(component_evidence(
+                component,
+                contained=False,
+                dimension=dimension,
+                reason=reason,
+                reason_code=reason_code,
+            ))
+            if first_failure is None:
+                first_failure = {
+                    "reason": reason,
+                    "reason_code": reason_code,
+                }
+            continue
         surface_n_s = None
         if contained and dimension == 2:
             surface_table = fixed_surface_n_s_evidence or {}

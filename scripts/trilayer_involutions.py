@@ -759,12 +759,10 @@ def evaluate_exact_trilayer_action(
         triangulation_cones = ioc._triangulation_cones(poly, triangulation)
         matrix = np.asarray(action["lattice_matrix"], dtype=np.int64)
         fixed_cone_keys = general_l._pointwise_invariant_cone_keys(triangulation_cones, matrix)
-        dual_polytope = _dual_polytope(poly)
-        dual_points_method = getattr(dual_polytope, "points", None)
-        if not callable(dual_points_method):
-            dual_points_method = getattr(dual_polytope, "vertices", None)
-        dual_points = None if not callable(dual_points_method) else np.asarray(
-            dual_points_method(), dtype=np.int64
+        dual_points, dual_points_provenance = ioc._extract_dual_lattice_points(poly)
+        dual_points_complete = (
+            dual_points_provenance is not None
+            and dual_points_provenance.get("complete") is True
         )
         ambient_rays = sorted({ray for cone in triangulation_cones for ray in cone})
         auxiliary_fan = general_l.build_auxiliary_fan(triangulation_cones, matrix)
@@ -777,6 +775,8 @@ def evaluate_exact_trilayer_action(
             dual_points=dual_points,
             ambient_rays=ambient_rays,
             fan_cones=triangulation_cones,
+            dual_points_complete=dual_points_complete,
+            dual_points_provenance=dual_points_provenance,
         )
         result["fixed_components"] = fixed_components
         fixed_surface_evidence = topology.get("fixed_surface_n_s", {})

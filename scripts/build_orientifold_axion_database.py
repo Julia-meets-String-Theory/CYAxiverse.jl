@@ -1068,7 +1068,11 @@ def exact_action_h21_diagnostic(poly, triangulation, witness):
         # explicit compatibility fallback.  Omitting these inputs would
         # make an otherwise valid action fail closed as
         # ``missing_invariant_restricted_support``.
-        dual_points = ioc._extract_dual_lattice_points(poly)
+        dual_points, dual_points_provenance = ioc._extract_dual_lattice_points(poly)
+        dual_points_complete = (
+            dual_points_provenance is not None
+            and dual_points_provenance.get("complete") is True
+        )
         ambient_rays = sorted({
             tuple(int(value) for value in ray)
             for cone in triangulation_cones
@@ -1087,6 +1091,8 @@ def exact_action_h21_diagnostic(poly, triangulation, witness):
             dual_points=dual_points,
             ambient_rays=ambient_rays,
             fan_cones=triangulation_cones,
+            dual_points_complete=dual_points_complete,
+            dual_points_provenance=dual_points_provenance,
         )
         fixed = toric_euler.exact_fixed_locus_euler(
             auxiliary_fan,
