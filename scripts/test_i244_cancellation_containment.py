@@ -242,18 +242,68 @@ class SyntheticCancellationContainmentTests(unittest.TestCase):
                 "dual_points_provenance",
                 "kappa",
                 "column_status",
-                "q",
-                "Aq",
-                "phase",
-                "column",
                 "support_complete",
+                "matrix_witness",
+                "q",
                 "orbit_q",
                 "phase_exponent",
             },
         )
-        self.assertEqual(item["containment_witness"]["q"], [-1, 0, -1, -1])
-        self.assertEqual(item["containment_witness"]["column"], [{"character": [], "coefficient": 2}])
+        witness = item["containment_witness"]
+        self.assertEqual(witness["q"], [0, 0, 0, 0])
         self.assertEqual(item["containment_witness"]["orbit_q"], [[0, 0, 0, 0]])
+        self.assertEqual(
+            set(witness["matrix_witness"]), {"q", "Aq", "phase", "column"}
+        )
+
+    def test_s11_a6_matrix_witness_is_separate_for_qt4_diagonal_lambda1(self):
+        cones, rays = product_fan(DIAG_2D)
+        rows = full_dual(rays)
+        matrix = np.diag([-1, -1, -1, 1])
+        shift = (F(0), F(0), F(0), F(1, 2))
+        self.assertEqual(len(rows), 45)
+
+        for sigma_ray, expected_q in (
+            ((0, 0, 0, 1), [0, 0, 0, -1]),
+            ((0, 0, 0, -1), [0, 0, 0, 1]),
+        ):
+            sigma = [sigma_ray]
+            decision_log = []
+            records, _, _, _ = build(
+                DIAG_2D,
+                matrix,
+                shift,
+                1,
+                rows,
+                complete=True,
+                keys=[sigma],
+                decision_log=decision_log,
+            )
+
+            self.assertEqual(records, [])
+            self.assertEqual(len(decision_log), 8)
+            for item in decision_log:
+                self.assertEqual(item["sigma_rays"], [list(sigma_ray)])
+                self.assertIs(item["f_vanishes_identically"], False)
+                self.assertEqual(item["containment_method"], SINGLETON)
+                self.assertIsNone(item["containment_reason_code"])
+                self.assertIs(item["containment_generic"], True)
+                witness = item["containment_witness"]
+                self.assertEqual(witness["q"], expected_q)
+                self.assertEqual(witness["orbit_q"], [expected_q])
+                self.assertEqual(
+                    set(witness["matrix_witness"]), {"q", "Aq", "phase", "column"}
+                )
+                self.assertEqual(witness["kappa"], 1)
+                self.assertEqual(witness["failed_checks"], [])
+                self.assertEqual(
+                    witness["dual_points_provenance"]["method"], "fixture_attested"
+                )
+                self.assertIs(witness["dual_points_provenance"]["complete"], True)
+                self.assertIs(witness["support_complete"], True)
+                self.assertNotIn("Aq", witness)
+                self.assertNotIn("phase", witness)
+                self.assertNotIn("column", witness)
 
     def test_s2b_partial_pair_proves_generic_false_before_point_filter(self):
         cones, rays = product_fan(DIAG_2D)

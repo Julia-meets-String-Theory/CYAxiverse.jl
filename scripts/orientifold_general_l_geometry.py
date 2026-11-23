@@ -1739,7 +1739,28 @@ def _fixed_component_records(
                         "failed_checks": ["certificate_conflict"],
                         "totality_violation": True,
                     }
-                if singleton_witness is not None and isinstance(containment_witness, dict):
+                if (
+                    singleton_witness is not None
+                    and containment_method
+                    == "eq_4.42_fixed_singleton_nonvanishing_witness"
+                ):
+                    # Rule W keeps A-6 identity fields authoritative at top level.
+                    matrix_fields = ("q", "Aq", "phase", "column")
+                    matrix_witness = {}
+                    if isinstance(containment_witness, dict):
+                        if all(key in containment_witness for key in matrix_fields):
+                            matrix_witness = {
+                                key: copy.deepcopy(containment_witness.pop(key))
+                                for key in matrix_fields
+                            }
+                        for key, value in singleton_witness.items():
+                            containment_witness[key] = copy.deepcopy(value)
+                        if matrix_witness:
+                            containment_witness["matrix_witness"] = matrix_witness
+                    elif containment_witness is None:
+                        containment_witness = copy.deepcopy(singleton_witness)
+                elif singleton_witness is not None and isinstance(containment_witness, dict):
+                    # Preserve the 40fecd89 layout for conflict records.
                     for key, value in singleton_witness.items():
                         containment_witness.setdefault(key, copy.deepcopy(value))
                 elif singleton_witness is not None and containment_witness is None:
