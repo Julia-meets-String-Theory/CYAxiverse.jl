@@ -751,7 +751,11 @@ def evaluate_exact_trilayer_action(
     result["eq_4_45_parity"] = parity
     if parity["status"] != "eq_4_45_parity_passed":
         result["terminal_status"] = parity["status"]
-        result["reason"] = "source eq. (4.45) parity failed"
+        result["reason"] = (
+            "source eq. (4.45) parity failed"
+            if parity["status"] == "eq_4_45_parity_failure"
+            else "source eq. (4.45) parity evidence unavailable"
+        )
         return result
     try:
         import inherited_orientifold_candidates as ioc
