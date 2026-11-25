@@ -1,0 +1,10 @@
+{
+ "schema": "cyaxiverse_relic_run/2",
+ "description": "Methodology v2 at w_R = 0 (stated explicitly) for the three reference reheating temperatures: reproduces the v1 example (examples/minimal/run.json) bit for bit apart from the extra w_R column.",
+ "scenarios": [
+  {"label": "5MeV", "T_reh_GeV": 0.005, "w_R": 0.0},
+  {"label": "1e4GeV", "T_reh_GeV": 1e4, "w_R": 0.0},
+  {"label": "1e10GeV", "T_reh_GeV": 1e10, "w_R": 0.0}
+ ],
+ "production_run_approved": false
+}

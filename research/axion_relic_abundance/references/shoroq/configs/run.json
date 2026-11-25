@@ -1,0 +1,19 @@
+{
+ "schema": "cyaxiverse_relic_run/1",
+ "description": "Shoroq reference run: the three reheating scenarios of the frozen analysis; theta analysis with the default methodology",
+ "scenarios": [
+  {
+   "label": "5MeV",
+   "T_reh_GeV": 0.005
+  },
+  {
+   "label": "1e4GeV",
+   "T_reh_GeV": 10000.0
+  },
+  {
+   "label": "1e10GeV",
+   "T_reh_GeV": 10000000000.0
+  }
+ ],
+ "production_run_approved": true
+}

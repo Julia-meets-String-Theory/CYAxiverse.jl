@@ -1,0 +1,11 @@
+{
+ "schema": "cyaxiverse_relic_run/2",
+ "description": "Different (T_reh, w_R) pairs in one run. A scenario without w_R uses the documented default w_R = 0.",
+ "scenarios": [
+  {"label": "T1e4-w0p17", "T_reh_GeV": 1e4, "w_R": 0.17},
+  {"label": "T1e10-wm1o3", "T_reh_GeV": 1e10, "w_R": -0.3333333333333333},
+  {"label": "T5MeV-wm0p5", "T_reh_GeV": 0.005, "w_R": -0.5},
+  {"label": "T1e4-default", "T_reh_GeV": 1e4}
+ ],
+ "production_run_approved": false
+}
