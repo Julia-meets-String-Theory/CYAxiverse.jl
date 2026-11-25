@@ -657,9 +657,9 @@ def _invalid_restriction_failure_codes(failed_checks):
     if not isinstance(failed_checks, (list, tuple)):
         if isinstance(failed_checks, str):
             return [failed_checks]
-        return [repr(failed_checks)]
+        return [type(failed_checks).__name__]
     return [
-        code if isinstance(code, str) else repr(code)
+        code if isinstance(code, str) else type(code).__name__
         for code in failed_checks
         if not isinstance(code, str) or code not in _RESTRICTION_FAILURE_CODES
     ]
@@ -790,6 +790,22 @@ def _matrix_cone_rows(value, *, diagnostic=False):
     if any(cone is None for cone in cones):
         return None
     return cones
+
+
+def _matrix_effective_ambient_rays(ambient_rays, fan_cones):
+    """Infer distinct raw cone generators when the ambient ray list is absent."""
+    if ambient_rays is not None or fan_cones is None:
+        return ambient_rays
+    try:
+        return sorted(
+            {
+                tuple(ray)
+                for cone in fan_cones
+                for ray in cone
+            }
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def _matrix_integer_linear_solution(matrix, rhs):
@@ -1132,7 +1148,12 @@ def restriction_matrix_columns(
     torus_shift,
     lambda_f,
 ):
-    """Build the exact Eq. 4.42 restriction column for each free orbit."""
+    """Build the exact Eq. 4.42 restriction column for each free orbit.
+
+    If the ambient ray list is omitted, infer it from the supplied cones before
+    applying the same exact-input and geometry checks used for an explicit list.
+    """
+    ambient_rays = _matrix_effective_ambient_rays(ambient_rays, fan_cones)
     witness_alpha = (
         cox_phase_witness.get("alpha")
         if isinstance(cox_phase_witness, dict)
@@ -1367,6 +1388,7 @@ def _restriction_matrix_witness(
     value,
     *,
     frame_available,
+    refusal_flags=False,
     totality_violation=False,
 ):
     witness = {"failed_checks": list(failed_checks)}
@@ -1406,6 +1428,41 @@ def _restriction_matrix_witness(
         )
     if totality_violation:
         witness["totality_violation"] = True
+    if refusal_flags and value is None:
+        if frame_available:
+            if any(record.get("status") == "column_invalid" for record in orbit_records):
+                witness["column_invalid"] = True
+            surviving = [
+                record
+                for record in orbit_records
+                if record.get("free") is True and record.get("survives") is True
+            ]
+            statuses = {
+                "nonzero" if record.get("column") else "zero"
+                for record in surviving
+                if record.get("status") not in ("forced_singleton", "partner_missing")
+            }
+            valid_surviving = [
+                record
+                for record in surviving
+                if record.get("status") != "column_invalid"
+            ]
+            valid_statuses = {
+                "nonzero" if record.get("column") else "zero"
+                for record in valid_surviving
+                if record.get("status") not in ("forced_singleton", "partner_missing")
+            }
+            kappas = {
+                record.get("kappa")
+                for record in valid_surviving
+                if record.get("kappa") in (-1, 1)
+            }
+            if len(valid_statuses) == 1 and len(kappas) == 1:
+                kappa = next(iter(kappas))
+                if (kappa == -1 and valid_statuses == {"nonzero"}) or (
+                    kappa == 1 and valid_statuses == {"zero"}
+                ):
+                    witness["kappa_mismatch"] = True
     return witness
 
 
@@ -1482,6 +1539,7 @@ def decide_from_columns(orbit_records, failed_checks, provenance, fast_path=None
         provenance,
         matrix_value,
         frame_available=frame_available,
+        refusal_flags=fast_path is None,
     )
     if fast_path is not None:
         fast_value, fast_method = fast_path
@@ -1520,6 +1578,10 @@ def decide_from_columns(orbit_records, failed_checks, provenance, fast_path=None
         final_witness = matrix_witness
         if matrix_value is None and not frame_available:
             final_witness = {"failed_checks": failures}
+            if "dual_points_provenance" in matrix_witness:
+                final_witness["dual_points_provenance"] = copy.deepcopy(
+                    matrix_witness["dual_points_provenance"]
+                )
         return (
             fast_value,
             fast_method,
@@ -1610,6 +1672,12 @@ def _fixed_component_records(
         verified_dual_provenance is not None
         and verified_dual_provenance.get("complete") is True
     )
+    # Defer omitted-ray inference until the first component reaches support
+    # construction. This preserves the builder's base exception timing and
+    # lets an empty fixed-cone list return without inspecting fan data.
+    effective_ambient_rays = ambient_rays
+    if effective_ambient_rays is None and fan_cones is None:
+        effective_ambient_rays = ()
     decision_log_indices = {}
     # The connected fixed torus has the +1 eigenspace of L.  Keep the
     # source convention (rank(I+L)) while evaluating the rank exactly.
@@ -1675,13 +1743,22 @@ def _fixed_component_records(
                 if rays else np.empty((4, 0), dtype=int)
             )
             lattice_index = _integer_lattice_index(sigma_lattice_matrix)
+            if effective_ambient_rays is None:
+                effective_ambient_rays = _matrix_effective_ambient_rays(
+                    None, fan_cones
+                )
+                if effective_ambient_rays is None:
+                    # The base builder converted each raw coordinate with
+                    # int() here. Preserve its exception behavior for invalid
+                    # fan inputs while direct callers fail closed above.
+                    effective_ambient_rays = tuple(
+                        tuple(int(value) for value in ray)
+                        for cone in (fan_cones or ())
+                        for ray in cone
+                    )
             support = invariant_restricted_monomial_support(
                 dual_points,
-                ambient_rays if ambient_rays is not None else tuple(
-                    tuple(int(value) for value in ray)
-                    for cone in (fan_cones or ())
-                    for ray in cone
-                ),
+                effective_ambient_rays,
                 rays,
                 matrix,
                 torus_shift,
@@ -1735,11 +1812,7 @@ def _fixed_component_records(
                     ) = restriction_matrix_decision(
                         dual_points,
                         verified_dual_provenance,
-                        ambient_rays if ambient_rays is not None else tuple(
-                            tuple(int(value) for value in ray)
-                            for cone in (fan_cones or ())
-                            for ray in cone
-                        ),
+                        effective_ambient_rays,
                         fan_cones,
                         rays,
                         nu,
@@ -1757,6 +1830,8 @@ def _fixed_component_records(
                         lambda_f,
                         fast_path=fast_path,
                     )
+                except MemoryError:
+                    raise
                 except Exception as error:
                     # Matrix-route failures are unavailable component
                     # certificates, never exceptions escaping the builder

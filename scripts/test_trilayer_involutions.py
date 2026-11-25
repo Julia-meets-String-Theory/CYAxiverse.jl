@@ -309,7 +309,7 @@ class EvaluatorFacetEvidenceExtractionTests(unittest.TestCase):
 
         require_cytools()
 
-    def _evaluate(self, facet_return):
+    def _evaluate(self, facet_return, *, poly=SOURCE_POLY, action_override=None):
         from unittest import mock
 
         import generate_geometric_data_multitriangulation as mg
@@ -333,7 +333,10 @@ class EvaluatorFacetEvidenceExtractionTests(unittest.TestCase):
             ioc, "facets_with_non_smooth_cones", return_value=facet_return
         ) as facets:
             evaluated = evaluate_exact_trilayer_action(
-                SOURCE_POLY, triangulation, {"fixed_surface_n_s": {}}, structural
+                poly,
+                triangulation,
+                {"fixed_surface_n_s": {}},
+                structural if action_override is None else action_override,
             )
         return evaluated, facets
 
@@ -344,6 +347,42 @@ class EvaluatorFacetEvidenceExtractionTests(unittest.TestCase):
             evaluated["eq_4_45_parity"]["status"], "eq_4_45_parity_unavailable"
         )
         self.assertEqual(evaluated["terminal_status"], "eq_4_45_parity_unavailable")
+        self.assertEqual(
+            evaluated["reason"], "source eq. (4.45) parity evidence unavailable"
+        )
+        self.assertNotIn("fixed_components", evaluated)
+
+    def test_dual_unavailable_uses_the_parity_unavailable_reason(self):
+        class _NoDualPoly:
+            def points(self):
+                return SOURCE_POLY.points()
+
+        evaluated, _ = self._evaluate(None, poly=_NoDualPoly())
+        self.assertEqual(
+            evaluated["eq_4_45_parity"]["status"], "eq_4_45_parity_unavailable"
+        )
+        self.assertEqual(evaluated["terminal_status"], "eq_4_45_parity_unavailable")
+        self.assertEqual(
+            evaluated["reason"], "source eq. (4.45) parity evidence unavailable"
+        )
+        self.assertIn("reason", evaluated["eq_4_45_parity"])
+        self.assertNotIn("fixed_components", evaluated)
+
+    def test_genuine_parity_violation_keeps_the_failure_reason(self):
+        structural = next(
+            item
+            for item in enumerate_source_trilayer_candidates(SOURCE_POLY)
+            if item["terminal_status"] == "structurally_reconstructed"
+        )
+        action = dict(structural)
+        action["action"] = {**structural["action"], "lambda_f": 0}
+        evaluated, _ = self._evaluate(set(), action_override=action)
+        self.assertEqual(
+            evaluated["eq_4_45_parity"]["status"], "eq_4_45_parity_failure"
+        )
+        self.assertEqual(evaluated["terminal_status"], "eq_4_45_parity_failure")
+        self.assertEqual(evaluated["reason"], "source eq. (4.45) parity failed")
+        self.assertNotIn("fixed_components", evaluated)
 
     def test_missing_facet_key_uses_extracted_evidence(self):
         evaluated, facets = self._evaluate(set())

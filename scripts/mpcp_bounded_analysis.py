@@ -1776,7 +1776,16 @@ def dual_action_evidence(poly: Any, action: Mapping[str, Any]) -> dict[str, Any]
         vertices_method = getattr(dual, "vertices", None)
         if not callable(vertices_method):
             raise ValueError("dual polytope does not expose vertices()")
-        dual_vertices = _integer_rows(vertices_method(), name="dual vertices", dimension=4)
+        raw_dual_vertices = vertices_method()
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as exc:
+        return {"status": "dual_check_unavailable", "reason": str(exc), "terminal": True}
+    try:
+        dual_vertices = _integer_rows(
+            raw_dual_vertices, name="dual vertices", dimension=4
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return {"status": "dual_check_unavailable", "reason": str(exc), "terminal": True}
+    try:
         matrix = _integer_rows(action["lattice_matrix"], name="lattice action", dimension=4)
         shift = _decode_vector(action["torus_shift"])
         lambda_f = int(action["lambda_f"])

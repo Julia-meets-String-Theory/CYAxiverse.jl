@@ -30,6 +30,7 @@ from mpcp_bounded_analysis import (
     point_identity,
     validate_population_replay_certificate,
     validate_replay_certificate,
+    dual_action_evidence,
 )
 from orientifold_general_l_geometry import (
     _fixed_component_records,
@@ -344,6 +345,104 @@ def _reseal_certificate(certificate):
 
 
 class AnalyticMPCPTests(unittest.TestCase):
+    def test_dual_action_evidence_records_dual_acquisition_exceptions(self):
+        class _RaisingPolytope:
+            def __init__(self, error):
+                self.error = error
+
+            def dual(self):
+                raise self.error
+
+        class _RaisingVertices:
+            def vertices(self):
+                raise AttributeError("synthetic dual vertices unavailable")
+
+        class _InnerAttributeErrorPolytope:
+            def dual(self):
+                return _RaisingVertices()
+
+        class _MissingVerticesPolytope:
+            class _Dual:
+                pass
+
+            def dual(self):
+                return self._Dual()
+
+        action = {
+            "lattice_matrix": np.eye(4, dtype=np.int64).tolist(),
+            "torus_shift": [0, 0, 0, 0],
+            "lambda_f": 0,
+        }
+        cases = [
+            (_FakePolytope([]), "Polytope.dual() is absent"),
+            (_MissingVerticesPolytope(), "dual polytope does not expose vertices()"),
+            (_RaisingPolytope(ValueError("synthetic ValueError")), "synthetic ValueError"),
+            (_RaisingPolytope(RuntimeError("synthetic RuntimeError")), "synthetic RuntimeError"),
+            (_InnerAttributeErrorPolytope(), "synthetic dual vertices unavailable"),
+        ]
+        for poly, reason in cases:
+            with self.subTest(poly=type(poly).__name__):
+                evidence = dual_action_evidence(poly, action)
+                self.assertEqual(evidence["status"], "dual_check_unavailable")
+                self.assertEqual(evidence["reason"], reason)
+                self.assertIs(evidence["terminal"], True)
+
+    def test_dual_action_evidence_propagates_runtime_error_from_action_decoding(self):
+        class _Dual:
+            def vertices(self):
+                return np.zeros((1, 4), dtype=np.int64)
+
+        class _Polytope:
+            def dual(self):
+                return _Dual()
+
+        class _RaisingAction(dict):
+            def __getitem__(self, key):
+                if key == "lattice_matrix":
+                    raise RuntimeError("synthetic action decoding failure")
+                return super().__getitem__(key)
+
+        action = _RaisingAction(
+            {
+                "lattice_matrix": np.eye(4, dtype=np.int64).tolist(),
+                "torus_shift": [0, 0, 0, 0],
+                "lambda_f": 0,
+            }
+        )
+        with self.assertRaisesRegex(RuntimeError, "synthetic action decoding failure"):
+            dual_action_evidence(_Polytope(), action)
+
+    def test_dual_check_unavailable_leaves_top_level_report_not_started(self):
+        poly = _FakePolytope([])
+        selected = _FakeTriangulation(
+            [[0, 1, 2, 3, 4]], [[0, 1, 2, 3, 4]]
+        )
+        source_identity = {
+            "terminal": False,
+            "expected_hodge": {"h11": 2, "h21": 120, "chi": -236},
+            "expected_boundary_point_count": 5,
+            "global_point_count": 5,
+            "global_points": POINTS.tolist(),
+            "polytope_id": "fixture-polytope",
+            "source_sha256": "fixture-source",
+            "source_row": 21,
+        }
+        record = {"index": 26, "actions": [ACTION]}
+        with mock.patch("mpcp_bounded_analysis._source_identity_evidence", return_value=source_identity), \
+             mock.patch("mpcp_bounded_analysis._construct_polytope", return_value=(poly, {"status": "constructed"})), \
+             mock.patch("mpcp_bounded_analysis._hodge_values", return_value={"h11": 2, "h21": 120, "chi": -236}), \
+             mock.patch("mpcp_bounded_analysis._hodge_match_evidence", return_value={"status": "matched", "terminal": False}), \
+             mock.patch("mpcp_bounded_analysis.height_one_point_evidence", return_value={"height_one_point_count": 5}), \
+             mock.patch("mpcp_bounded_analysis._construct_selected_triangulation", return_value=(selected, {"status": "constructed"})), \
+             mock.patch("mpcp_bounded_analysis._selected_identity_evidence", return_value={"status": "matched"}), \
+             mock.patch("mpcp_bounded_analysis._points_from_object", return_value=POINTS), \
+             mock.patch("mpcp_bounded_analysis.omitted_point_facet_evidence", return_value={"status": "omitted_facet_interior_points_certified", "triangulation_point_count": 5}), \
+             mock.patch("mpcp_bounded_analysis._public_geometry_evidence", return_value={}):
+            report = analyze_replay_index(26, record, caps={"max_triangulations": 0})
+        self.assertEqual(report["dual_action_checks"][0]["status"], "dual_check_unavailable")
+        self.assertEqual(report["status"], "not_started")
+        self.assertIs(report["terminal"], False)
+
     def test_eq_4_50_identity_conormal_sign_fixture(self):
         tensor = np.zeros((4, 4, 4, 4), dtype=object)
         tensor[1, 2, 1, 2] = 1
