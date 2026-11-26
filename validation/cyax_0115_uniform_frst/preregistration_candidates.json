@@ -1,0 +1,220 @@
+{
+  "schema": "CYAX-0115-r4-preregistration-candidates-v1",
+  "status": "FROZEN_BEFORE_EXACT_SUPPORT_ENUMERATION",
+  "handoff_id": "cyax-0115-uniform-frst-validation-manager-handoff",
+  "handoff_revision": 4,
+  "execution_base": {
+    "commit": "74fea608684eae746f25ae45b18512f89b862fb0",
+    "tree": "9b61208871ed933ca3fdabd5d4cd9f8431308fbf",
+    "branch": "research/cyax-0115-uniform-frst-validation-r1"
+  },
+  "scientific_target": {
+    "state_space": "Omega(P) is the set of distinct full fine, regular, star triangulations of the CYTools public-wrapper default point configuration for the fixed lattice polytope P.",
+    "raw_measure": "At each fixed post-burn-in raw observation index, test the marginal law of temp_tri immediately before CYTools duplicate-hash suppression in the exact public augmented CYTools 1.4.12 process.",
+    "full_identity": "Canonical full-triangulation identity is the sorted tuple of sorted point-label tuples for every maximal simplex, hashed with SHA-256. Polytope identity is bound separately to canonical lattice-point coordinates.",
+    "two_face_identity": "Canonical two-face identity is the sorted face-indexed collection of sorted simplex vertex tuples for each 2-face; it is a duplicate diagnostic only and does not define the target state space.",
+    "nonclaims": [
+      "A passing finite validation is operational evidence and is not a proof of exact uniformity at large h11.",
+      "The yielded first-seen unique sequence is a separate history-dependent projection and is not assumed measure-preserving.",
+      "No conclusion transfers from fast or NTFE comparisons to the Uniform-FRST target."
+    ]
+  },
+  "source_bindings": {
+    "cytools_version": "1.4.12",
+    "python_version": "3.14.6",
+    "numpy_version": "2.4.6",
+    "polytope_py_git_blob_sha": "c54a01651b850842128df00589fef981cf09c05c",
+    "triangulation_py_git_blob_sha": "d83758d7c10ba9092fac66453a378e39e314d7a2",
+    "test_triangulation_py_git_blob_sha": "264d61bc3f637c1f389ac8a7ce041f2d90f7d2a1",
+    "paper": "arXiv:2008.01730v1, Algorithm 3 and Appendix A Eq. A.1"
+  },
+  "candidate_fixture_selection": {
+    "source_file": "cytools/triangulation.py or cytools/polytope.py from installed CYTools 1.4.12",
+    "candidate_order_is_frozen_before_enumeration": true,
+    "selection_rule": "Enumerate candidates in the listed order using the public all_triangulations(only_fine=True, only_regular=True, only_star=True) defaults. Select the first three candidates with a complete support size K in [2,500]. If fewer than three qualify, return CALIBRATION_SUPPORT_INSUFFICIENT and run no sampler calibration.",
+    "support_window": {
+      "minimum_inclusive": 2,
+      "maximum_inclusive": 500,
+      "enumeration_stop_after_count": 501,
+      "stop_after_count_interpretation": "A candidate yielding 501 distinct states is ineligible (>500); do not claim its complete support size."
+    },
+    "candidates": [
+      {
+        "order": 1,
+        "candidate_id": "cytools-polytope-doc-7pt-frst-2",
+        "source_locator": "cytools/polytope.py:2984-2996, all_triangulations example; docs state 7-point configuration and 2 default FRSTs",
+        "construction": "Polytope(vertices)",
+        "vertices": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [-1, -2, -1, -1], [-2, -1, -1, -1]]
+      },
+      {
+        "order": 2,
+        "candidate_id": "cytools-triangulation-doc-9pt-equivalence",
+        "source_locator": "cytools/triangulation.py:1940-1948, is_equivalent example; docs construct two distinct default all_triangulations results",
+        "construction": "Polytope(vertices)",
+        "vertices": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [-1, 1, 1, 0], [0, -1, -1, 0], [0, 0, 0, 1], [1, -2, 1, 1], [-2, 2, 1, -1], [1, 1, -1, -1]]
+      },
+      {
+        "order": 3,
+        "candidate_id": "cytools-triangulation-doc-8pt-two-neighbors",
+        "source_locator": "cytools/triangulation.py:2244-2250, neighbor_triangulations(two_neighbors=True) example",
+        "construction": "Polytope(vertices)",
+        "vertices": [[0, 0, 1, 0], [-2, -2, -1, -2], [0, 0, 1, 2], [-1, 0, 1, 0], [1, 2, -2, -1], [-1, 0, 0, -1], [0, 1, 0, 0], [1, 0, 0, 0]]
+      },
+      {
+        "order": 4,
+        "candidate_id": "cytools-triangulation-doc-9pt-automorphism",
+        "source_locator": "cytools/triangulation.py:1782-1790, automorphism_orbit example",
+        "construction": "Polytope(vertices)",
+        "vertices": [[-1, 0, 0, 0], [-1, 1, 0, 0], [-1, 0, 1, 0], [2, -1, 0, -1], [2, 0, -1, -1], [2, -1, -1, -1], [-1, 0, 0, 1], [-1, 1, 0, 1], [-1, 0, 1, 1]]
+      },
+      {
+        "order": 5,
+        "candidate_id": "cytools-triangulation-doc-reflexive-7pt",
+        "source_locator": "cytools/triangulation.py:106-113, triangulate example; docs identify the polytope as reflexive and its point configuration as 7 points",
+        "construction": "Polytope(vertices)",
+        "vertices": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [-1, -1, -6, -9]]
+      },
+      {
+        "order": 6,
+        "candidate_id": "cytools-polytope-doc-standard-simplex-dual",
+        "source_locator": "cytools/polytope.py:2657-2668, random_triangulations_fair example",
+        "construction": "Polytope(vertices).dual()",
+        "vertices": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [-1, -1, -1, -1]]
+      }
+    ]
+  },
+  "sampler_control_grid": [
+    {
+      "control_id": "00-paper-source",
+      "n_walk": 50,
+      "n_flip": 40,
+      "initial_walk_steps": "CYTools public-wrapper default: 2*len(poly.points())//10+10",
+      "walk_step_size": 0.01,
+      "max_steps_to_wall": 25,
+      "fine_tune_steps": 8,
+      "max_retries": 50,
+      "N": null,
+      "make_star": true,
+      "backend": "cgal",
+      "rationale": "Appendix A of arXiv:2008.01730v1 uses N_walk=50 and N_flip=40 for Algorithm 3."
+    },
+    {
+      "control_id": "01-stricter",
+      "n_walk": 100,
+      "n_flip": 80,
+      "initial_walk_steps": "2*(CYTools public-wrapper default: 2*len(poly.points())//10+10)",
+      "walk_step_size": 0.01,
+      "max_steps_to_wall": 25,
+      "fine_tune_steps": 16,
+      "max_retries": 50,
+      "N": null,
+      "make_star": true,
+      "backend": "cgal",
+      "rationale": "Preregistered stricter burn-in, walk, flip, and wall fine-tuning control."
+    }
+  ],
+  "calibration_protocol": {
+    "raw_observation_indices": [1, 2, 5, 10, 25],
+    "restart_count_rule": "N=max(10000,50*K) for each selected fixture/control",
+    "seed_rule": "For fixture order f starting at 1, seed_i=0x11500000+f*0x00100000+i for i=0..N-1. The same fixed seed list is used for both controls to make control comparisons paired. Seeds are frozen after K is enumerated and before any fair-sampler candidate observation is read.",
+    "seed_type": "NumPy legacy global RNG-compatible unsigned 32-bit integer",
+    "process_start_method": "spawn",
+    "concurrency": "At most one active fair chain in each Python process; no thread-concurrent fair chains.",
+    "public_wrapper": "Invoke CYTools Polytope.random_triangulations_fair with points=None, N=None, make_star=True, and every other control explicit. The instrumented function is an AST-only validation wrapper of the exact installed random_triangulations_fair_generator source.",
+    "early_termination": "Advance every started restart until raw index 25 and the fixed k first-discovery unique projection are both observed, or until the public process terminates. Any termination before a required raw index fails RAW_UNIFORM_MARGINAL for that fixture/control. Any termination before k first discoveries fails UNIQUE_STORAGE_PROJECTION. Never replace seeds, omit failures, or condition a marginal on survivor chains. Stop that fixture/control at its first protocol failure and persist the complete attempted-seed evidence; the fixed N-seed schedule remains frozen.",
+    "per_restart_unique_size": "k=min(10,floor(K/2))",
+    "full_support_enumeration": "CYTools 1.4.12 Polytope.all_triangulations(only_fine=True, only_regular=True, only_star=True, as_list=False) with public default point labels; canonical full-triangulation identity is used to verify support uniqueness.",
+    "equivalence_controls": "For every selected fixture/control, compare a public and instrumented chain in separate spawned processes at the same frozen seed; require exact raw candidate identities, duplicate events, retry counts, termination result, yielded unique identities, and loop counter/state trace equality.",
+    "reproducibility_and_scheduling": "Repeat one frozen seed in separate spawned processes. For the first eight frozen restart task IDs, compare outcomes under worker counts 1 and 4 and reversed task submission order; task identity and outcome must be unchanged.",
+    "rng_isolation": "Run independently seeded fair chains only in spawned worker processes. No Python thread runs a fair chain. The instrumented callback uses no random generator and records the active process ID.",
+    "atomic_staging_and_resume": "Write each completed seed result to the append-only JSONL journal as one canonical JSON line, flush and fsync it, and ignore only a final unterminated line on resume. Resume verifies the exact frozen manifest hash and may rerun only a missing seed from the already frozen list. Duplicate completed seed IDs or a mismatched manifest are hard failures. A partial task is restarted from its original seed and never combined with the prior partial observations.",
+    "collision_and_interruption_tests": "Use temporary output roots to force an existing-result collision and a journal interrupted after a partial final line; verify collision fails without overwrite and resume repairs only the incomplete tail before rerunning the same frozen seed.",
+    "early_termination_adversarial_test": "Under the exact instrumented CYTools source, substitute a deterministic Triangulation stub whose is_fine() always returns true and set the test-only max_retries=1. The public process must terminate before any candidate observation; the gate must fail with zero replacements and no survivor-conditioned statistics.",
+    "fail_closed_stop_rule": "If any identity/source mismatch or early termination occurs, close the affected gate immediately, retain evidence, and do not continue to population or large-h11 claims unless the relevant earlier gates pass."
+  },
+  "statistical_protocol": {
+    "raw_uniformity": {
+      "test": "Monte-Carlo Pearson multinomial goodness-of-fit against p_i=1/K at each fixed raw index",
+      "null_simulations": 10000,
+      "null_seed_rule": "0x2A115000 + 100000*f + 10000*c + 100*j_position",
+      "familywise_correction": "Holm across every selected fixture x control x raw observation index test",
+      "familywise_alpha": 0.01,
+      "additional_envelopes": ["two-sided central 99% total-variation null envelope", "two-sided central 99% maximum absolute state-frequency-deviation null envelope"],
+      "envelope_quantiles": [0.005, 0.995]
+    },
+    "unique_projection": {
+      "sample_unit": "The first k yielded unique full-FRST identities from each fixed restart seed, in first-discovery order.",
+      "inclusion_diagnostic": "Pearson, total-variation, and maximum absolute inclusion-frequency deviation compared to Monte-Carlo samples of N independent exact uniform k-subsets of K states, generated by the preregistered sequential conditional-binomial construction.",
+      "order_diagnostic": "For every first-discovery position 1..k, Pearson, total-variation, and maximum absolute state-frequency deviation compared to the exact multinomial marginal for N independent uniform permutations without replacement.",
+      "null_simulations": 10000,
+      "null_seed_rule": "0x3A115000 + 100000*f + 10000*c + 100*j_position",
+      "familywise_correction": "Holm across the complete inclusion plus first-discovery-position test family",
+      "familywise_alpha": 0.01,
+      "envelope_quantiles": [0.005, 0.995],
+      "missing_sequence_rule": "Any restart that terminates before k yielded unique identities fails the projection gate; do not remove it from the reference comparison."
+    }
+  },
+  "large_h11_plan": {
+    "subset_rule": "Use the first listed manifest polytope for h11=50, 100, and 200, plus the unique h11=491 entry.",
+    "chains_per_polytope_control": 4,
+    "raw_observations_per_chain": 1000,
+    "controls": "Selected exact-support control and 01-stricter, if and only if exact-support raw marginal calibration passes.",
+    "seed_rule": "0x115F0000 + polytope_order*0x00100000 + control_order*0x00010000 + chain_index",
+    "preregistered_scalar_observables": [
+      "maximal_simplex_count",
+      "maximum_point_incidence_count",
+      "population_variance_of_point_incidence_counts",
+      "normalized_GKZ_l1_summary"
+    ],
+    "diagnostics": "Rank-normalized split R-hat <= 1.01 for every scalar; aggregate bulk ESS >= 1000 where defined; paired source-control versus stricter-control chain-mean Welch tests with Holm familywise alpha 0.01.",
+    "claim_boundary": "Passing is operational stability evidence only; failure returns UNIFORMITY_NOT_ESTABLISHED."
+  },
+  "appendix_a_benchmark": {
+    "source": "arXiv:2008.01730v1 Appendix A Eq. A.1, lines corresponding to h11=11 and 330019 FRSTs",
+    "vertices_by_rows": [[-1, 1, -1, -1, -1], [-1, -1, -1, 7, -1], [0, 0, 0, -2, 2], [0, 0, 2, -2, 0]],
+    "vertices": [[-1, -1, 0, 0], [1, -1, 0, 0], [-1, -1, 0, 2], [-1, 7, -2, -2], [-1, -1, 2, 0]],
+    "source_frst_count": 330019,
+    "source_control": {"n_walk": 50, "n_flip": 40},
+    "unique_output_count": 10000,
+    "observables": ["GKZ componentwise sample-mean convergence", "RMS of nonzero triple intersection numbers where computation is available"],
+    "reference_rule": "Compare numeric metrics against full exact/source references only when those values are recoverable from a bounded complete computation or published numeric source data. Otherwise record the paper's qualitative reference and mark numeric reference unavailable; never substitute a comparison-sampler reference."
+  },
+  "comparison_plan": {
+    "routes": ["fast", "ntfe_fast"],
+    "glimmers_or_gnn": "Not run unless exact current repository capability/policy permits it; current adapter says GNN samplers are unavailable.",
+    "polytope_subset": "The same first three exact-support calibration fixtures, if at least three qualify.",
+    "per_route_yield_target": 100,
+    "paired_seed_rule": "0x4A115000 + fixture_order*1000 + proposal_index",
+    "interpretation": "Biased comparison ensembles only; report exact denominators and uncertainty, with no transfer of population claims."
+  },
+  "open_policy": {
+    "search_scope": "Issue #115 governing history/comments, repository policy and design records",
+    "fallback_if_absent": "OWNER_DECISION_REQUIRED_OPEN_POLICY for the open sub-contract only"
+  },
+  "resource_caps_and_stops": {
+    "exact_support_cap": {
+      "distinct_states_per_candidate": 501,
+      "wall_clock_seconds_per_candidate": 1800,
+      "cumulative_enumeration_wall_clock_seconds": 10800
+    },
+    "calibration": "Do not lower N or any frozen index. Stop the affected fixture/control on first preregistered gate failure and preserve all attempted outcomes. Do not treat unexecuted seeds as observations.",
+    "large_h11": "No large-h11 runs unless all exact-support raw marginal gates pass and the augmented-process equivalence gate passes.",
+    "appendix_a": "Two hours wall time for complete reference reconstruction after the 10000-output sampler run; retain bounded source-only evidence if exact numeric references do not complete within this cap.",
+    "comparisons": "Five minutes per polytope/method, with a maximum of 100 yielded outputs; report shortfall and exact terminal reason."
+  },
+  "persistence": {
+    "directory": "validation/cyax_0115_uniform_frst/",
+    "required_artifacts": [
+      "frozen validation manifest and SHA-256 receipt",
+      "exact-support enumerations and identities",
+      "raw observations and unique projections",
+      "successes, failures, duplicates, retry/counter state, exact denominators",
+      "null simulations, statistics, corrected p-values, and envelopes",
+      "resource/timing records",
+      "process isolation, scheduling, staging/interruption, and collision evidence",
+      "Appendix-A benchmark evidence",
+      "fast/NTFE comparison evidence",
+      "open-policy search outcome"
+    ]
+  }
+}
